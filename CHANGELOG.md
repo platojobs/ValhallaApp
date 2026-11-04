@@ -2,6 +2,50 @@
 
 本文件记录 ValhallaApp 的版本演进，按「阶段完成即提交 + 打 annotated tag」的节奏维护。
 
+## v2.0.0 - 发布收口
+
+### 变更
+
+- **版本定版**：`gradle.properties` 升至 `2.0.0` / `versionCode 20`，Android
+  `versionName/versionCode`、iOS `MARKETING_VERSION/CURRENT_PROJECT_VERSION` 与关于页
+  `AppBuildInfo` 同源；`VersionConsistencyTest` 断言同步更新，`verifyVersionConsistency`
+  输出「版本一致性校验通过：2.0.0 (code 20)」。
+- **交付验证**：release 构建启用 R8 与资源压缩；未配置签名时产出
+  `composeApp-release-unsigned.apk`，`verifyReleaseArtifact` 通过并明确警告未签名。
+
+### 新增
+
+- **发布说明** [`docs/release-notes/v2.0.0.md`](docs/release-notes/v2.0.0.md)：
+  版本要点、能力边界、已知限制、Android/iOS 安装前提、签名通道完整步骤、真机验收清单。
+- **交付说明** [`docs/delivery.md`](docs/delivery.md)：交付物清单、模块说明、构建命令、
+  产物路径、CI 入口、可交付 vs 未完成对照表。
+- **文档索引** [`docs/README.md`](docs/README.md)：按交付/架构/数据隐私/产品分组，
+  覆盖 architecture、protocol、firmware、storage、export、privacy、permissions、
+  security、product、testing、environment-report、delivery 与 release-notes。
+- README 顶部补充项目定位、核心能力、快速开始（测试 / 构建 / 打包 / 运行）与文档索引。
+
+### 文档
+
+- `docs/product.md` 版本与测试基线更新为 `2.0.0 (20)` 与 458 项；
+- README 版本号章节由 `1.8.0` / `18` 更正为 `2.0.0` / `20`，移除「早期版本」表述。
+
+### 验证
+
+- `JAVA_HOME=$(/usr/libexec/java_home -v 21) ./gradlew :core:jvmTest :data:jvmTest :feature:jvmTest
+  :composeApp:assembleDebug :composeApp:assembleRelease
+  :composeApp:linkDebugFrameworkIosSimulatorArm64 :composeApp:verifyReleaseArtifact`
+  全部成功（BUILD SUCCESSFUL，1m 29s）；
+- JVM 测试 458 项通过（core 276 / data 21 / feature 161），无失败、无跳过；
+- 产物：Debug APK 11,583,813 B（约 11.0 MiB）、Release unsigned APK 2,008,665 B（约 1.92 MiB）、
+  iOS Simulator Framework 目录约 212 MiB。
+
+### 未验证
+
+- 真机权限弹窗、系统设置跳转、真实 BLE 连接/断连与 OTA（含续传）、Keystore/Keychain、
+  系统保存/分享面板；
+- 签名 release 包的覆盖安装与升级安装（仓库不含 keystore，本轮未生成签名产物）；
+- 视觉渲染、无障碍、横屏排版与小时级长稳。
+
 ## v1.9.0 - 稳定性与压力
 
 ### 修复

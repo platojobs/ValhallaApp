@@ -1,9 +1,68 @@
 # ValhallaApp
 
-面向智能硬件（IoT/BLE 设备）的 Kotlin Multiplatform 跨平台应用骨架，业务逻辑、协议层与 UI 在
-Android / iOS 之间共享，设备能力通过 `expect/actual` 分别落到 Android BLE 与 iOS CoreBluetooth。
+面向 BLE/IoT 智能硬件的 Kotlin Multiplatform 调试与管理客户端：协议解析、指令调度、配置管理、
+OTA 升级与报文诊断在 Android / iOS 之间共享，平台能力通过 `expect/actual` 落到 Android BLE
+与 iOS CoreBluetooth。
 
-> 当前仓库处于持续迭代的早期版本，版本节奏见 [CHANGELOG.md](CHANGELOG.md)。
+当前版本 **v2.0.0（versionCode 20）**。状态：**源码级可交付** —— 构建与测试可复现、
+协议与行为有文档和自动化证据；release 产物默认未签名，权限弹窗、真实 BLE/OTA、
+Keystore/Keychain 等真机路径**未验证**。发布边界见
+[docs/release-notes/v2.0.0.md](docs/release-notes/v2.0.0.md)，交付清单见
+[docs/delivery.md](docs/delivery.md)。
+
+## 核心能力
+
+- **设备接入**：BLE 扫描/去重/排序、连接、鉴权（界面走令牌；HMAC-SHA256 签名挑战在控制器层可用，界面未接入）、设备信息、电量；
+- **配置管理**：按固件版本与型号做能力协商，只展示可编辑项，本地校验后才下发；
+- **OTA**：固件解析与签名段识别、本地预检、分片传输、同偏移重传、断点续传与手动清除；
+- **稳定性**：四类异常分类、统一错误边界、状态机终态收敛、连接池资源回收、报文日志并发安全；
+- **诊断与隐私**：500 条内存报文日志、命令/错误/时间/关键字筛选、TEXT/JSON/CSV 流式导出、
+  写入时脱敏（默认开启、不可关闭）、无网络上传；
+- **产品化**：中英双语、跟随系统/手动主题、设备档案与 OTA 历史、关于/帮助/隐私页。
+
+## 快速开始
+
+前置条件：JDK 21、Android SDK（compileSdk 36 / build-tools 36.0.0）；iOS 需要 macOS + Xcode。
+
+```bash
+# 测试（core / data / feature 三模块 JVM 测试）
+JAVA_HOME=$(/usr/libexec/java_home -v 21) ./gradlew :core:jvmTest :data:jvmTest :feature:jvmTest
+
+# 构建 Android Debug 包
+./gradlew :composeApp:assembleDebug        # → composeApp/build/outputs/apk/debug/composeApp-debug.apk
+
+# 打包 Android Release（R8；未配置签名时产出 unsigned APK）
+./gradlew :composeApp:assembleRelease :composeApp:verifyReleaseArtifact
+# → composeApp/build/outputs/apk/release/composeApp-release-unsigned.apk
+
+# 构建 iOS 模拟器 Framework
+./gradlew :composeApp:linkDebugFrameworkIosSimulatorArm64
+
+# 运行 Android（连接真机或启动模拟器后）
+./gradlew :composeApp:installDebug
+```
+
+- 签名：通过 `VALHALLA_KEYSTORE_PATH` 等环境变量或 `keystore.properties` 配置，完整步骤见
+  [发布说明第 4 节](docs/release-notes/v2.0.0.md#4-安装前提)；
+- iOS App 壳在 `iosApp/iosApp.xcodeproj`，用 Xcode 选择自己的开发团队签名后运行；
+- 版本号唯一来源是 [gradle.properties](gradle.properties)，改动后运行
+  `./gradlew :composeApp:syncIosVersion`。
+
+## 文档索引
+
+完整索引见 [docs/README.md](docs/README.md)，常用入口：
+
+| 文档 | 内容 |
+| --- | --- |
+| [docs/delivery.md](docs/delivery.md) | 交付物、构建命令、产物路径、CI 入口、完成度对照 |
+| [docs/release-notes/v2.0.0.md](docs/release-notes/v2.0.0.md) | 版本要点、能力边界、已知限制、真机验收清单 |
+| [docs/architecture.md](docs/architecture.md) | 分层、BLE 适配、调度器接入、OTA 时序、错误边界 |
+| [docs/protocol.md](docs/protocol.md) | 帧格式、状态码、命令表、续传扩展与签名挑战 |
+| [docs/firmware.md](docs/firmware.md) | 固件格式、签名段、预检与断点持久化 |
+| [docs/storage.md](docs/storage.md) / [docs/export.md](docs/export.md) | 本地存储与报文导出 |
+| [docs/privacy.md](docs/privacy.md) / [docs/permissions.md](docs/permissions.md) | 脱敏规则与权限/重连 |
+| [docs/product.md](docs/product.md) / [docs/security.md](docs/security.md) | 产品功能与安全边界 |
+| [CHANGELOG.md](CHANGELOG.md) | v0.0.1 → v2.0.0 版本演进 |
 
 ## 技术栈
 
@@ -157,8 +216,8 @@ Xcode 构建阶段会自动调用 Gradle 链接对应架构的 Framework。权�
 唯一来源是 [gradle.properties](gradle.properties)
 
 ```properties
-valhalla.versionName=1.8.0
-valhalla.versionCode=18
+valhalla.versionName=2.0.0
+valhalla.versionCode=20
 ```
 
 - Android：`composeApp/build.gradle.kts` 通过 `providers.gradleProperty` 读取，写入
