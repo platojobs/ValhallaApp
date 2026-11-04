@@ -2,6 +2,75 @@
 
 本文件记录 ValhallaApp 的版本演进，按「阶段完成即提交 + 打 annotated tag」的节奏维护。
 
+## v1.8.0 - 产品化界面与文案
+
+### 新增
+
+- **中英双语国际化**
+  - `feature/i18n`：`StringKey` 枚举 + `AppStrings`（约 240 条中英文案），覆盖扫描、
+    权限引导、断连/重连、详情、配置、OTA、日志导出、设置、关于、帮助与隐私；
+  - 逻辑层只产出 `UiMessage(key, args, nested)`，不再拼接中文；UI 通过
+    `StringResolver.render()` 渲染，嵌套原因（如设备状态码）按当前语言二次渲染；
+  - `AppLanguageMode(SYSTEM / CHINESE / ENGLISH)` + `resolveLanguage` 纯函数：
+    `zh*` 映射中文，其余英文；根界面用 `CompositionLocalProvider(LocalStrings)`，
+    切换后当前页面立即生效；
+  - 日期时间复用 `core` 的 `formatAbsoluteTime` / `formatRelativeTime`（新增可本地化
+    的「刚刚/前/未来」标签）；`LocaleFormat` 统一数字、百分比与字节格式，英文千位分隔。
+
+- **主题与设计令牌**
+  - `DesignTokens`：间距 `xxs..xxl`、圆角 `sm/md/lg`、尺寸与
+    `StatusColors(success/warning/error/inProgress)`，替换页面中的 `.dp` 魔法数字；
+  - `ThemeMode(SYSTEM / LIGHT / DARK)` + `resolveDarkTheme` 纯函数，`ValhallaTheme`
+    按偏好或系统解析亮暗，扫描/详情/配置/OTA/日志/导出页统一状态色；
+  - 语言与主题偏好持久化：Android `SharedPreferences`、iOS `NSUserDefaults`、
+    JVM 内存（`AppSettingsStore`），未知值回退「跟随系统」。
+
+- **设置、关于、帮助与隐私页**
+  - 设置页提供语言与主题选择，并进入关于/帮助/隐私；
+  - 关于页读取构建期生成的 `AppBuildInfo`（应用名、版本、构建号、渠道、平台、许可），
+    版本来源与 `gradle.properties` 同源；
+  - 帮助页覆盖蓝牙权限、连接失败、OTA 失败、日志位置四类问题，文案与已实现行为一致；
+  - 隐私页按平台列出设备档案、OTA 断点、鉴权令牌、报文日志、应用偏好与权限标记的
+    位置/key/是否持久化，并如实声明当前没有任何网络上传（未声明 `INTERNET` 权限）。
+
+### 变更
+
+- 错误提示统一为「现象 + 原因 + 可操作建议」，控制器（设备详情、配置、OTA、扫描、
+  固件选择）的用户可见文案全部改为 `UiMessage`；协议层诊断作为技术详情保留。
+- 连接超时改为 `BleTimeoutException`（Android `withTimeoutOrNull`、iOS 显式抛出），
+  不再依赖中文字符串匹配判断超时，同时避免 Android 超时被当作协程取消吞掉。
+- 空态、加载态、进行中状态文案梳理：扫描区分权限/蓝牙/超时/失败，导出显示阶段与
+  已处理条数，OTA 显示阶段、进度与失败原因。
+- 版本号升至 `1.8.0 (18)`，同步 `Version.xcconfig`。
+
+### 测试
+
+- 新增 28 项（总数 408 → 436：core 264 + data 17 + feature 155）：
+  - `StringsCompletenessTest`（key 集合、空值、占位符、英文无中文、错误文案含建议、
+    嵌套渲染、语言解析）9 项；
+  - `AppPreferencesTest`（主题解析、首次启动默认、读写、未知值回退、清空回退）5 项；
+  - `PrivacyDisclosureTest`（存储项覆盖、无上传声明、令牌/日志说明、帮助/关于）6 项；
+  - `StorageInventoryTest`（平台覆盖、键唯一、令牌加密键、日志不落盘、JVM 内存）6 项；
+  - `NoHardcodedChineseTest`（扫描 `ui`/`theme`/`composeApp`，忽略注释与 i18n）1 项；
+  - `VersionConsistencyTest` 增加 `AppBuildInfo` 一致性 1 项并更新为 1.8.0/18。
+- 既有断言未削弱：中文提示改为按中文渲染 `UiMessage` 后断言，语义与覆盖不变。
+- 全量 `:core:jvmTest :data:jvmTest :feature:jvmTest` 436 项通过。
+- `:composeApp:assembleDebug`、`:composeApp:assembleRelease`、
+  `:composeApp:linkDebugFrameworkIosSimulatorArm64` 构建通过。
+
+### 文档
+
+- README 增加功能一览、语言/主题/隐私说明，更新版本号与下一步；
+- `docs/architecture.md` 新增第 8 节（i18n、设计令牌、产品信息页与测试边界）；
+- 新增 `docs/product.md`（产品能力、文案规范、验收边界）；
+- `docs/storage.md` 新增隐私清单单一来源说明。
+
+### 已知边界
+
+- 系统语言/深浅色切换、真机字体与排版、设置页切换后的整页刷新效果只能人工确认；
+- 协议层原始日志与部分设备诊断文本（`DeviceStatus.describe()`、固件解析细节、
+  配置项 `displayName`）未本地化，界面以「技术详情」原样展示。
+
 ## v1.7.0 - 权限与连接体验
 
 ### 新增

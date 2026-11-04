@@ -21,6 +21,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.UUID
 
 /**
@@ -188,11 +189,11 @@ internal class AndroidBleConnection private constructor(
         ): BleConnection {
             val holder = ConnectionHolder()
 
-            return withTimeout(timeoutMillis) {
-                kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
-                    var settled = false
+            return withTimeoutOrNull(timeoutMillis) {
+                    kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
+                        var settled = false
 
-                    val callback = object : BluetoothGattCallback() {
+                        val callback = object : BluetoothGattCallback() {
                         override fun onConnectionStateChange(
                             gatt: BluetoothGatt,
                             status: Int,
@@ -288,6 +289,9 @@ internal class AndroidBleConnection private constructor(
                         runCatching { gatt.close() }
                     }
                 }
+            } ?: run {
+                holder.connection?.markDisconnected()
+                throw BleTimeoutException("连接超时（${timeoutMillis}ms）")
             }
         }
 

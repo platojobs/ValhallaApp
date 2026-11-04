@@ -7,9 +7,9 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * 版本号一致性（v1.7.0）：
- * gradle.properties 是唯一来源，Android 直接读取，iOS 通过生成的 Version.xcconfig 读取。
- * 该测试防止两侧版本号漂移，也防止回退到硬编码。
+ * 版本号一致性（v1.8.0）：
+ * gradle.properties 是唯一来源，Android/iOS 与关于页的 AppBuildInfo 都从它派生。
+ * 该测试防止各处版本号漂移，也防止回退到硬编码。
  */
 class VersionConsistencyTest {
 
@@ -31,10 +31,18 @@ class VersionConsistencyTest {
     private val versionCode: String get() = gradleProperties["valhalla.versionCode"].orEmpty()
 
     @Test
-    fun `gradle properties 提供 1_7_0 版本号`() {
-        assertEquals("1.7.0", versionName)
+    fun `gradle properties 提供 1_8_0 版本号`() {
+        assertEquals("1.8.0", versionName)
         assertTrue(versionName.matches(Regex("""\d+\.\d+\.\d+""")), "versionName 应为 x.y.z：$versionName")
-        assertEquals(17, versionCode.toIntOrNull())
+        assertEquals(18, versionCode.toIntOrNull())
+    }
+
+    @Test
+    fun `关于页读取的 AppBuildInfo 与版本源一致`() {
+        assertEquals(versionName, AppBuildInfo.VERSION_NAME)
+        assertEquals(versionCode.toIntOrNull(), AppBuildInfo.VERSION_CODE)
+        assertTrue(AppBuildInfo.APP_NAME.isNotBlank())
+        assertTrue(AppBuildInfo.BUILD_CHANNEL.isNotBlank())
     }
 
     @Test
@@ -52,7 +60,7 @@ class VersionConsistencyTest {
         val plist = File(root, "iosApp/iosApp/Info.plist").readText()
         assertTrue(plist.contains("<string>\$(MARKETING_VERSION)</string>"))
         assertTrue(plist.contains("<string>\$(CURRENT_PROJECT_VERSION)</string>"))
-        assertFalse(plist.contains("<string>1.7.0</string>"), "Info.plist 不应硬编码版本号")
+        assertFalse(plist.contains("<string>1.8.0</string>"), "Info.plist 不应硬编码版本号")
     }
 
     @Test
@@ -72,6 +80,6 @@ class VersionConsistencyTest {
         assertTrue(script.contains("gradleProperty(\"valhalla.versionCode\")"))
         assertTrue(script.contains("versionName = appVersionName"))
         assertTrue(script.contains("versionCode = appVersionCode"))
-        assertFalse(script.contains("versionName = \"1.7.0\""), "Android 不应硬编码版本号")
+        assertFalse(script.contains("versionName = \"1.8.0\""), "Android 不应硬编码版本号")
     }
 }

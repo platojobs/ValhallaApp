@@ -30,6 +30,7 @@ import com.valhalla.feature.detail.DeviceDetailController
 import com.valhalla.feature.firmware.FirmwarePicker
 import com.valhalla.feature.firmware.FirmwareSelectionController
 import com.valhalla.feature.firmware.PickedFirmware
+import com.valhalla.feature.i18n.asChinese
 import com.valhalla.feature.ota.OtaController
 import com.valhalla.feature.ota.OtaState
 import com.valhalla.testkit.DeviceSimulator
@@ -233,7 +234,7 @@ class DeviceSimulatorE2ETest {
         val transferring = observed as? OtaState.Transferring
         assertNotNull(transferring)
         assertEquals(96, transferring.initialOffset)
-        assertTrue(transferring.resumeFallbackReason!!.contains("下调"))
+        assertTrue(transferring.resumeFallbackReason!!.asChinese().contains("下调"))
         assertNull(store.load())
     }
 
@@ -288,7 +289,7 @@ class DeviceSimulatorE2ETest {
         val transferring = observed as? OtaState.Transferring
         assertNotNull(transferring)
         assertNotNull(transferring.resumeFallbackReason)
-        assertTrue(transferring.resumeFallbackReason!!.contains("回退"))
+        assertTrue(transferring.resumeFallbackReason!!.asChinese().contains("回退"))
     }
 
     @Test
@@ -344,7 +345,7 @@ class DeviceSimulatorE2ETest {
         assertFalse(state.canResume)
         assertNull(state.resumePoint)
         assertNotNull(state.resumeBlockedReason)
-        assertTrue(state.resumeBlockedReason!!.contains("标识不匹配"))
+        assertTrue(state.resumeBlockedReason!!.asChinese().contains("不匹配"))
 
         val controller = OtaController(
             dispatcher = dispatcher,

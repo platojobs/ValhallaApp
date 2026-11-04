@@ -819,13 +819,24 @@ fun parseLocalDateTimeMillis(input: String, zoneOffsetMinutes: Int): Long? {
     return days * MILLIS_PER_DAY + millisOfDay - zoneOffsetMinutes.toLong() * 60_000L
 }
 
-/** 相对当前时间的可读描述；未来时间会标注方向，避免导出/查看时钟漂移时出现负数。 */
-fun formatRelativeTime(entryMillis: Long, nowMillis: Long): String {
+/**
+ * 相对当前时间的可读描述；未来时间会标注方向，避免导出/查看时钟漂移时出现负数。
+ *
+ * 默认中文标签；英文界面传入 `justNow = "just now"`、`agoSuffix = " ago"`、
+ * `futurePrefix = "in "` 即可复用同一套时长计算，避免两套时间格式化实现。
+ */
+fun formatRelativeTime(
+    entryMillis: Long,
+    nowMillis: Long,
+    justNow: String = "刚刚",
+    agoSuffix: String = "前",
+    futurePrefix: String = "未来 ",
+): String {
     val delta = nowMillis - entryMillis
     return when {
-        delta < -1_000L -> "未来 ${formatDuration(-delta)}"
-        delta < 1_000L -> "刚刚"
-        else -> "${formatDuration(delta)}前"
+        delta < -1_000L -> "$futurePrefix${formatDuration(-delta)}"
+        delta < 1_000L -> justNow
+        else -> "${formatDuration(delta)}$agoSuffix"
     }
 }
 

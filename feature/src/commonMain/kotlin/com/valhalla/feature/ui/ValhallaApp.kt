@@ -22,6 +22,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -31,10 +32,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.intl.Locale
 import com.valhalla.core.command.ConcurrentCommandDispatcher
 import com.valhalla.core.command.PacketRecordingFrameLink
 import com.valhalla.core.config.DeviceConfigTarget
@@ -49,9 +51,7 @@ import com.valhalla.core.logging.PacketLogExportProgress
 import com.valhalla.core.logging.PacketLogExporter
 import com.valhalla.core.logging.PacketLogFilter
 import com.valhalla.core.logging.PacketLogIndex
-import com.valhalla.core.logging.formatAbsoluteTime
 import com.valhalla.core.logging.formatForCopy
-import com.valhalla.core.logging.formatRelativeTime
 import com.valhalla.core.logging.parseLocalDateTimeMillis
 import com.valhalla.core.logging.validateByteLimitKb
 import com.valhalla.core.logging.validateEntryLimit
@@ -59,21 +59,24 @@ import com.valhalla.core.profile.DeviceProfile
 import com.valhalla.core.profile.DeviceProfileRepository
 import com.valhalla.core.profile.OtaOutcome
 import com.valhalla.core.protocol.CommandType
+import com.valhalla.core.protocol.message.OtaAbortReason
+import com.valhalla.core.protocol.message.OtaStage
 import com.valhalla.data.ble.BleAdapterState
 import com.valhalla.data.ble.BleConnection
 import com.valhalla.data.ble.BleDevice
 import com.valhalla.data.ble.BleFrameLink
+import com.valhalla.data.ble.BleTimeoutException
 import com.valhalla.data.ble.createBleClient
 import com.valhalla.data.firmware.createOtaCheckpointStore
 import com.valhalla.data.profile.createDeviceProfileStore
 import com.valhalla.data.security.createTokenStore
+import com.valhalla.data.settings.createAppSettingsStore
 import com.valhalla.data.share.ShareStatus
 import com.valhalla.data.share.ShareableText
 import com.valhalla.data.share.createTextSharer
 import com.valhalla.data.share.currentTimeZoneOffsetMinutes
 import com.valhalla.feature.ble.AutoReconnectController
 import com.valhalla.feature.ble.BleAvailability
-import com.valhalla.feature.ble.BleGuidance
 import com.valhalla.feature.ble.BleGuidanceAction
 import com.valhalla.feature.ble.BlePermissionController
 import com.valhalla.feature.ble.BlePermissionState
@@ -100,11 +103,23 @@ import com.valhalla.feature.export.rememberFileSaver
 import com.valhalla.feature.firmware.FirmwareSelectionController
 import com.valhalla.feature.firmware.FirmwareSelectionState
 import com.valhalla.feature.firmware.rememberFirmwarePicker
+import com.valhalla.feature.i18n.AppLanguageMode
+import com.valhalla.feature.i18n.LocaleFormat
+import com.valhalla.feature.i18n.LocalStrings
+import com.valhalla.feature.i18n.StringKey
+import com.valhalla.feature.i18n.StringResolver
+import com.valhalla.feature.i18n.UiMessage
+import com.valhalla.feature.i18n.render
+import com.valhalla.feature.i18n.resolveLanguage
 import com.valhalla.feature.ota.OtaController
 import com.valhalla.feature.ota.OtaState
-import com.valhalla.core.protocol.message.OtaStage
 import com.valhalla.feature.scan.ScanController
 import com.valhalla.feature.scan.ScanUiState
+import com.valhalla.feature.theme.AppPreferenceStore
+import com.valhalla.feature.theme.DesignTokens
+import com.valhalla.feature.theme.ThemeMode
+import com.valhalla.feature.theme.ValhallaTheme
+import com.valhalla.feature.theme.statusColors
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -113,7 +128,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
-import kotlin.time.Instant
 
 /** 一次已建立连接对应的协议栈与控制器，详情页与 OTA 页共享同一调度器与断点存储。 */
 private class DeviceSession(
@@ -140,6 +154,10 @@ private class ReconnectSession(
 
 private sealed interface Route {
     data object Scan : Route
+    data object Settings : Route
+    data object About : Route
+    data object Help : Route
+    data object Privacy : Route
     data class Detail(val session: DeviceSession) : Route
     data class Ota(val session: DeviceSession) : Route
     data class Logs(val session: DeviceSession) : Route
@@ -149,8 +167,37 @@ private sealed interface Route {
  * Compose Multiplatform 根界面：扫描 → 设备详情 → OTA 三段式流程。
  * Android / iOS 共用同一套页面，平台差异封装在 [createBleClient] 之后。
  */
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun ValhallaApp() {
+    val settingsStore = remember { createAppSettingsStore() }
+    var preferences by remember { mutableStateOf(AppPreferenceStore.load(settingsStore)) }
+    val language = resolveLanguage(preferences.language, Locale.current.language)
+    val strings = remember(language) { StringResolver(language) }
+
+    CompositionLocalProvider(LocalStrings provides strings) {
+        ValhallaTheme(preferences.theme) {
+            ValhallaContent(
+                preferences = preferences,
+                onLanguageChange = { mode ->
+                    preferences = preferences.copy(language = mode)
+                    AppPreferenceStore.saveLanguage(settingsStore, mode)
+                },
+                onThemeChange = { mode ->
+                    preferences = preferences.copy(theme = mode)
+                    AppPreferenceStore.saveTheme(settingsStore, mode)
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun ValhallaContent(
+    preferences: com.valhalla.feature.theme.AppPreferences,
+    onLanguageChange: (AppLanguageMode) -> Unit,
+    onThemeChange: (ThemeMode) -> Unit,
+) {
     val bleClient = remember { createBleClient() }
     val permissionController = rememberBlePermissionController(bleClient)
     val scope = rememberCoroutineScope()
@@ -166,7 +213,7 @@ fun ValhallaApp() {
 
     var route by remember { mutableStateOf<Route>(Route.Scan) }
     var connectingDeviceId by remember { mutableStateOf<String?>(null) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
+    var errorMessage by remember { mutableStateOf<UiMessage?>(null) }
     var reconnect by remember { mutableStateOf<ReconnectSession?>(null) }
 
     fun createSession(
@@ -233,6 +280,7 @@ fun ValhallaApp() {
             existing.controller.cancel()
             reconnect = null
         }
+
         val device = session.device
         val packetLog = session.packetLog
         val controller = AutoReconnectController(
@@ -273,7 +321,8 @@ fun ValhallaApp() {
             errorMessage = errorMessage,
             onStart = {
                 if (!availability.allowsConnection()) {
-                    errorMessage = availability.guidance()?.message ?: "蓝牙不可用"
+                    errorMessage = availability.guidance()?.message
+                        ?: UiMessage(StringKey.BLUETOOTH_UNAVAILABLE)
                     return@ScanScreen
                 }
                 errorMessage = null
@@ -282,7 +331,8 @@ fun ValhallaApp() {
             onStop = { scanController.stopScan() },
             onSelect = select@{ device ->
                 if (!availability.allowsConnection()) {
-                    errorMessage = availability.guidance()?.message ?: "蓝牙不可用"
+                    errorMessage = availability.guidance()?.message
+                        ?: UiMessage(StringKey.BLUETOOTH_UNAVAILABLE)
                     return@select
                 }
                 scope.launch {
@@ -295,23 +345,38 @@ fun ValhallaApp() {
                     } catch (cancellation: CancellationException) {
                         throw cancellation
                     } catch (error: Throwable) {
-                        val message = error.message ?: "连接失败"
                         val info = classifyDisconnect(
                             DisconnectSignals(
-                                timeout = message.contains("超时"),
+                                timeout = error is BleTimeoutException,
                                 transportError = true,
                                 adapterState = adapterState,
                                 permissionState = permissionState,
                             ),
                         )
-                        errorMessage = "${info.title}：${info.message}"
+                        errorMessage = info.message
                     } finally {
                         connectingDeviceId = null
                     }
                 }
             },
             onBleAction = { handleBleAction(it) },
+            onOpenSettings = { route = Route.Settings },
         )
+
+        Route.Settings -> SettingsScreen(
+            language = preferences.language,
+            theme = preferences.theme,
+            onLanguageChange = onLanguageChange,
+            onThemeChange = onThemeChange,
+            onBack = { route = Route.Scan },
+            onAbout = { route = Route.About },
+            onHelp = { route = Route.Help },
+            onPrivacy = { route = Route.Privacy },
+        )
+
+        Route.About -> AboutScreen(onBack = { route = Route.Settings })
+        Route.Help -> HelpScreen(onBack = { route = Route.Settings })
+        Route.Privacy -> PrivacyScreen(onBack = { route = Route.Settings })
 
         is Route.Detail -> {
             val connected by current.session.connection.connected.collectAsState()
@@ -377,75 +442,101 @@ private fun ScanScreen(
     state: ScanUiState,
     availability: BleAvailability,
     connectingDeviceId: String?,
-    errorMessage: String?,
+    errorMessage: UiMessage?,
     onStart: () -> Unit,
     onStop: () -> Unit,
     onSelect: (BleDevice) -> Unit,
     onBleAction: (BleGuidanceAction) -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
+    val strings = LocalStrings.current
+    val status = statusColors()
     val canScan = availability.allowsConnection()
     val guidance = availability.guidance()
     val emptyReason = classifyScanEmpty(
         scanning = state.scanning,
         deviceCount = state.devices.size,
         availability = availability,
-        error = state.error,
+        error = state.error?.key?.name,
         timedOut = state.timedOut,
     )
 
     Column(
-        modifier = Modifier.fillMaxSize().padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier.fillMaxSize().padding(DesignTokens.Spacing.lg),
+        verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.md),
     ) {
-        Text("设备扫描", style = MaterialTheme.typography.headlineSmall)
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                strings.t(StringKey.SCAN_TITLE),
+                style = MaterialTheme.typography.headlineSmall,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = onOpenSettings) { Text(strings.t(StringKey.SETTINGS)) }
+        }
         Text(
-            "确保设备已上电并处于广播模式。Android 需要蓝牙权限，iOS 需要蓝牙授权。",
+            strings.t(StringKey.SCAN_HINT),
             style = MaterialTheme.typography.bodySmall,
         )
 
         guidance?.let { guide ->
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(
-                    modifier = Modifier.padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.padding(DesignTokens.Spacing.md),
+                    verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs),
                 ) {
-                    Text(guide.title, style = MaterialTheme.typography.titleSmall)
-                    Text(guide.message, style = MaterialTheme.typography.bodySmall)
+                    Text(strings.render(guide.title), style = MaterialTheme.typography.titleSmall)
+                    Text(strings.render(guide.message), style = MaterialTheme.typography.bodySmall)
                     guide.actionLabel?.let { label ->
-                        Button(onClick = { onBleAction(guide.action) }) { Text(label) }
+                        Button(onClick = { onBleAction(guide.action) }) {
+                            Text(strings.render(label))
+                        }
                     }
                 }
             }
         }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = onStart, enabled = canScan && !state.scanning) { Text("开始扫描") }
-            OutlinedButton(onClick = onStop, enabled = state.scanning) { Text("停止") }
+        Row(horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm)) {
+            Button(onClick = onStart, enabled = canScan && !state.scanning) {
+                Text(strings.t(StringKey.START_SCAN))
+            }
+            OutlinedButton(onClick = onStop, enabled = state.scanning) {
+                Text(strings.t(StringKey.STOP_SCAN))
+            }
         }
 
         if (state.scanning) {
             LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
         }
 
-        (errorMessage ?: state.error)?.let { message ->
-            Text(message, color = MaterialTheme.colorScheme.error)
+        errorMessage?.let { message ->
+            Text(strings.render(message), color = status.error)
         }
 
         if (state.devices.isEmpty() && errorMessage == null) {
-            Text(
-                emptyReasonText(emptyReason),
-                style = MaterialTheme.typography.bodyMedium,
-                color = if (emptyReason == ScanEmptyReason.SCAN_TIMEOUT) {
-                    MaterialTheme.colorScheme.error
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
-            )
+            val emptyText = emptyReasonText(emptyReason, strings)
+            if (emptyText != null) {
+                Text(
+                    emptyText,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (emptyReason == ScanEmptyReason.SCAN_TIMEOUT) {
+                        status.warning
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+            }
+            state.error?.let { message ->
+                Text(
+                    strings.render(message),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
 
         LazyColumn(
             modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm),
         ) {
             items(state.devices, key = { it.deviceId }) { device ->
                 Card(
@@ -453,13 +544,17 @@ private fun ScanScreen(
                         .fillMaxWidth()
                         .clickable(enabled = canScan) { onSelect(device) },
                 ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
+                    Column(modifier = Modifier.padding(DesignTokens.Spacing.md)) {
                         Text(
-                            device.name ?: "未命名设备",
+                            device.name ?: strings.t(StringKey.UNNAMED_DEVICE),
                             style = MaterialTheme.typography.titleMedium,
                         )
                         Text(
-                            "${device.deviceId} · RSSI ${device.rssi} dBm",
+                            strings.t(
+                                StringKey.DEVICE_RSSI,
+                                "id" to device.deviceId,
+                                "rssi" to device.rssi.toString(),
+                            ),
                             style = MaterialTheme.typography.bodySmall,
                         )
                     }
@@ -468,23 +563,27 @@ private fun ScanScreen(
         }
 
         connectingDeviceId?.let {
-            Text("正在连接 $it …", style = MaterialTheme.typography.bodyMedium)
+            Text(
+                strings.t(StringKey.SCAN_CONNECTING, "device" to it),
+                style = MaterialTheme.typography.bodyMedium,
+            )
         }
     }
 }
 
-private fun emptyReasonText(reason: ScanEmptyReason): String = when (reason) {
-    ScanEmptyReason.NONE -> ""
-    ScanEmptyReason.SCANNING -> "正在扫描附近的设备…"
-    ScanEmptyReason.SCAN_TIMEOUT -> "扫描超过 12 秒仍无设备。请确认设备已上电、处于广播模式并靠近手机。"
-    ScanEmptyReason.NO_DEVICES -> "暂无设备。请确认设备已上电并处于广播模式。"
-    ScanEmptyReason.NO_PERMISSION -> "没有蓝牙权限，无法发现设备。"
-    ScanEmptyReason.PERMISSION_PERMANENTLY_DENIED -> "蓝牙权限已被永久拒绝，请前往系统设置开启。"
-    ScanEmptyReason.BLUETOOTH_OFF -> "蓝牙已关闭，开启后才能扫描设备。"
-    ScanEmptyReason.BLUETOOTH_RESETTING -> "蓝牙正在重置，请稍候。"
-    ScanEmptyReason.UNSUPPORTED -> "当前设备不支持蓝牙低功耗。"
-    ScanEmptyReason.UNKNOWN_AVAILABILITY -> "蓝牙状态未知，请稍后重试。"
-    ScanEmptyReason.ERROR -> "扫描失败。"
+private fun emptyReasonText(reason: ScanEmptyReason, strings: StringResolver): String? = when (reason) {
+    ScanEmptyReason.NONE -> null
+    ScanEmptyReason.SCANNING -> strings.t(StringKey.SCAN_EMPTY_SCANNING)
+    ScanEmptyReason.SCAN_TIMEOUT -> strings.t(StringKey.SCAN_EMPTY_TIMEOUT)
+    ScanEmptyReason.NO_DEVICES -> strings.t(StringKey.SCAN_EMPTY_NO_DEVICES)
+    ScanEmptyReason.NO_PERMISSION -> strings.t(StringKey.SCAN_EMPTY_NO_PERMISSION)
+    ScanEmptyReason.PERMISSION_PERMANENTLY_DENIED ->
+        strings.t(StringKey.SCAN_EMPTY_PERMISSION_PERMANENTLY_DENIED)
+    ScanEmptyReason.BLUETOOTH_OFF -> strings.t(StringKey.SCAN_EMPTY_BLUETOOTH_OFF)
+    ScanEmptyReason.BLUETOOTH_RESETTING -> strings.t(StringKey.SCAN_EMPTY_BLUETOOTH_RESETTING)
+    ScanEmptyReason.UNSUPPORTED -> strings.t(StringKey.SCAN_EMPTY_UNSUPPORTED)
+    ScanEmptyReason.UNKNOWN_AVAILABILITY -> strings.t(StringKey.SCAN_EMPTY_UNKNOWN)
+    ScanEmptyReason.ERROR -> null
 }
 
 @Composable
@@ -496,57 +595,83 @@ private fun DisconnectBanner(
     onBleAction: (BleGuidanceAction) -> Unit,
     onBack: () -> Unit,
 ) {
+    val strings = LocalStrings.current
+    val status = statusColors()
     val reconnectRunning = reconnectState?.phase == ReconnectPhase.WAITING ||
         reconnectState?.phase == ReconnectPhase.CONNECTING
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.padding(DesignTokens.Spacing.md),
+            verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs),
         ) {
             Text(
-                info.title,
+                strings.render(info.title),
                 style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.error,
+                color = status.error,
             )
-            Text(info.message, style = MaterialTheme.typography.bodySmall)
+            Text(strings.render(info.message), style = MaterialTheme.typography.bodySmall)
 
             reconnectState?.let { rs ->
                 val hint = when (rs.phase) {
-                    ReconnectPhase.WAITING ->
-                        "将在 ${(rs.nextDelayMillis ?: 0L) / 1000} 秒后进行第 ${rs.attempt + 1} 次自动重连"
+                    ReconnectPhase.WAITING -> strings.t(
+                        StringKey.RECONNECT_WAITING,
+                        "seconds" to ((rs.nextDelayMillis ?: 0L) / 1000).toString(),
+                        "attempt" to (rs.attempt + 1).toString(),
+                    )
 
-                    ReconnectPhase.CONNECTING -> "正在执行第 ${rs.attempt + 1} 次自动重连…"
+                    ReconnectPhase.CONNECTING -> strings.t(
+                        StringKey.RECONNECT_CONNECTING,
+                        "attempt" to (rs.attempt + 1).toString(),
+                    )
+
                     ReconnectPhase.PAUSED ->
-                        if (rs.pausedByBluetoothOff) "蓝牙已关闭，自动重连已暂停，开启蓝牙后继续" else "自动重连已暂停"
+                        if (rs.pausedByBluetoothOff) {
+                            strings.t(StringKey.RECONNECT_PAUSED_BLUETOOTH_OFF)
+                        } else {
+                            strings.t(StringKey.RECONNECT_PAUSED)
+                        }
 
-                    ReconnectPhase.EXHAUSTED -> "自动重连已达上限（${rs.attempt} 次），请手动重试"
-                    ReconnectPhase.CANCELLED -> "已取消自动重连"
-                    ReconnectPhase.SUCCEEDED -> "重连成功"
+                    ReconnectPhase.EXHAUSTED -> strings.t(
+                        StringKey.RECONNECT_EXHAUSTED,
+                        "attempt" to rs.attempt.toString(),
+                    )
+
+                    ReconnectPhase.CANCELLED -> strings.t(StringKey.RECONNECT_CANCELLED)
+                    ReconnectPhase.SUCCEEDED -> strings.t(StringKey.RECONNECT_SUCCEEDED)
                     ReconnectPhase.IDLE -> null
                 }
                 hint?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
             }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm)) {
                 if (reconnectRunning) {
-                    OutlinedButton(onClick = onCancelReconnect) { Text("取消重连") }
+                    OutlinedButton(onClick = onCancelReconnect) {
+                        Text(strings.t(StringKey.CANCEL_RECONNECT))
+                    }
                 } else if (info.autoReconnectAllowed && info.action == DisconnectAction.RECONNECT) {
-                    Button(onClick = onRetryReconnect) { Text("重新连接") }
+                    Button(onClick = onRetryReconnect) {
+                        Text(strings.t(StringKey.RECONNECT_NOW))
+                    }
                 }
                 when (info.action) {
                     DisconnectAction.OPEN_SETTINGS -> {
-                        Button(
-                            onClick = { onBleAction(BleGuidanceAction.OPEN_SETTINGS) },
-                        ) { Text("去系统设置") }
-                        OutlinedButton(onClick = onBack) { Text("返回扫描") }
+                        Button(onClick = { onBleAction(BleGuidanceAction.OPEN_SETTINGS) }) {
+                            Text(strings.t(StringKey.ACTION_OPEN_SETTINGS))
+                        }
+                        OutlinedButton(onClick = onBack) {
+                            Text(strings.t(StringKey.ACTION_RESCAN))
+                        }
                     }
 
                     DisconnectAction.ENABLE_BLUETOOTH -> Button(
                         onClick = { onBleAction(BleGuidanceAction.ENABLE_BLUETOOTH) },
-                    ) { Text("开启蓝牙") }
+                    ) { Text(strings.t(StringKey.ACTION_ENABLE_BLUETOOTH)) }
 
-                    DisconnectAction.RESCAN -> OutlinedButton(onClick = onBack) { Text("返回扫描") }
+                    DisconnectAction.RESCAN -> OutlinedButton(onClick = onBack) {
+                        Text(strings.t(StringKey.ACTION_RESCAN))
+                    }
+
                     DisconnectAction.RECONNECT,
                     DisconnectAction.NONE,
                     -> Unit
@@ -569,12 +694,16 @@ private fun DetailScreen(
     onOpenOta: () -> Unit,
     onOpenLogs: () -> Unit,
 ) {
+    val strings = LocalStrings.current
+    val format = remember(strings.language) { LocaleFormat(strings.language) }
+    val status = statusColors()
     val controller = session.detail
     val state by controller.state.collectAsState()
     val configState by session.config.state.collectAsState()
     val connected by session.connection.connected.collectAsState()
     val scope = rememberCoroutineScope()
     val profile = session.profileRepository.get(state.deviceId)
+    val zoneOffsetMinutes = remember { currentTimeZoneOffsetMinutes(Clock.System.now().toEpochMilliseconds()) }
 
     LaunchedEffect(session, connected) {
         if (!connected && !session.userDisconnected) {
@@ -597,12 +726,16 @@ private fun DetailScreen(
     }
 
     Column(
-        modifier = Modifier.fillMaxSize().padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = Modifier.fillMaxSize().padding(DesignTokens.Spacing.lg),
+        verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.md),
     ) {
         Row(modifier = Modifier.fillMaxWidth()) {
-            Text("设备详情", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
-            TextButton(onClick = onBack) { Text("返回") }
+            Text(
+                strings.t(StringKey.DETAIL_TITLE),
+                style = MaterialTheme.typography.headlineSmall,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = onBack) { Text(strings.t(StringKey.BACK)) }
         }
 
         disconnectInfo?.let { info ->
@@ -618,51 +751,73 @@ private fun DetailScreen(
 
         LazyColumn(
             modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.md),
         ) {
             item {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs)) {
                     Text(state.deviceId, style = MaterialTheme.typography.titleMedium)
-                    Text("状态：${state.deviceState}")
-                    Text("固件版本：${state.firmwareVersion ?: "未知"}")
+                    Text(strings.t(StringKey.STATE_LABEL, "state" to state.deviceState.toString()))
                     Text(
-                        "电量：${state.batteryPercent?.let { "$it%" } ?: "未知"}" +
-                            if (state.charging == true) "（充电中）" else "",
+                        strings.t(
+                            StringKey.FIRMWARE_LABEL,
+                            "version" to (state.firmwareVersion ?: strings.t(StringKey.UNKNOWN)),
+                        ),
+                    )
+                    Text(
+                        strings.t(
+                            StringKey.BATTERY_LABEL,
+                            "percent" to (
+                                state.batteryPercent?.let { "$it%" }
+                                    ?: strings.t(StringKey.UNKNOWN)
+                                ),
+                        ) + if (state.charging == true) strings.t(StringKey.CHARGING) else "",
                     )
                     state.deviceInfo?.let { info ->
-                        Text("型号：${info.vendor} ${info.model} · 序列号 ${info.serialNumber}")
+                        Text(
+                            strings.t(
+                                StringKey.MODEL_LINE,
+                                "vendor" to info.vendor,
+                                "model" to info.model,
+                                "serial" to info.serialNumber,
+                            ),
+                        )
                     }
                 }
             }
 
             item {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm)) {
                     Button(onClick = { scope.launch { controller.authenticate("demo-token") } }) {
-                        Text("鉴权")
+                        Text(strings.t(StringKey.AUTHENTICATE))
                     }
                     OutlinedButton(onClick = { scope.launch { controller.refreshInfo() } }) {
-                        Text("刷新信息")
+                        Text(strings.t(StringKey.REFRESH_INFO))
                     }
                 }
             }
 
             item {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm)) {
                     OutlinedButton(onClick = onOpenOta, modifier = Modifier.fillMaxWidth()) {
-                        Text("进入 OTA 升级")
+                        Text(strings.t(StringKey.ENTER_OTA))
                     }
                     OutlinedButton(onClick = onOpenLogs, modifier = Modifier.fillMaxWidth()) {
-                        Text("报文日志（TX/RX）")
+                        Text(strings.t(StringKey.OPEN_LOGS))
                     }
                 }
             }
 
             state.error?.let { message ->
-                item { Text(message, color = MaterialTheme.colorScheme.error) }
+                item {
+                    Text(
+                        strings.render(message),
+                        color = status.error,
+                    )
+                }
             }
 
             profile?.let { snapshot ->
-                item { ProfileCard(snapshot) }
+                item { ProfileCard(snapshot, format, zoneOffsetMinutes) }
             }
 
             item {
@@ -673,7 +828,7 @@ private fun DetailScreen(
                 )
             }
 
-            item { Text("设备日志", style = MaterialTheme.typography.titleMedium) }
+            item { Text(strings.t(StringKey.DEVICE_LOGS), style = MaterialTheme.typography.titleMedium) }
             items(state.logs) { line ->
                 Text(line, style = MaterialTheme.typography.bodySmall)
             }
@@ -682,27 +837,67 @@ private fun DetailScreen(
 }
 
 @Composable
-private fun ProfileCard(profile: DeviceProfile) {
+private fun ProfileCard(
+    profile: DeviceProfile,
+    format: LocaleFormat,
+    zoneOffsetMinutes: Int,
+) {
+    val strings = LocalStrings.current
+    val status = statusColors()
     Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("设备档案", style = MaterialTheme.typography.titleMedium)
-            Text("最后连接：${formatEpoch(profile.lastConnectedAtEpochMillis)}", style = MaterialTheme.typography.bodySmall)
+        Column(
+            modifier = Modifier.padding(DesignTokens.Spacing.md),
+            verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs),
+        ) {
+            Text(strings.t(StringKey.PROFILE_TITLE), style = MaterialTheme.typography.titleMedium)
             Text(
-                "最近固件：${profile.lastKnownFirmwareVersion ?: "未知"} · " +
-                    "电量：${profile.lastKnownBatteryPercent?.let { "$it%" } ?: "未知"}",
+                strings.t(
+                    StringKey.PROFILE_LAST_CONNECTED,
+                    "time" to format.absoluteTime(profile.lastConnectedAtEpochMillis, zoneOffsetMinutes),
+                ),
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Text(
+                strings.t(
+                    StringKey.PROFILE_SUMMARY,
+                    "version" to (profile.lastKnownFirmwareVersion ?: strings.t(StringKey.UNKNOWN)),
+                    "percent" to (
+                        profile.lastKnownBatteryPercent?.let { "$it%" }
+                            ?: strings.t(StringKey.UNKNOWN)
+                        ),
+                ),
                 style = MaterialTheme.typography.bodySmall,
             )
             profile.lastOtaRecord?.let { record ->
                 Text(
-                    "最近 OTA：${record.outcome.label()} · ${record.firmwareVersion} · " +
-                        "耗时 ${record.durationMillis} ms",
+                    strings.t(
+                        StringKey.PROFILE_LAST_OTA,
+                        "outcome" to record.outcome.label(strings),
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Text(
+                    strings.t(
+                        StringKey.PROFILE_OTA_RECORD,
+                        "outcome" to record.outcome.label(strings),
+                        "version" to record.firmwareVersion,
+                        "duration" to format.number(record.durationMillis),
+                    ),
                     style = MaterialTheme.typography.bodySmall,
                 )
                 record.errorCode?.let {
-                    Text("错误码：$it", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        strings.t(StringKey.ERROR_CODE_LABEL, "code" to it),
+                        color = status.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
                 }
                 record.detail?.let {
-                    Text(it, style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        strings.t(StringKey.TECHNICAL_DETAIL, "detail" to it),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
         }
@@ -715,37 +910,69 @@ private fun ConfigSection(
     state: ConfigEditorState,
     onRefreshDevice: () -> Unit,
 ) {
+    val strings = LocalStrings.current
+    val status = statusColors()
     val scope = rememberCoroutineScope()
     Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(
+            modifier = Modifier.padding(DesignTokens.Spacing.md),
+            verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm),
+        ) {
             Row(modifier = Modifier.fillMaxWidth()) {
                 Text(
-                    "设备配置",
+                    strings.t(StringKey.CONFIG_TITLE),
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.weight(1f),
                 )
                 TextButton(
                     onClick = { scope.launch { controller.load() } },
                     enabled = !state.loading && !state.saving,
-                ) { Text(if (state.loading) "读取中…" else "重新读取") }
+                ) {
+                    Text(
+                        if (state.loading) {
+                            strings.t(StringKey.LOADING)
+                        } else {
+                            strings.t(StringKey.CONFIG_RELOAD)
+                        },
+                    )
+                }
             }
             Text(
-                "配置键能力按固件版本与型号判定；不支持的键已隐藏，避免下发后设备返回 INVALID_PARAM。",
+                strings.t(StringKey.CONFIG_HINT),
                 style = MaterialTheme.typography.bodySmall,
             )
-            state.capabilityNotice?.let { notice ->
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            state.capabilityNoticeKey?.let { noticeKey ->
+                val notice = if (noticeKey == StringKey.CONFIG_HIDDEN_UNKNOWN_TARGET) {
+                    strings.t(noticeKey, "count" to state.hiddenFields.size.toString())
+                } else {
+                    strings.t(
+                        noticeKey,
+                        "count" to state.hiddenFields.size.toString(),
+                        "firmware" to (
+                            state.target.firmwareVersion
+                                ?.let { "${it.major}.${it.minor}.${it.patch}" }
+                                ?: strings.t(StringKey.UNKNOWN)
+                            ),
+                        "model" to (state.target.model ?: strings.t(StringKey.UNKNOWN)),
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm)) {
                     Text(
                         notice,
                         color = MaterialTheme.colorScheme.secondary,
                         style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier.weight(1f),
                     )
-                    TextButton(onClick = onRefreshDevice) { Text("刷新设备信息") }
+                    TextButton(onClick = onRefreshDevice) {
+                        Text(strings.t(StringKey.REFRESH_DEVICE_INFO))
+                    }
                 }
                 state.hiddenFields.forEach { field ->
                     field.capability.reason?.let { reason ->
-                        Text("· $reason", style = MaterialTheme.typography.bodySmall)
+                        Text(
+                            strings.t(StringKey.TECHNICAL_DETAIL, "detail" to reason),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
                     }
                 }
             }
@@ -757,11 +984,16 @@ private fun ConfigSection(
                     onSave = { scope.launch { controller.save(field.spec.key) } },
                 )
             }
-            state.message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
+            state.message?.let { message ->
+                Text(
+                    strings.render(message),
+                    color = status.success,
+                )
+            }
             state.error?.let { message ->
                 Text(
-                    message + (state.errorCode?.let { "（${it.describe()}）" } ?: ""),
-                    color = MaterialTheme.colorScheme.error,
+                    strings.render(message),
+                    color = status.error,
                 )
             }
         }
@@ -775,33 +1007,37 @@ private fun ConfigFieldRow(
     onTextChange: (String) -> Unit,
     onSave: () -> Unit,
 ) {
+    val strings = LocalStrings.current
+    val status = statusColors()
     val supporting = when {
-        field.loading -> "读取中…"
-        field.loadError != null -> field.loadError
-        field.validationError != null -> field.validationError
-        !field.editable -> field.spec.readOnlyReason ?: "只读"
-        field.saving -> "保存中…"
-        field.lastSavedAtEpochMillis != null && !field.dirty -> "已保存"
-        field.dirty -> "未保存"
-        else -> "可编辑"
+        field.loading -> strings.t(StringKey.CONFIG_FIELD_LOADING)
+        field.loadError != null ->
+            strings.t(StringKey.TECHNICAL_DETAIL, "detail" to field.loadError!!)
+        field.validationError != null ->
+            strings.t(StringKey.TECHNICAL_DETAIL, "detail" to field.validationError!!)
+        !field.editable ->
+            strings.t(StringKey.CONFIG_FIELD_READ_ONLY) +
+                (field.spec.readOnlyReason?.let {
+                    " · " + strings.t(StringKey.TECHNICAL_DETAIL, "detail" to it)
+                } ?: "")
+        field.saving -> strings.t(StringKey.CONFIG_FIELD_SAVING)
+        field.lastSavedAtEpochMillis != null && !field.dirty -> strings.t(StringKey.CONFIG_FIELD_SAVED)
+        field.dirty -> strings.t(StringKey.CONFIG_FIELD_UNSAVED)
+        else -> strings.t(StringKey.CONFIG_FIELD_EDITABLE)
     }
     val isError = field.loadError != null || field.validationError != null
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm)) {
             OutlinedTextField(
                 value = field.text,
                 onValueChange = onTextChange,
                 enabled = field.editable && !field.saving && !savingAny,
-                label = { Text(field.spec.displayName) },
+                label = { Text(field.spec.key.toString()) },
                 singleLine = true,
                 supportingText = {
                     Text(
                         supporting,
-                        color = if (isError) {
-                            MaterialTheme.colorScheme.error
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
+                        color = if (isError) status.error else MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 },
                 modifier = Modifier.weight(1f),
@@ -810,7 +1046,13 @@ private fun ConfigFieldRow(
                 onClick = onSave,
                 enabled = field.editable && field.dirty && !field.saving && !savingAny,
             ) {
-                Text(if (field.saving) "保存中" else "保存")
+                Text(
+                    if (field.saving) {
+                        strings.t(StringKey.CONFIG_FIELD_SAVING)
+                    } else {
+                        strings.t(StringKey.SAVE)
+                    },
+                )
             }
         }
     }
@@ -824,6 +1066,9 @@ private fun PacketLogScreen(
     packetLog: InMemoryPacketLog,
     onBack: () -> Unit,
 ) {
+    val strings = LocalStrings.current
+    val localeFormat = remember(strings.language) { LocaleFormat(strings.language) }
+    val status = statusColors()
     val entries by packetLog.entries.collectAsState()
     var query by remember { mutableStateOf("") }
     var appliedQuery by remember { mutableStateOf("") }
@@ -840,6 +1085,7 @@ private fun PacketLogScreen(
     var progress by remember { mutableStateOf<PacketLogExportProgress?>(null) }
     var exportJob by remember { mutableStateOf<Job?>(null) }
     var exportMessage by remember { mutableStateOf<String?>(null) }
+    var exportSuccess by remember { mutableStateOf(false) }
     var estimate by remember { mutableStateOf<PacketLogExportEstimate?>(null) }
 
     val clipboard = LocalClipboardManager.current
@@ -865,17 +1111,17 @@ private fun PacketLogScreen(
     val fromMillis = if (fromText.isBlank()) null else parseLocalDateTimeMillis(fromText, zoneOffsetMinutes)
     val toMillis = if (toText.isBlank()) null else parseLocalDateTimeMillis(toText, zoneOffsetMinutes)
     val fromError = if (fromText.isNotBlank() && fromMillis == null) {
-        "格式：YYYY-MM-DD HH:mm:ss"
+        strings.t(StringKey.LOGS_TIME_FORMAT_ERROR)
     } else {
         null
     }
     val toError = if (toText.isNotBlank() && toMillis == null) {
-        "格式：YYYY-MM-DD HH:mm:ss"
+        strings.t(StringKey.LOGS_TIME_FORMAT_ERROR)
     } else {
         null
     }
     val rangeError = if (fromMillis != null && toMillis != null && fromMillis > toMillis) {
-        "起始时间不能晚于结束时间"
+        strings.t(StringKey.LOGS_TIME_RANGE_ERROR)
     } else {
         null
     }
@@ -923,19 +1169,23 @@ private fun PacketLogScreen(
         if (exporting) return
         val error = rangeError ?: fromError ?: toError
         if (error != null) {
+            exportSuccess = false
             exportMessage = error
             return
         }
         val opts = options
         if (opts == null) {
-            exportMessage = entryLimit.error ?: byteLimit.error ?: "上限输入非法"
+            exportSuccess = false
+            exportMessage = strings.t(StringKey.LOGS_INVALID_LIMIT)
             return
         }
         if (estimate?.matchedCount == 0) {
-            exportMessage = "没有匹配的报文，未导出空文件"
+            exportSuccess = false
+            exportMessage = strings.t(StringKey.LOGS_ESTIMATE_NO_MATCH)
             return
         }
 
+        exportSuccess = false
         exportMessage = null
         exporting = true
         val snapshot = packetLog.entries.value
@@ -956,7 +1206,8 @@ private fun PacketLogScreen(
                 }
                 progress = null
                 if (result.empty) {
-                    exportMessage = result.notice ?: "没有匹配的报文，未导出空文件"
+                    exportSuccess = false
+                    exportMessage = strings.t(StringKey.LOGS_ESTIMATE_NO_MATCH)
                     return@launch
                 }
                 val fileName = PacketLogExporter.resolveFileName(result.fileName, exportedNames)
@@ -966,15 +1217,32 @@ private fun PacketLogScreen(
                         when (save.status) {
                             FileSaveStatus.SAVED -> {
                                 exportedNames += fileName
-                                exportMessage =
-                                    "已保存 $fileName（${result.entryCount} 条，${result.byteSize} 字节）"
+                                exportSuccess = true
+                                exportMessage = strings.t(
+                                    StringKey.LOGS_SAVE_SUCCESS,
+                                    "name" to fileName,
+                                    "entries" to localeFormat.number(result.entryCount),
+                                    "bytes" to localeFormat.number(result.byteSize),
+                                )
                             }
 
-                            FileSaveStatus.CANCELLED -> exportMessage = "已取消保存，未写入文件"
-                            FileSaveStatus.UNAVAILABLE ->
-                                exportMessage = "当前平台不支持保存为文件，可改用分享"
+                            FileSaveStatus.CANCELLED -> {
+                                exportSuccess = false
+                                exportMessage = strings.t(StringKey.LOGS_SAVE_CANCELLED)
+                            }
 
-                            FileSaveStatus.FAILED -> exportMessage = "保存失败：${save.message ?: "未知原因"}"
+                            FileSaveStatus.UNAVAILABLE -> {
+                                exportSuccess = false
+                                exportMessage = strings.t(StringKey.LOGS_SAVE_UNAVAILABLE)
+                            }
+
+                            FileSaveStatus.FAILED -> {
+                                exportSuccess = false
+                                exportMessage = strings.t(
+                                    StringKey.LOGS_SAVE_FAILED,
+                                    "detail" to (save.message ?: strings.t(StringKey.UNKNOWN)),
+                                )
+                            }
                         }
                     }
 
@@ -983,17 +1251,33 @@ private fun PacketLogScreen(
                         when (shared.status) {
                             ShareStatus.SHARED -> {
                                 exportedNames += fileName
-                                exportMessage =
-                                    "已分享 $fileName（${result.entryCount} 条，${result.byteSize} 字节）"
+                                exportSuccess = true
+                                exportMessage = strings.t(
+                                    StringKey.LOGS_SHARE_SUCCESS,
+                                    "name" to fileName,
+                                    "entries" to localeFormat.number(result.entryCount),
+                                    "bytes" to localeFormat.number(result.byteSize),
+                                )
                             }
 
-                            ShareStatus.UNAVAILABLE -> exportMessage = "当前平台不支持系统分享"
-                            ShareStatus.FAILED -> exportMessage = "分享失败：${shared.message ?: "未知原因"}"
+                            ShareStatus.UNAVAILABLE -> {
+                                exportSuccess = false
+                                exportMessage = strings.t(StringKey.LOGS_SHARE_UNAVAILABLE)
+                            }
+
+                            ShareStatus.FAILED -> {
+                                exportSuccess = false
+                                exportMessage = strings.t(
+                                    StringKey.LOGS_SHARE_FAILED,
+                                    "detail" to (shared.message ?: strings.t(StringKey.UNKNOWN)),
+                                )
+                            }
                         }
                     }
                 }
             } catch (cancellation: CancellationException) {
-                exportMessage = "已取消导出，未写入文件"
+                exportSuccess = false
+                exportMessage = strings.t(StringKey.LOGS_EXPORT_CANCELLED)
                 throw cancellation
             } finally {
                 exporting = false
@@ -1008,38 +1292,42 @@ private fun PacketLogScreen(
         estimate?.matchedCount != 0
 
     Column(
-        modifier = Modifier.fillMaxSize().padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = Modifier.fillMaxSize().padding(DesignTokens.Spacing.lg),
+        verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.md),
     ) {
         Row(modifier = Modifier.fillMaxWidth()) {
-            Text("报文日志", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
+            Text(
+                strings.t(StringKey.LOGS_TITLE),
+                style = MaterialTheme.typography.headlineSmall,
+                modifier = Modifier.weight(1f),
+            )
             TextButton(
                 enabled = canExport,
                 onClick = { startExport(ExportAction.SAVE) },
-            ) { Text("保存文件") }
+            ) { Text(strings.t(StringKey.SAVE_FILE)) }
             TextButton(
                 enabled = canExport,
                 onClick = { startExport(ExportAction.SHARE) },
-            ) { Text("分享") }
-            TextButton(onClick = onBack) { Text("返回") }
+            ) { Text(strings.t(StringKey.SHARE)) }
+            TextButton(onClick = onBack) { Text(strings.t(StringKey.BACK)) }
         }
 
         OutlinedTextField(
             value = query,
             onValueChange = { query = it },
-            label = { Text("搜索命令名 / 摘要 / HEX / seq") },
+            label = { Text(strings.t(StringKey.LOGS_SEARCH)) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
 
         Row(
             modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm),
         ) {
             FilterChip(
                 selected = selectedCommands.isEmpty(),
                 onClick = { selectedCommands = emptySet() },
-                label = { Text("全部命令") },
+                label = { Text(strings.t(StringKey.LOGS_ALL_COMMANDS)) },
             )
             availableCommands.forEach { item ->
                 val selected = item in selectedCommands
@@ -1058,39 +1346,43 @@ private fun PacketLogScreen(
             FilterChip(
                 selected = errorsOnly,
                 onClick = { errorsOnly = !errorsOnly },
-                label = { Text("仅错误") },
+                label = { Text(strings.t(StringKey.LOGS_ERRORS_ONLY)) },
             )
         }
 
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm),
         ) {
             OutlinedTextField(
                 value = fromText,
                 onValueChange = { fromText = it },
-                label = { Text("起始时间") },
-                placeholder = { Text("YYYY-MM-DD HH:mm:ss") },
+                label = { Text(strings.t(StringKey.LOGS_START_TIME)) },
+                placeholder = { Text(strings.t(StringKey.LOGS_TIME_PLACEHOLDER)) },
                 singleLine = true,
                 isError = fromError != null || rangeError != null,
-                supportingText = { Text(fromError ?: rangeError ?: "留空表示不限，含边界") },
+                supportingText = {
+                    Text(fromError ?: rangeError ?: strings.t(StringKey.LOGS_TIME_HINT))
+                },
                 modifier = Modifier.weight(1f),
             )
             OutlinedTextField(
                 value = toText,
                 onValueChange = { toText = it },
-                label = { Text("结束时间") },
-                placeholder = { Text("YYYY-MM-DD HH:mm:ss") },
+                label = { Text(strings.t(StringKey.LOGS_END_TIME)) },
+                placeholder = { Text(strings.t(StringKey.LOGS_TIME_PLACEHOLDER)) },
                 singleLine = true,
                 isError = toError != null || rangeError != null,
-                supportingText = { Text(toError ?: rangeError ?: "留空表示不限，含边界") },
+                supportingText = {
+                    Text(toError ?: rangeError ?: strings.t(StringKey.LOGS_TIME_HINT))
+                },
                 modifier = Modifier.weight(1f),
             )
         }
 
         Row(
             modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm),
         ) {
             PacketLogExportFormat.entries.forEach { item ->
                 FilterChip(
@@ -1103,18 +1395,25 @@ private fun PacketLogScreen(
 
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm),
         ) {
             OutlinedTextField(
                 value = maxEntriesText,
                 onValueChange = { maxEntriesText = it },
-                label = { Text("条数上限") },
+                label = { Text(strings.t(StringKey.LOGS_ENTRY_LIMIT)) },
                 singleLine = true,
                 isError = !entryLimit.valid,
                 supportingText = {
                     Text(
-                        entryLimit.error
-                            ?: "允许 ${PacketLogExportOptions.MIN_ENTRIES}..${PacketLogExportOptions.MAX_ENTRIES}",
+                        if (entryLimit.valid) {
+                            strings.t(
+                                StringKey.LOGS_ENTRY_RANGE,
+                                "min" to localeFormat.number(PacketLogExportOptions.MIN_ENTRIES),
+                                "max" to localeFormat.number(PacketLogExportOptions.MAX_ENTRIES),
+                            )
+                        } else {
+                            strings.t(StringKey.LOGS_INVALID_LIMIT)
+                        },
                     )
                 },
                 modifier = Modifier.weight(1f),
@@ -1122,13 +1421,19 @@ private fun PacketLogScreen(
             OutlinedTextField(
                 value = maxBytesKbText,
                 onValueChange = { maxBytesKbText = it },
-                label = { Text("大小上限（KB）") },
+                label = { Text(strings.t(StringKey.LOGS_BYTES_LIMIT)) },
                 singleLine = true,
                 isError = !byteLimit.valid,
                 supportingText = {
                     Text(
-                        byteLimit.error
-                            ?: "允许 1..${PacketLogExportOptions.MAX_BYTES / 1024}",
+                        if (byteLimit.valid) {
+                            strings.t(
+                                StringKey.LOGS_BYTES_RANGE,
+                                "max" to localeFormat.number(PacketLogExportOptions.MAX_BYTES / 1024),
+                            )
+                        } else {
+                            strings.t(StringKey.LOGS_INVALID_LIMIT)
+                        },
                     )
                 },
                 modifier = Modifier.weight(1f),
@@ -1137,18 +1442,27 @@ private fun PacketLogScreen(
 
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             val estimateLine = when {
-                rangeError != null -> "时间范围无效：$rangeError"
-                fromError != null || toError != null -> "时间格式无效"
-                options == null -> "上限输入无效：${entryLimit.error ?: byteLimit.error}"
-                estimate == null -> "正在估算导出量…"
-                estimate!!.matchedCount == 0 -> "没有匹配的报文，不会导出空文件"
-                estimate!!.notice != null -> estimate!!.notice!!
-                estimate!!.truncated ->
-                    "预计导出 ${estimate!!.estimatedEntries} 条 / ${formatBytes(estimate!!.estimatedBytes.toLong())}" +
-                        "（匹配 ${estimate!!.matchedCount} 条，超出上限将截断最旧的一端）"
+                rangeError != null -> strings.t(
+                    StringKey.LOGS_ESTIMATE_INVALID_RANGE,
+                    "detail" to rangeError,
+                )
 
-                else ->
-                    "预计导出 ${estimate!!.estimatedEntries} 条 / ${formatBytes(estimate!!.estimatedBytes.toLong())}"
+                fromError != null || toError != null -> strings.t(StringKey.LOGS_TIME_FORMAT_ERROR)
+                options == null -> strings.t(StringKey.LOGS_ESTIMATE_INVALID_LIMIT, "detail" to "")
+                estimate == null -> strings.t(StringKey.LOGS_ESTIMATE_LOADING)
+                estimate!!.matchedCount == 0 -> strings.t(StringKey.LOGS_ESTIMATE_NO_MATCH)
+                estimate!!.truncated -> strings.t(
+                    StringKey.LOGS_ESTIMATE_TRUNCATED,
+                    "entries" to localeFormat.number(estimate!!.estimatedEntries),
+                    "bytes" to localeFormat.bytes(estimate!!.estimatedBytes.toLong()),
+                    "matched" to localeFormat.number(estimate!!.matchedCount),
+                )
+
+                else -> strings.t(
+                    StringKey.LOGS_ESTIMATE,
+                    "entries" to localeFormat.number(estimate!!.estimatedEntries),
+                    "bytes" to localeFormat.bytes(estimate!!.estimatedBytes.toLong()),
+                )
             }
             Text(
                 estimateLine,
@@ -1156,46 +1470,72 @@ private fun PacketLogScreen(
                 modifier = Modifier.weight(1f),
             )
             if (exporting) {
-                TextButton(onClick = { exportJob?.cancel() }) { Text("取消") }
+                TextButton(onClick = { exportJob?.cancel() }) { Text(strings.t(StringKey.CANCEL)) }
             }
         }
 
         if (exporting) {
             val current = progress
+            val phaseText = current?.phase?.let { it.label(strings) }
+                ?: strings.t(StringKey.LOGS_EXPORT_PREPARING)
             Text(
-                "导出中 · ${current?.phase?.label() ?: "准备"} ${current?.processed ?: 0}/${current?.total ?: 0}",
+                strings.t(
+                    StringKey.LOGS_EXPORTING,
+                    "phase" to phaseText,
+                    "processed" to localeFormat.number(current?.processed ?: 0),
+                    "total" to localeFormat.number(current?.total ?: 0),
+                ),
                 style = MaterialTheme.typography.bodySmall,
             )
             LinearProgressIndicator(
                 progress = { current?.fraction ?: 0f },
                 modifier = Modifier.fillMaxWidth(),
+                color = status.inProgress,
             )
         }
 
         Row(modifier = Modifier.fillMaxWidth()) {
             Text(
-                "显示 ${filtered.size} / ${entries.size} 条 · 上限 ${InMemoryPacketLog.DEFAULT_CAPACITY} 条，超出滚动淘汰",
+                strings.t(
+                    StringKey.LOGS_DISPLAY_COUNT,
+                    "shown" to localeFormat.number(filtered.size),
+                    "total" to localeFormat.number(entries.size),
+                    "capacity" to localeFormat.number(InMemoryPacketLog.DEFAULT_CAPACITY),
+                ),
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.weight(1f),
             )
-            TextButton(onClick = { packetLog.clear() }) { Text("清空") }
+            TextButton(onClick = { packetLog.clear() }) { Text(strings.t(StringKey.CLEAR)) }
         }
 
-        exportMessage?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+        exportMessage?.let {
+            Text(
+                it,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (exportSuccess) status.success else status.error,
+            )
+        }
 
         if (filtered.isEmpty()) {
-            Text("暂无报文。连接设备并触发鉴权/信息/OTA 后，这里会记录 TX/RX 报文。")
+            Text(
+                if (entries.isEmpty()) {
+                    strings.t(StringKey.LOGS_EMPTY)
+                } else {
+                    strings.t(StringKey.LOGS_NO_MATCH)
+                },
+            )
         }
 
         LazyColumn(
             modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm),
         ) {
             items(filtered, key = { it.id }) { entry ->
                 PacketLogCard(
                     entry = entry,
                     nowMillis = nowMillis,
                     zoneOffsetMinutes = zoneOffsetMinutes,
+                    format = localeFormat,
                     onCopy = {
                         clipboard.setText(
                             AnnotatedString(entry.formatForCopy(nowMillis, zoneOffsetMinutes)),
@@ -1207,10 +1547,10 @@ private fun PacketLogScreen(
     }
 }
 
-private fun PacketLogExportPhase.label(): String = when (this) {
-    PacketLogExportPhase.FILTERING -> "筛选"
-    PacketLogExportPhase.RENDERING -> "生成"
-    PacketLogExportPhase.ASSEMBLING -> "拼装"
+private fun PacketLogExportPhase.label(strings: StringResolver): String = when (this) {
+    PacketLogExportPhase.FILTERING -> strings.t(StringKey.LOGS_EXPORT_PHASE_FILTERING)
+    PacketLogExportPhase.RENDERING -> strings.t(StringKey.LOGS_EXPORT_PHASE_RENDERING)
+    PacketLogExportPhase.ASSEMBLING -> strings.t(StringKey.LOGS_EXPORT_PHASE_ASSEMBLING)
 }
 
 @Composable
@@ -1218,48 +1558,58 @@ private fun PacketLogCard(
     entry: PacketLogEntry,
     nowMillis: Long,
     zoneOffsetMinutes: Int,
+    format: LocaleFormat,
     onCopy: () -> Unit,
 ) {
+    val strings = LocalStrings.current
+    val status = statusColors()
     Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Column(
+            modifier = Modifier.padding(DesignTokens.Spacing.md),
+            verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs),
+        ) {
             Row(modifier = Modifier.fillMaxWidth()) {
                 Text(
                     "${entry.direction.name} · ${entry.command.name} · seq=${entry.sequence}",
                     style = MaterialTheme.typography.titleSmall,
                     modifier = Modifier.weight(1f),
                 )
-                TextButton(onClick = onCopy) { Text("复制") }
+                TextButton(onClick = onCopy) { Text(strings.t(StringKey.COPY)) }
             }
             Text(
-                "${formatAbsoluteTime(entry.timestampMillis, zoneOffsetMinutes)} · " +
-                    formatRelativeTime(entry.timestampMillis, nowMillis),
+                format.absoluteTime(entry.timestampMillis, zoneOffsetMinutes) + " · " +
+                    format.relativeTime(entry.timestampMillis, nowMillis),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(entry.summary, style = MaterialTheme.typography.bodySmall)
             entry.error?.let { error ->
-                Text("错误：$error", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                Text(
+                    strings.t(StringKey.ERROR_PREFIX, "detail" to error),
+                    color = status.error,
+                    style = MaterialTheme.typography.bodySmall,
+                )
             }
-            Text("HEX ${entry.hex}", style = MaterialTheme.typography.bodySmall)
+            Text(strings.t(StringKey.LOGS_HEX, "hex" to entry.hex), style = MaterialTheme.typography.bodySmall)
         }
     }
 }
 
-private fun OtaOutcome.label(): String = when (this) {
-    OtaOutcome.SUCCEEDED -> "成功"
-    OtaOutcome.FAILED -> "失败"
-    OtaOutcome.ABORTED -> "中止"
+private fun OtaOutcome.label(strings: StringResolver): String = when (this) {
+    OtaOutcome.SUCCEEDED -> strings.t(StringKey.OTA_OUTCOME_SUCCEEDED)
+    OtaOutcome.FAILED -> strings.t(StringKey.OTA_OUTCOME_FAILED)
+    OtaOutcome.ABORTED -> strings.t(StringKey.OTA_OUTCOME_ABORTED)
 }
 
 @OptIn(ExperimentalTime::class)
-private fun formatEpoch(epochMillis: Long): String =
-    Instant.fromEpochMilliseconds(epochMillis).toString()
-
 @Composable
 private fun OtaScreen(
     session: DeviceSession,
     onBack: () -> Unit,
 ) {
+    val strings = LocalStrings.current
+    val format = remember(strings.language) { LocaleFormat(strings.language) }
+    val status = statusColors()
     val controller = session.ota
     val state by controller.state.collectAsState()
     val detailState by session.detail.state.collectAsState()
@@ -1283,27 +1633,38 @@ private fun OtaScreen(
     }
 
     Column(
-        modifier = Modifier.fillMaxSize().padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier.fillMaxSize().padding(DesignTokens.Spacing.lg),
+        verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.md),
     ) {
         Row(modifier = Modifier.fillMaxWidth()) {
-            Text("固件升级（OTA）", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
+            Text(
+                strings.t(StringKey.OTA_TITLE),
+                style = MaterialTheme.typography.headlineSmall,
+                modifier = Modifier.weight(1f),
+            )
             TextButton(
                 onClick = {
                     if (running) scope.launch { controller.abort() }
                     onBack()
                 },
-            ) { Text("返回") }
+            ) { Text(strings.t(StringKey.BACK)) }
         }
 
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm),
+        ) {
             Text(
-                "设备版本：${detailState.firmwareVersion ?: "未知"} · 型号：${detailState.deviceInfo?.model ?: "未知"}",
+                strings.t(
+                    StringKey.OTA_DEVICE_LINE,
+                    "version" to (detailState.firmwareVersion ?: strings.t(StringKey.UNKNOWN)),
+                    "model" to (detailState.deviceInfo?.model ?: strings.t(StringKey.UNKNOWN)),
+                ),
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.weight(1f),
             )
             TextButton(onClick = { scope.launch { session.detail.refreshInfo() } }) {
-                Text("刷新设备信息")
+                Text(strings.t(StringKey.REFRESH_DEVICE_INFO))
             }
         }
 
@@ -1319,23 +1680,33 @@ private fun OtaScreen(
             enabled = !running && !selectionState.picking && !selectionState.prechecking,
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text(if (selectionState.selected) "重新选择固件" else "选择固件")
+            Text(
+                if (selectionState.selected) {
+                    strings.t(StringKey.RESELECT_FIRMWARE)
+                } else {
+                    strings.t(StringKey.SELECT_FIRMWARE)
+                },
+            )
         }
 
         if (selectionState.picking) {
-            Text("正在打开文件选择器…", style = MaterialTheme.typography.bodySmall)
+            Text(strings.t(StringKey.OPENING_PICKER), style = MaterialTheme.typography.bodySmall)
         }
         if (selectionState.prechecking) {
             LinearProgressIndicator(
                 progress = { selectionState.precheckProgress },
                 modifier = Modifier.fillMaxWidth(),
+                color = status.inProgress,
             )
             Text(
-                "正在预检固件… ${(selectionState.precheckProgress * 100).toInt()}%",
+                strings.t(
+                    StringKey.PRECHECK_PROGRESS,
+                    "percent" to (selectionState.precheckProgress * 100).toInt().toString(),
+                ),
                 style = MaterialTheme.typography.bodySmall,
             )
             TextButton(onClick = { selection.cancelPrecheck() }) {
-                Text("取消预检")
+                Text(strings.t(StringKey.CANCEL_PRECHECK))
             }
         }
 
@@ -1352,49 +1723,100 @@ private fun OtaScreen(
         )
 
         when (val current = state) {
-            OtaState.Idle -> Text("等待开始")
+            OtaState.Idle -> Text(strings.t(StringKey.OTA_IDLE))
             is OtaState.Preparing -> Text(
-                "准备中：${current.totalBytes} 字节，CRC=${current.crc16}" +
-                    (current.sessionId?.let { "，会话 $it" } ?: ""),
+                strings.t(
+                    StringKey.OTA_PREPARING,
+                    "bytes" to format.bytes(current.totalBytes.toLong()),
+                    "crc" to hex16(current.crc16),
+                    "session" to (current.sessionId?.let {
+                        strings.t(StringKey.OTA_SESSION_SUFFIX, "id" to it.toString())
+                    } ?: ""),
+                ),
             )
 
             is OtaState.Transferring -> {
-                LinearProgressIndicator(progress = { current.progress }, modifier = Modifier.fillMaxWidth())
+                LinearProgressIndicator(
+                    progress = { current.progress },
+                    modifier = Modifier.fillMaxWidth(),
+                    color = status.inProgress,
+                )
                 val resumeNote = if (current.initialOffset > 0) {
-                    "（从 ${formatBytes(current.initialOffset.toLong())} 续传）"
+                    strings.t(StringKey.OTA_RESUME_NOTE, "offset" to format.bytes(current.initialOffset.toLong()))
                 } else {
                     ""
                 }
-                Text("${current.stage.label()}：已发送 ${current.sentBytes}/${current.totalBytes} 字节（${(current.progress * 100).toInt()}%）$resumeNote")
+                Text(
+                    strings.t(
+                        StringKey.OTA_TRANSFERRING,
+                        "stage" to current.stage.label(strings),
+                        "sent" to format.number(current.sentBytes),
+                        "total" to format.number(current.totalBytes),
+                        "percent" to (current.progress * 100).toInt().toString(),
+                        "resume" to resumeNote,
+                    ),
+                )
                 if (current.retransmissions > 0) {
-                    Text("分片重传 ${current.retransmissions} 次", style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        strings.t(
+                            StringKey.OTA_RETRANSMISSIONS,
+                            "count" to format.number(current.retransmissions),
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
                 }
                 current.resumeFallbackReason?.let { reason ->
                     Text(
-                        reason,
-                        color = MaterialTheme.colorScheme.error,
+                        strings.render(reason),
+                        color = status.warning,
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
             }
 
-            is OtaState.Verifying -> Text("校验中：设备正在核对 CRC=${current.crc16}")
+            is OtaState.Verifying -> Text(
+                strings.t(StringKey.OTA_VERIFYING, "crc" to hex16(current.crc16)),
+            )
+
             is OtaState.Succeeded -> Text(
-                "升级完成：${current.chunks} 片，CRC=${current.crc16}" +
-                    if (current.rebootRequired) "，设备将重启" else "",
+                strings.t(
+                    StringKey.OTA_SUCCEEDED,
+                    "chunks" to format.number(current.chunks),
+                    "crc" to hex16(current.crc16),
+                ) + if (current.rebootRequired) strings.t(StringKey.OTA_REBOOT_REQUIRED) else "",
+                color = status.success,
             )
 
             is OtaState.Aborted -> Text(
-                "升级已中止：${current.reason}（已发送 ${current.sentBytes}/${current.totalBytes} 字节）",
-                color = MaterialTheme.colorScheme.error,
+                strings.t(
+                    StringKey.OTA_ABORTED,
+                    "reason" to abortReasonText(current.reason, strings),
+                    "sent" to format.number(current.sentBytes),
+                    "total" to format.number(current.totalBytes),
+                ),
+                color = status.warning,
             )
 
-            is OtaState.Failed -> Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("升级失败：${current.reason}", color = MaterialTheme.colorScheme.error)
-                Text("已发送 ${current.sentBytes}/${current.totalBytes} 字节")
+            is OtaState.Failed -> Column(verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs)) {
+                Text(
+                    strings.t(StringKey.OTA_FAILED, "reason" to strings.render(current.reason)),
+                    color = status.error,
+                )
+                Text(
+                    strings.t(
+                        StringKey.OTA_SENT_BYTES,
+                        "sent" to format.number(current.sentBytes),
+                        "total" to format.number(current.totalBytes),
+                    ),
+                )
                 current.resumePoint?.let { point ->
                     Text(
-                        "已保存断点：${point.sentBytes}/${point.totalBytes} 字节（会话 ${point.sessionId}）",
+                        strings.t(
+                            StringKey.OTA_RESUME_SAVED,
+                            "sent" to format.number(point.sentBytes),
+                            "total" to format.number(point.totalBytes),
+                            "session" to format.number(point.sessionId),
+                        ),
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
@@ -1415,7 +1837,7 @@ private fun OtaScreen(
             enabled = !running && selectionState.readyForOta,
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text("开始升级")
+            Text(strings.t(StringKey.START_OTA))
         }
 
         OutlinedButton(
@@ -1438,16 +1860,20 @@ private fun OtaScreen(
             val point = selectionState.resumePoint
             Text(
                 if (point != null) {
-                    "继续上次升级（${point.sentBytes}/${point.totalBytes}）"
+                    strings.t(
+                        StringKey.RESUME_OTA_WITH_PROGRESS,
+                        "sent" to format.number(point.sentBytes),
+                        "total" to format.number(point.totalBytes),
+                    )
                 } else {
-                    "继续上次升级"
+                    strings.t(StringKey.RESUME_OTA)
                 },
             )
         }
 
         if (selectionState.resumePoint != null || selectionState.resumeBlockedReason != null) {
             TextButton(onClick = { selection.clearResume() }, enabled = !running) {
-                Text("清除断点")
+                Text(strings.t(StringKey.CLEAR_RESUME))
             }
         }
 
@@ -1456,7 +1882,7 @@ private fun OtaScreen(
             enabled = running,
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text("中止升级")
+            Text(strings.t(StringKey.ABORT_OTA))
         }
 
         OutlinedButton(
@@ -1464,7 +1890,7 @@ private fun OtaScreen(
             enabled = !running,
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text("重置状态")
+            Text(strings.t(StringKey.RESET_STATE))
         }
     }
 }
@@ -1474,21 +1900,35 @@ private fun FirmwareCard(
     selectionState: FirmwareSelectionState,
     onRecheck: () -> Unit,
 ) {
+    val strings = LocalStrings.current
+    val format = remember(strings.language) { LocaleFormat(strings.language) }
+    val status = statusColors()
     if (selectionState.packageName == null && selectionState.error == null) return
     Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Column(
+            modifier = Modifier.padding(DesignTokens.Spacing.md),
+            verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs),
+        ) {
             selectionState.packageName?.let { name ->
                 Text(name, style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "版本 ${selectionState.version} · payload ${formatBytes(selectionState.payloadBytes)}",
+                    strings.t(
+                        StringKey.FIRMWARE_VERSION_LINE,
+                        "version" to selectionState.version.toString(),
+                        "bytes" to format.bytes(selectionState.payloadBytes.toLong()),
+                    ),
                     style = MaterialTheme.typography.bodySmall,
                 )
                 Text(
-                    "CRC32 声明 ${hex32(selectionState.declaredCrc32)} · 实际 ${hex32(selectionState.computedCrc32)}",
+                    strings.t(
+                        StringKey.FIRMWARE_CRC32_LINE,
+                        "declared" to hex32(selectionState.declaredCrc32),
+                        "computed" to hex32(selectionState.computedCrc32),
+                    ),
                     style = MaterialTheme.typography.bodySmall,
                 )
                 Text(
-                    "CRC16 ${hex16(selectionState.computedCrc16)}",
+                    strings.t(StringKey.FIRMWARE_CRC16_LINE, "value" to hex16(selectionState.computedCrc16)),
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
@@ -1496,15 +1936,19 @@ private fun FirmwareCard(
             val resumePoint = selectionState.resumePoint
             if (resumePoint != null && selectionState.canResume) {
                 Text(
-                    "可续传，从 ${formatBytes(resumePoint.sentBytes.toLong())} 继续" +
-                        "（已传输 ${resumePoint.sentBytes}/${resumePoint.totalBytes} 字节）",
-                    color = MaterialTheme.colorScheme.primary,
+                    strings.t(
+                        StringKey.FIRMWARE_RESUME_READY,
+                        "offset" to format.bytes(resumePoint.sentBytes.toLong()),
+                        "sent" to format.number(resumePoint.sentBytes),
+                        "total" to format.number(resumePoint.totalBytes),
+                    ),
+                    color = status.inProgress,
                 )
             }
             selectionState.resumeBlockedReason?.let { reason ->
                 Text(
-                    "无法续传：$reason",
-                    color = MaterialTheme.colorScheme.error,
+                    strings.render(reason),
+                    color = status.error,
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
@@ -1512,33 +1956,43 @@ private fun FirmwareCard(
             val precheck = selectionState.precheck
             if (precheck == null) {
                 if (selectionState.error == null) {
-                    Text("尚未预检", style = MaterialTheme.typography.bodySmall)
+                    Text(strings.t(StringKey.FIRMWARE_NOT_PRECHECKED), style = MaterialTheme.typography.bodySmall)
                 }
             } else if (precheck.passed) {
-                Text("预检通过，可以开始升级", color = MaterialTheme.colorScheme.primary)
+                Text(strings.t(StringKey.FIRMWARE_PRECHECK_PASSED), color = status.success)
             } else {
-                Text("预检未通过，OTA 不可启动：", color = MaterialTheme.colorScheme.error)
+                Text(strings.t(StringKey.FIRMWARE_PRECHECK_FAILED), color = status.error)
                 precheck.errors.forEach { error ->
-                    Text("· ${error.message}", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        "· " + strings.t(StringKey.TECHNICAL_DETAIL, "detail" to (error.message ?: "")),
+                        color = status.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
                 }
             }
 
             selectionState.error?.let { message ->
                 Text(
-                    "固件加载失败：$message" + (selectionState.errorCode?.let { "（$it）" } ?: ""),
-                    color = MaterialTheme.colorScheme.error,
+                    strings.render(message) +
+                        (selectionState.errorCode?.let { " ($it)" } ?: ""),
+                    color = status.error,
                 )
             }
 
-            TextButton(onClick = onRecheck) { Text("重新预检") }
+            TextButton(onClick = onRecheck) { Text(strings.t(StringKey.RECHECK_FIRMWARE)) }
         }
     }
 }
 
-private fun formatBytes(bytes: Long): String = when {
-    bytes >= 1024L * 1024 -> "${bytes / (1024L * 1024)} MiB（$bytes 字节）"
-    bytes >= 1024L -> "${bytes / 1024} KiB（$bytes 字节）"
-    else -> "$bytes 字节"
+private fun abortReasonText(reasonName: String, strings: StringResolver): String = when (
+    OtaAbortReason.entries.firstOrNull { it.name == reasonName }
+) {
+    OtaAbortReason.TIMEOUT -> strings.t(StringKey.OTA_ABORT_TIMEOUT)
+    OtaAbortReason.VERIFY_FAILED -> strings.t(StringKey.OTA_ABORT_VERIFY_FAILED)
+    OtaAbortReason.TRANSPORT_ERROR -> strings.t(StringKey.OTA_ABORT_TRANSPORT)
+    OtaAbortReason.DEVICE_REJECTED -> strings.t(StringKey.OTA_ABORT_DEVICE_REJECTED)
+    OtaAbortReason.USER_CANCELLED -> strings.t(StringKey.OTA_ABORT_USER)
+    null -> strings.t(StringKey.OTA_ABORT_USER)
 }
 
 private fun hex32(value: Long?): String =
@@ -1547,10 +2001,10 @@ private fun hex32(value: Long?): String =
 private fun hex16(value: Int?): String =
     value?.let { "0x" + it.toString(16).uppercase().padStart(4, '0') } ?: "—"
 
-private fun OtaStage.label(): String = when (this) {
-    OtaStage.PREPARING -> "准备中"
-    OtaStage.TRANSFERRING -> "传输中"
-    OtaStage.VERIFYING -> "校验中"
-    OtaStage.APPLYING -> "应用固件"
-    OtaStage.COMPLETED -> "已完成"
+private fun OtaStage.label(strings: StringResolver): String = when (this) {
+    OtaStage.PREPARING -> strings.t(StringKey.OTA_STAGE_PREPARING)
+    OtaStage.TRANSFERRING -> strings.t(StringKey.OTA_STAGE_TRANSFERRING)
+    OtaStage.VERIFYING -> strings.t(StringKey.OTA_STAGE_VERIFYING)
+    OtaStage.APPLYING -> strings.t(StringKey.OTA_STAGE_APPLYING)
+    OtaStage.COMPLETED -> strings.t(StringKey.OTA_STAGE_COMPLETED)
 }

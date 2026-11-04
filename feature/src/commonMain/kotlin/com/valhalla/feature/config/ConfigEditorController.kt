@@ -11,6 +11,8 @@ import com.valhalla.core.protocol.message.DeviceStatus
 import com.valhalla.core.protocol.message.GetConfigRequest
 import com.valhalla.core.protocol.message.SetConfigRequest
 import com.valhalla.core.protocol.message.SetConfigResponse
+import com.valhalla.feature.i18n.StringKey
+import com.valhalla.feature.i18n.UiMessage
 import com.valhalla.feature.toFailureInfo
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
@@ -46,8 +48,8 @@ data class ConfigEditorState(
     val fields: List<ConfigFieldState> = emptyList(),
     val loading: Boolean = false,
     val savingKey: String? = null,
-    val message: String? = null,
-    val error: String? = null,
+    val message: UiMessage? = null,
+    val error: UiMessage? = null,
     val errorCode: DeviceStatus? = null,
     /** 当前用于能力判定的设备快照。 */
     val target: DeviceConfigTarget = DeviceConfigTarget(),
@@ -56,14 +58,14 @@ data class ConfigEditorState(
     val visibleFields: List<ConfigFieldState> get() = fields.filter { it.visible }
     val hiddenFields: List<ConfigFieldState> get() = fields.filterNot { it.visible }
 
-    /** 能力提示：未知快照时优先提示刷新设备信息，否则说明因能力隐藏。 */
-    val capabilityNotice: String?
+    /** 能力提示的文案键：未知快照时优先提示刷新设备信息，否则说明因能力隐藏。 */
+    val capabilityNoticeKey: StringKey?
         get() = when {
             hiddenFields.isEmpty() -> null
             hiddenFields.any { it.capability.status == com.valhalla.core.config.ConfigCapabilityStatus.TARGET_UNKNOWN } ->
-                "已隐藏 ${hiddenFields.size} 项配置：当前固件版本/型号未知，请先刷新设备信息后再判定"
+                StringKey.CONFIG_HIDDEN_UNKNOWN_TARGET
 
-            else -> "已隐藏 ${hiddenFields.size} 项配置：当前设备（固件 ${target.firmwareVersion?.let { "${it.major}.${it.minor}.${it.patch}" } ?: "未知"}，型号 ${target.model ?: "未知"}）不支持"
+            else -> StringKey.CONFIG_HIDDEN_UNSUPPORTED
         }
 }
 
@@ -124,7 +126,7 @@ class ConfigEditorController(
                 it.copy(
                     loading = false,
                     message = null,
-                    error = "当前设备没有可读取的配置项，请先刷新设备信息",
+                    error = UiMessage(StringKey.CONFIG_NO_KEYS),
                     errorCode = null,
                 )
             }
@@ -159,20 +161,22 @@ class ConfigEditorController(
     suspend fun save(key: String): Boolean {
         val snapshot = mutableState.value
         val field = snapshot.fields.firstOrNull { it.spec.key == key }
-            ?: return fail("未知配置项：$key")
+            ?: return fail(UiMessage(StringKey.CONFIG_UNKNOWN_KEY, mapOf("key" to key)))
         // 下发前用最新设备快照二次校验能力，避免读取版本后设备状态变化导致设备回 INVALID_PARAM。
         val capability = catalog.capability(field.spec, snapshot.target)
         if (capability != field.capability) {
             updateField(key) { it.copy(capability = capability) }
         }
         if (!capability.supported || !capability.visible) {
-            return fail(capability.reason ?: "当前设备不支持该配置项")
+            return fail(UiMessage(StringKey.CONFIG_UNSUPPORTED_FIELD, mapOf("field" to key)))
         }
         if (!field.spec.editable) {
-            return fail(field.spec.readOnlyReason ?: "该配置项只读")
+            return fail(UiMessage(StringKey.CONFIG_READ_ONLY_FIELD, mapOf("field" to key)))
         }
         if (snapshot.savingKey != null) {
-            return fail("正在保存 ${snapshot.savingKey}，请稍后再试")
+            return fail(
+                UiMessage(StringKey.CONFIG_SAVING_BUSY, mapOf("field" to snapshot.savingKey)),
+            )
         }
         val validation = catalog.validate(field.spec, field.text)
         if (validation is ConfigValidation.Invalid) {
@@ -202,7 +206,7 @@ class ConfigEditorController(
             mutableState.update {
                 it.copy(
                     savingKey = null,
-                    message = "已保存 ${field.spec.displayName}",
+                    message = UiMessage(StringKey.CONFIG_SAVED_FIELD, mapOf("field" to key)),
                     error = null,
                     errorCode = null,
                     fields = it.fields.map { item ->
@@ -230,7 +234,11 @@ class ConfigEditorController(
             mutableState.update {
                 it.copy(
                     savingKey = null,
-                    error = "保存 ${field.spec.displayName} 失败：${info.message}",
+                    error = UiMessage(
+                        StringKey.CONFIG_LOAD_FAILED,
+                        args = mapOf("field" to key),
+                        nested = mapOf("detail" to info.ui),
+                    ),
                     errorCode = info.status,
                     fields = it.fields.map { item ->
                         if (item.spec.key == key) item.copy(saving = false) else item
@@ -270,13 +278,13 @@ class ConfigEditorController(
             updateField(spec.key) {
                 it.copy(
                     loading = false,
-                    loadError = "读取失败：${info.message}",
+                    loadError = info.message,
                 )
             }
         }
     }
 
-    private fun fail(message: String): Boolean {
+    private fun fail(message: UiMessage): Boolean {
         mutableState.update { it.copy(error = message) }
         return false
     }

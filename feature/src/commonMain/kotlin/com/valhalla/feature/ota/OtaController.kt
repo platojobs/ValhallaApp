@@ -25,6 +25,9 @@ import com.valhalla.core.profile.DeviceProfileRepository
 import com.valhalla.core.profile.OtaHistoryRecord
 import com.valhalla.core.profile.OtaOutcome
 import com.valhalla.data.ble.BleException
+import com.valhalla.feature.FailureInfo
+import com.valhalla.feature.i18n.StringKey
+import com.valhalla.feature.i18n.UiMessage
 import com.valhalla.feature.toFailureInfo
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -65,7 +68,7 @@ sealed interface OtaState {
         /** 设备实际确认的起始偏移（续传时为断点偏移，从头开始为 0）。 */
         val initialOffset: Int = 0,
         /** 设备拒绝或下调续传偏移时的说明；正常从头开始为 null。 */
-        val resumeFallbackReason: String? = null,
+        val resumeFallbackReason: UiMessage? = null,
     ) : OtaState {
         val progress: Float
             get() = if (totalBytes == 0) 0f else sentBytes.toFloat() / totalBytes
@@ -94,7 +97,7 @@ sealed interface OtaState {
     ) : OtaState
 
     data class Failed(
-        val reason: String,
+        val reason: UiMessage,
         val sentBytes: Int,
         val totalBytes: Int = 0,
         val status: DeviceStatus? = null,
@@ -166,7 +169,7 @@ class OtaController(
     suspend fun start(firmware: ByteArray, resumeFrom: OtaResumePoint? = null): OtaState = startMutex.withLock {
         prepareRun()
         if (firmware.isEmpty()) {
-            return failed("固件包为空", 0, 0)
+            return failed(UiMessage(StringKey.OTA_REASON_EMPTY_FIRMWARE), 0, 0)
         }
 
         val crc = Crc16.ccittFalse(firmware)
@@ -200,7 +203,14 @@ class OtaController(
         }
         prepareRun()
         if (firmware.payloadLength <= 0 || firmware.payloadLength > Int.MAX_VALUE.toLong()) {
-            return failed("固件 payload 长度非法: ${firmware.payloadLength}", 0, 0)
+            return failed(
+                UiMessage(
+                    StringKey.OTA_REASON_INVALID_LENGTH,
+                    mapOf("length" to firmware.payloadLength.toString()),
+                ),
+                0,
+                0,
+            )
         }
 
         val crc = knownCrc16 ?: try {
@@ -208,7 +218,14 @@ class OtaController(
         } catch (cancellation: CancellationException) {
             throw cancellation
         } catch (error: FirmwareException) {
-            return failed(error.message ?: "固件读取失败", 0, 0)
+            return failed(
+                UiMessage(
+                    StringKey.FIRMWARE_LOAD_FAILED,
+                    mapOf("detail" to (error.message ?: StringKey.OTA_REASON_FIRMWARE_READ.name)),
+                ),
+                0,
+                0,
+            )
         }
 
         runTransfer(
@@ -399,7 +416,7 @@ class OtaController(
                 FinishOtaRequest(totalBytes = totalBytes, crc16 = crc16),
             )
             if (finishResponse !is FinishOtaResponse) {
-                error("结束 OTA 应答类型异常: ${finishResponse::class.simpleName}")
+                error("unexpected OTA finish response: ${finishResponse::class.simpleName}")
             }
 
             clearCheckpointStore()
@@ -422,7 +439,7 @@ class OtaController(
                 outcome = OtaOutcome.ABORTED,
                 sentBytes = sent,
                 totalBytes = total,
-                detail = "协程取消",
+                detail = "cancelled",
             )
             throw cancellation
         } catch (aborted: OtaAbortedException) {
@@ -440,7 +457,7 @@ class OtaController(
             return state
         } catch (error: Throwable) {
             val info = error.toFailureInfo()
-            val failureMessage = error.toOtaFailureMessage(info.message)
+            val failureMessage = error.toOtaFailureMessage(info)
             val resumePoint = persistInterruptedCheckpoint(
                 sessionId = sessionId,
                 sentBytes = sent,
@@ -466,7 +483,7 @@ class OtaController(
                 sentBytes = sent,
                 totalBytes = total,
                 errorCode = info.status?.describe(),
-                detail = failureMessage,
+                detail = failureMessage.key.name,
             )
             return state
         } finally {
@@ -485,13 +502,13 @@ class OtaController(
                 val response = dispatcher.execute(OtaDataRequest(offset = offset.toLong(), data = chunk))
                 if (response !is OtaDataResponse) {
                     throw CommandFailure.InvalidResponse(
-                        "OTA 分片应答类型异常: ${response::class.simpleName}",
+                        "unexpected OTA chunk response: ${response::class.simpleName}",
                     )
                 }
                 val expected = offset + chunk.size
                 if (response.receivedBytes < expected) {
                     throw CommandFailure.InvalidResponse(
-                        "设备确认长度不足: ${response.receivedBytes} < $expected",
+                        "device acknowledged fewer bytes: ${response.receivedBytes} < $expected",
                     )
                 }
                 return
@@ -574,7 +591,10 @@ class OtaController(
                 return StartSession(response)
             } catch (error: CommandFailure.DeviceRejected) {
                 // 旧设备不识别尾部扩展，或设备侧续传上下文失效：回退为旧格式并从 0 开始。
-                val reason = "设备拒绝续传（${error.status.describe()}），已回退为从头开始"
+                val reason = UiMessage(
+                    StringKey.OTA_FALLBACK_REJECTED,
+                    mapOf("detail" to error.status.describe()),
+                )
                 val legacy = executeStart(
                     totalBytes = totalBytes,
                     crc16 = crc16,
@@ -619,7 +639,7 @@ class OtaController(
         )
         return response as? StartOtaResponse
             ?: throw CommandFailure.InvalidResponse(
-                "开始 OTA 应答类型异常: ${response::class.simpleName}",
+                "unexpected OTA start response: ${response::class.simpleName}",
             )
     }
 
@@ -633,17 +653,32 @@ class OtaController(
      */
     private fun resolveStartOffset(requestedOffset: Int, acceptedOffset: Long, totalBytes: Int): Int {
         if (acceptedOffset >= totalBytes) {
-            throw CommandFailure.InvalidResponse("设备确认偏移超出范围: $acceptedOffset >= $totalBytes")
+            throw OtaValidationException(
+                UiMessage.of(
+                    StringKey.OTA_REASON_OFFSET_TOO_LARGE,
+                    "offset" to acceptedOffset.toString(),
+                    "total" to totalBytes.toString(),
+                ),
+            )
         }
         if (requestedOffset <= 0) {
             if (acceptedOffset > 0) {
-                throw CommandFailure.InvalidResponse("未请求续传但设备返回偏移 $acceptedOffset")
+                throw OtaValidationException(
+                    UiMessage.of(
+                        StringKey.OTA_REASON_OFFSET_UNEXPECTED,
+                        "offset" to acceptedOffset.toString(),
+                    ),
+                )
             }
             return 0
         }
         if (acceptedOffset > requestedOffset.toLong()) {
-            throw CommandFailure.InvalidResponse(
-                "设备确认偏移 $acceptedOffset 大于请求偏移 $requestedOffset",
+            throw OtaValidationException(
+                UiMessage.of(
+                    StringKey.OTA_REASON_OFFSET_GREATER_THAN_REQUESTED,
+                    "accepted" to acceptedOffset.toString(),
+                    "requested" to requestedOffset.toString(),
+                ),
             )
         }
         return acceptedOffset.toInt()
@@ -652,14 +687,19 @@ class OtaController(
     private fun fallbackNote(
         requestedOffset: Int,
         acceptedOffset: Int,
-        deviceFallbackReason: String?,
-    ): String? {
+        deviceFallbackReason: UiMessage?,
+    ): UiMessage? {
         if (deviceFallbackReason != null) return deviceFallbackReason
         if (requestedOffset <= 0) return null
         return when {
-            acceptedOffset == 0 -> "设备未接受续传偏移，已从 0 开始"
-            acceptedOffset < requestedOffset ->
-                "设备将续传偏移下调到 $acceptedOffset 字节（请求 $requestedOffset 字节）"
+            acceptedOffset == 0 -> UiMessage(StringKey.OTA_FALLBACK_NOT_ACCEPTED)
+            acceptedOffset < requestedOffset -> UiMessage(
+                StringKey.OTA_FALLBACK_LOWERED,
+                mapOf(
+                    "accepted" to acceptedOffset.toString(),
+                    "requested" to requestedOffset.toString(),
+                ),
+            )
             else -> null
         }
     }
@@ -703,10 +743,10 @@ class OtaController(
     ): ResumeGate {
         val point = resumeFrom ?: return ResumeGate(0, null)
         if (!point.isValid()) {
-            return ResumeGate(0, "本地断点数据已失效，已从 0 开始")
+            return ResumeGate(0, UiMessage(StringKey.RESUME_INVALID))
         }
         if (!point.matchesPayload(version, totalBytes, crc32, crc16)) {
-            return ResumeGate(0, "本地断点与当前固件不一致（版本/总长/CRC32/CRC16），已从 0 开始")
+            return ResumeGate(0, UiMessage(StringKey.RESUME_MISMATCH))
         }
         return ResumeGate(point.sentBytes, null)
     }
@@ -731,16 +771,26 @@ class OtaController(
         runCatching { checkpointStore?.clear() }
     }
 
-    /** 把传输失败翻译成可操作的提示；无法识别的异常保留原始文案。 */
-    private fun Throwable.toOtaFailureMessage(fallback: String): String = when (this) {
-        is BleException -> "链路已断开：请重新连接设备后使用「继续上次升级」"
-        is FirmwareException.ReadFailure ->
-            "读取固件失败（offset=$offset, length=$length）：请重新选择固件文件"
-        is CommandFailure.Timeout ->
-            "设备无响应（尝试 $attempts 次后超时）：请确认设备在附近且电量充足后重试"
-        is CommandFailure.TransportFailure ->
-            "链路传输失败（尝试 $attempts 次）：请重新连接设备后重试"
-        else -> fallback
+    /** 把传输失败翻译成可操作的提示；拒绝类失败优先展示设备状态码。 */
+    private fun Throwable.toOtaFailureMessage(failure: FailureInfo): UiMessage = when (this) {
+        is OtaValidationException -> uiMessage
+        is BleException -> UiMessage(StringKey.OTA_REASON_DISCONNECTED)
+        is FirmwareException.ReadFailure -> UiMessage(
+            StringKey.OTA_REASON_READ_FIRMWARE,
+            mapOf("offset" to offset.toString(), "length" to length.toString()),
+        )
+        is CommandFailure.Timeout -> UiMessage(
+            StringKey.OTA_REASON_TIMEOUT,
+            mapOf("attempts" to attempts.toString()),
+        )
+        is CommandFailure.TransportFailure -> UiMessage(
+            StringKey.OTA_REASON_TRANSPORT,
+            mapOf("attempts" to attempts.toString()),
+        )
+        else -> UiMessage(
+            StringKey.OTA_REASON_DEVICE_REJECTED,
+            nested = mapOf("detail" to (failure.statusUi ?: failure.ui)),
+        )
     }
 
     private fun saveCheckpoint(
@@ -806,7 +856,7 @@ class OtaController(
         crc32 = crc32,
     ).takeIf { it.isValid() }
 
-    private fun failed(reason: String, sentBytes: Int, totalBytes: Int): OtaState.Failed {
+    private fun failed(reason: UiMessage, sentBytes: Int, totalBytes: Int): OtaState.Failed {
         val state = OtaState.Failed(reason, sentBytes, totalBytes)
         mutableState.value = state
         return state
@@ -817,14 +867,17 @@ class OtaController(
     /** 一次 START_OTA 的结果；[fallbackReason] 非空表示续传被拒后回退为从头开始。 */
     private data class StartSession(
         val response: StartOtaResponse,
-        val fallbackReason: String? = null,
+        val fallbackReason: UiMessage? = null,
     )
 
     /** 续传前置检查结果：[offset] 为 0 且 [reason] 非空表示请求了续传但被本地门控拒绝。 */
     private data class ResumeGate(
         val offset: Int,
-        val reason: String?,
+        val reason: UiMessage?,
     )
+
+    /** 续传偏移校验失败：直接携带可展示文案，避免上层再做字符串匹配。 */
+    private class OtaValidationException(val uiMessage: UiMessage) : Exception(uiMessage.key.name)
 
     private fun OtaState.sentBytes(): Int = when (this) {
         is OtaState.Preparing -> 0

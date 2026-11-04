@@ -124,7 +124,7 @@ class IosBleClient : BleClient {
             connections.remove(deviceId)
             connection.markDisconnected()
             central.cancelPeripheralConnection(peripheral)
-            throw BleException("连接超时（${timeoutMillis}ms）")
+            throw BleTimeoutException("连接超时（${timeoutMillis}ms）")
         }
         return connection
     }

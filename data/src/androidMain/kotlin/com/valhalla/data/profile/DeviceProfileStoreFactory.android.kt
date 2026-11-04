@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import com.valhalla.core.profile.DeviceProfileStore
 import com.valhalla.data.ble.AndroidBleSupport
+import com.valhalla.data.settings.StorageKeys
 
 actual fun createDeviceProfileStore(): DeviceProfileStore =
     SharedPreferencesDeviceProfileStore(AndroidBleSupport.requireContext())
@@ -11,20 +12,16 @@ actual fun createDeviceProfileStore(): DeviceProfileStore =
 private class SharedPreferencesDeviceProfileStore(context: Context) : DeviceProfileStore {
 
     private val preferences: SharedPreferences =
-        context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+        context.getSharedPreferences(StorageKeys.ANDROID_PROFILES_PREFS, Context.MODE_PRIVATE)
 
-    override fun loadRaw(): String? = preferences.getString(KEY_PROFILES, null)
+    override fun loadRaw(): String? =
+        preferences.getString(StorageKeys.ANDROID_PROFILES_KEY, null)
 
     override fun saveRaw(raw: String) {
-        preferences.edit().putString(KEY_PROFILES, raw).apply()
+        preferences.edit().putString(StorageKeys.ANDROID_PROFILES_KEY, raw).apply()
     }
 
     override fun clear() {
-        preferences.edit().remove(KEY_PROFILES).apply()
-    }
-
-    private companion object {
-        const val PREFERENCES_NAME = "valhalla_profiles"
-        const val KEY_PROFILES = "profiles"
+        preferences.edit().remove(StorageKeys.ANDROID_PROFILES_KEY).apply()
     }
 }

@@ -19,6 +19,7 @@ import com.valhalla.core.protocol.message.OtaStage
 import com.valhalla.core.protocol.message.StartOtaRequest
 import com.valhalla.core.protocol.message.StartOtaResponse
 import com.valhalla.feature.FakeFrameLink
+import com.valhalla.feature.i18n.asChinese
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.runCurrent
@@ -158,8 +159,8 @@ class OtaControllerTest {
         assertEquals(300, failed.sentBytes)
         assertEquals(300, failed.totalBytes)
         assertEquals(DeviceStatus.CRC_MISMATCH, failed.status)
-        assertTrue(failed.reason.contains("0x0E"))
-        assertTrue(failed.reason.contains("CRC 不一致"))
+        assertTrue(failed.reason.asChinese().contains("0x0E"))
+        assertTrue(failed.reason.asChinese().contains("CRC 不一致"))
         assertNull(failed.resumePoint)
     }
 
@@ -204,7 +205,7 @@ class OtaControllerTest {
 
         assertTrue(result is OtaState.Failed)
         val failed = result
-        assertTrue(failed.reason.contains("链路已断开"))
+        assertTrue(failed.reason.asChinese().contains("链路已断开"))
         assertEquals(128, failed.sentBytes)
         val point = failed.resumePoint
         assertNotNull(point)
@@ -274,8 +275,8 @@ class OtaControllerTest {
 
         assertTrue(result is OtaState.Failed)
         val failed = result
-        assertTrue(failed.reason.contains("0x0D"))
-        assertTrue(failed.reason.contains("已有会话"))
+        assertTrue(failed.reason.asChinese().contains("0x0D"))
+        assertTrue(failed.reason.asChinese().contains("已有会话"))
         assertEquals(0, failed.sentBytes)
         assertEquals(DeviceStatus.OTA_STATE_INVALID, failed.status)
     }
@@ -288,7 +289,7 @@ class OtaControllerTest {
         val result = controller.start(ByteArray(0))
 
         assertTrue(result is OtaState.Failed)
-        assertEquals("固件包为空", result.reason)
+        assertEquals("固件内容为空。请重新选择有效的固件文件。", result.reason.asChinese())
         assertTrue(link.frames.isEmpty())
     }
 

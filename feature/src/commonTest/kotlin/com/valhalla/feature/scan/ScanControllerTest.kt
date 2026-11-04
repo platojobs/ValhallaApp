@@ -3,6 +3,7 @@ package com.valhalla.feature.scan
 import com.valhalla.data.ble.BleDevice
 import com.valhalla.data.ble.BleException
 import com.valhalla.feature.FakeBleClient
+import com.valhalla.feature.i18n.asChinese
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.flow
@@ -51,7 +52,7 @@ class ScanControllerTest {
 
         val error = controller.state.value.error
         assertNotNull(error)
-        assertTrue(error.contains("蓝牙不可用"))
+        assertTrue(error.asChinese().contains("蓝牙不可用"))
         assertFalse(controller.state.value.scanning)
     }
 

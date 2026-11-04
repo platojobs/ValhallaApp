@@ -5,6 +5,46 @@ plugins {
     alias(libs.plugins.android.library)
 }
 
+// ---------------------------------------------------------------------------
+// 应用元信息：与 Android/iOS 版本号同源于 gradle.properties，生成 commonMain 常量，
+// 供 UI（关于页）与测试读取，避免界面另外维护一份版本号。
+// ---------------------------------------------------------------------------
+val generatedAppInfoDir = layout.buildDirectory.dir("generated/appInfo/commonMain/kotlin")
+
+val generateAppInfo by tasks.registering {
+    group = "version"
+    description = "从 gradle.properties 生成 AppBuildInfo 常量"
+    val versionName = providers.gradleProperty("valhalla.versionName").getOrElse("0.0.0")
+    val versionCode = providers.gradleProperty("valhalla.versionCode").getOrElse("0")
+    inputs.property("versionName", versionName)
+    inputs.property("versionCode", versionCode)
+    outputs.dir(generatedAppInfoDir)
+    doLast {
+        val file = generatedAppInfoDir.get().asFile.resolve("com/valhalla/core/AppBuildInfo.kt")
+        file.parentFile.mkdirs()
+        file.writeText(
+            """
+            // 由 :core:generateAppInfo 从 gradle.properties 生成，请勿手改。
+            package com.valhalla.core
+
+            /** 应用级元信息：版本号唯一来源是 gradle.properties。 */
+            object AppBuildInfo {
+                const val APP_NAME: String = "Valhalla"
+                const val VERSION_NAME: String = "$versionName"
+                const val VERSION_CODE: Int = $versionCode
+                const val BUILD_CHANNEL: String = "stable"
+            }
+
+            """.trimIndent(),
+        )
+    }
+}
+
+kotlin.sourceSets.getByName("commonMain").kotlin.srcDir(generateAppInfo)
+tasks.matching { it.name.startsWith("compileKotlin") }.configureEach {
+    dependsOn(generateAppInfo)
+}
+
 kotlin {
     androidTarget {
         compilerOptions {

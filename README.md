@@ -52,12 +52,44 @@ ValhallaApp
 - `scan`：扫描控制器（`StateFlow` 驱动 UI）。
 - `detail`：设备详情控制器，负责鉴权、读取信息、下发指令。
 - `ota`：OTA 分片传输状态机（准备 → 传输 → 校验 → 成功/失败）。
-- `ui`：Compose Multiplatform 页面（扫描页、设备详情页、OTA 页）。
+- `i18n`：`StringKey` / 中英文案表 / `UiMessage` / `LocaleFormat` 与 `LocalStrings`。
+- `theme`：设计令牌、亮暗主题解析与语言/主题偏好存取。
+- `ui`：Compose Multiplatform 页面（扫描、详情、OTA、日志、导出、设置、关于、帮助、隐私）。
 
 ### composeApp
 
 - Android：`MainActivity` + 蓝牙权限声明。
 - iOS：`MainViewController`（Compose 入口）+ `ValhallaApp.framework` 输出配置。
+
+## 功能一览
+
+| 模块 | 能力 |
+| --- | --- |
+| 扫描 | BLE 扫描、去重、排序、12 秒无结果提示、权限与蓝牙状态引导 |
+| 连接 | 建立链路、并发命令调度、失败原因（超时/传输/设备拒绝）、自动重连退避 |
+| 详情 | 设备信息、固件版本、电量、充电状态、设备档案与 OTA 历史 |
+| 配置 | 按设备能力展示可编辑项，隐藏不支持项并说明原因 |
+| OTA | 固件预检、分片传输、进度/速率、失败原因、断点续传与手动清除断点 |
+| 日志 | 内存报文日志（默认 500 条）、筛选、复制、JSON/CSV 导出与分享 |
+| 设置 | 语言（中文 / English / 跟随系统）、主题（跟随系统 / 浅色 / 深色） |
+| 关于/帮助/隐私 | 版本与构建信息、常见问题、本机存储清单与无上传声明 |
+
+产品视角的功能与文案约定见 [docs/product.md](docs/product.md)。
+
+## 语言、主题与隐私
+
+- **国际化**：commonMain 维护 `StringKey` + 中英文案表，逻辑层只产出 `UiMessage`
+  （key + 参数 + 可嵌套原因），UI 通过 `LocalStrings` 渲染。语言可跟随系统或手动锁定
+  中文 / English，切换后当前页面立即刷新；日期时间复用 `core` 的时间格式化，
+  数字仅英文加千位分隔。
+- **主题与设计令牌**：`DesignTokens` 统一间距、圆角与尺寸；`ThemeMode` 支持跟随系统 /
+  浅色 / 深色；成功、警告、错误、进行中四类状态色在扫描、详情、配置、OTA、日志、导出页
+  保持一致，亮暗各一套。
+- **隐私**：隐私页按当前平台列出设备档案、OTA 断点、鉴权令牌、报文日志、应用偏好与
+  蓝牙权限标记的存储位置与 key（来源 `StorageInventory`）；报文日志仅存内存；
+  当前版本未声明 `INTERNET` 权限，**没有任何网络上传**。详见 [docs/storage.md](docs/storage.md)。
+- **关于/帮助**：关于页版本来自构建期生成的 `AppBuildInfo`，与 Android/iOS 同源；
+  帮助页只描述已实现行为（权限、连接失败、OTA 失败、日志位置）。
 
 ## 报文协议（v1）
 
@@ -125,12 +157,14 @@ Xcode 构建阶段会自动调用 Gradle 链接对应架构的 Framework。权�
 唯一来源是 [gradle.properties](gradle.properties)
 
 ```properties
-valhalla.versionName=1.7.0
-valhalla.versionCode=17
+valhalla.versionName=1.8.0
+valhalla.versionCode=18
 ```
 
 - Android：`composeApp/build.gradle.kts` 通过 `providers.gradleProperty` 读取，写入
   `defaultConfig.versionName/versionCode`；
+- 关于页：`core` 的 `generateAppInfo` 在构建期生成 `AppBuildInfo`（应用名/版本/构建号/
+  渠道），与上述值同源，`VersionConsistencyTest` 断言一致；
 - iOS：`Version.xcconfig` 由 `:composeApp:syncIosVersion` 从同一组值生成，
   Xcode 工程通过 `baseConfigurationReference` 读取，`Info.plist` 使用
   `$(MARKETING_VERSION)` / `$(CURRENT_PROJECT_VERSION)`；
@@ -188,6 +222,6 @@ keyPassword=***
 ## 下一步
 
 - 接入真实设备协议字典（按产品型号生成 `CommandType` 与 payload 编解码）。
-- OTA 增加断点续传与固件签名校验。
-- 引入 Ktor/SQLDelight 做设备档案与升级记录持久化。
+- 固件签名校验与更细的 OTA 回滚策略。
+- 扩展更多语言（当前中英双语），补充 RTL 与大字体的无障碍检查。
 - 配置正式 release keystore 与分发渠道（当前 CI 仅构建 unsigned release）。

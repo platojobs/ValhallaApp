@@ -10,6 +10,8 @@ import com.valhalla.core.firmware.FirmwarePrechecker
 import com.valhalla.core.firmware.OtaCheckpointStore
 import com.valhalla.core.firmware.OtaResumePoint
 import com.valhalla.core.protocol.message.FirmwareVersion
+import com.valhalla.feature.i18n.StringKey
+import com.valhalla.feature.i18n.UiMessage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -38,8 +40,8 @@ data class FirmwareSelectionState(
     val precheck: FirmwarePrecheckResult? = null,
     val resumePoint: OtaResumePoint? = null,
     /** 存在断点但无法续传时的原因；没有断点或可续传时为 null。 */
-    val resumeBlockedReason: String? = null,
-    val error: String? = null,
+    val resumeBlockedReason: UiMessage? = null,
+    val error: UiMessage? = null,
     val errorCode: String? = null,
 ) {
     val selected: Boolean get() = packageName != null
@@ -311,8 +313,14 @@ class FirmwareSelectionController(
 
     private fun fail(error: Throwable) {
         val message = when (error) {
-            is FirmwareException -> error.message ?: "固件预检失败"
-            else -> error.message ?: "固件读取失败"
+            is FirmwareException -> UiMessage(
+                StringKey.FIRMWARE_LOAD_FAILED,
+                mapOf("detail" to (error.message ?: error.code)),
+            )
+            else -> UiMessage(
+                StringKey.FIRMWARE_FILE_READ_FAILED,
+                mapOf("detail" to (error.message ?: StringKey.UNKNOWN.name)),
+            )
         }
         val code = (error as? FirmwareException)?.code
         mutableState.update {
@@ -333,7 +341,7 @@ class FirmwareSelectionController(
 
     private data class ResumeResolution(
         val point: OtaResumePoint?,
-        val blockedReason: String?,
+        val blockedReason: UiMessage?,
     )
 
     /**
@@ -353,18 +361,18 @@ class FirmwareSelectionController(
     ): ResumeResolution {
         val stored = checkpointStore.load() ?: return ResumeResolution(null, null)
         if (!stored.isValid()) {
-            return ResumeResolution(null, "断点数据已失效，将从 0 开始")
+            return ResumeResolution(null, UiMessage(StringKey.RESUME_INVALID))
         }
         if (!stored.matchesFirmware(firmware)) {
-            return ResumeResolution(null, "断点固件标识不匹配（版本/总长/CRC32），已禁用续传")
+            return ResumeResolution(null, UiMessage(StringKey.RESUME_MISMATCH))
         }
         if (precheck?.passed != true) {
-            return ResumeResolution(null, "预检未通过，暂不可续传")
+            return ResumeResolution(null, UiMessage(StringKey.RESUME_PRECHECK_BLOCKED))
         }
         val crc16 = precheck.payloadCrc16
-            ?: return ResumeResolution(null, "固件 CRC16 未能计算，已禁用续传")
+            ?: return ResumeResolution(null, UiMessage(StringKey.RESUME_CRC16_MISSING))
         if (stored.crc16 != crc16) {
-            return ResumeResolution(null, "固件内容 CRC16 与断点不一致，已禁用续传")
+            return ResumeResolution(null, UiMessage(StringKey.RESUME_CRC16_MISMATCH))
         }
         return ResumeResolution(stored, null)
     }

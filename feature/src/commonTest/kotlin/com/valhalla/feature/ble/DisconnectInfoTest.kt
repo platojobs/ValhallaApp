@@ -2,6 +2,8 @@ package com.valhalla.feature.ble
 
 import com.valhalla.data.ble.BleAdapterState
 import kotlin.test.Test
+import com.valhalla.feature.i18n.StringKey
+import com.valhalla.feature.i18n.UiMessage
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -57,7 +59,7 @@ class DisconnectInfoTest {
 
         assertEquals(DisconnectReason.TIMEOUT, info.reason)
         assertEquals(DisconnectAction.RECONNECT, info.action)
-        assertEquals("重新连接", info.actionLabel)
+        assertEquals(UiMessage(StringKey.RECONNECT_NOW), info.actionLabel)
         assertTrue(info.autoReconnectAllowed)
     }
 
@@ -67,7 +69,7 @@ class DisconnectInfoTest {
 
         assertEquals(DisconnectReason.DEVICE_SIDE, info.reason)
         assertEquals(DisconnectAction.RECONNECT, info.action)
-        assertTrue(info.message.contains("设备侧"))
+        assertEquals(StringKey.DISCONNECT_DEVICE_MESSAGE, info.message.key)
     }
 
     @Test
@@ -93,7 +95,7 @@ class DisconnectInfoTest {
         )
 
         assertEquals(DisconnectReason.BLUETOOTH_OFF, info.reason)
-        assertTrue(info.title.contains("重置"))
+        assertEquals(StringKey.DISCONNECT_RESETTING_TITLE, info.title.key)
         assertTrue(info.autoReconnectAllowed)
     }
 }

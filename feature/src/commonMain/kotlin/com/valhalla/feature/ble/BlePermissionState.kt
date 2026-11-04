@@ -1,6 +1,8 @@
 package com.valhalla.feature.ble
 
 import com.valhalla.data.ble.BleAdapterState
+import com.valhalla.feature.i18n.StringKey
+import com.valhalla.feature.i18n.UiMessage
 
 /**
  * 蓝牙权限的四种稳定状态。
@@ -33,17 +35,17 @@ enum class BleGuidanceAction {
 
 /** 一段可直接展示给用户的引导文案。 */
 data class BleGuidance(
-    val title: String,
-    val message: String,
+    val title: UiMessage,
+    val message: UiMessage,
     val action: BleGuidanceAction = BleGuidanceAction.NONE,
 ) {
-    val actionLabel: String?
+    val actionLabel: UiMessage?
         get() = when (action) {
             BleGuidanceAction.NONE -> null
-            BleGuidanceAction.REQUEST_PERMISSION -> "授予权限"
-            BleGuidanceAction.OPEN_SETTINGS -> "去系统设置"
-            BleGuidanceAction.ENABLE_BLUETOOTH -> "开启蓝牙"
-            BleGuidanceAction.RETRY -> "重试"
+            BleGuidanceAction.REQUEST_PERMISSION -> UiMessage(StringKey.ACTION_GRANT_PERMISSION)
+            BleGuidanceAction.OPEN_SETTINGS -> UiMessage(StringKey.ACTION_OPEN_SETTINGS)
+            BleGuidanceAction.ENABLE_BLUETOOTH -> UiMessage(StringKey.ACTION_ENABLE_BLUETOOTH)
+            BleGuidanceAction.RETRY -> UiMessage(StringKey.RETRY)
         }
 }
 
@@ -161,43 +163,43 @@ fun BleAvailability.guidance(): BleGuidance? = when (this) {
     BleAvailability.READY -> null
 
     BleAvailability.PERMISSION_NOT_REQUESTED -> BleGuidance(
-        title = "需要蓝牙权限",
-        message = "扫描并连接设备需要蓝牙权限。Android 12 及以上使用「附近的设备」权限，旧版本使用定位权限。",
+        title = UiMessage(StringKey.GUIDANCE_NEED_PERMISSION_TITLE),
+        message = UiMessage(StringKey.GUIDANCE_NEED_PERMISSION_MESSAGE),
         action = BleGuidanceAction.REQUEST_PERMISSION,
     )
 
     BleAvailability.PERMISSION_DENIED -> BleGuidance(
-        title = "蓝牙权限被拒绝",
-        message = "没有蓝牙权限无法扫描设备。可再次授权；若系统不再弹窗，请前往系统设置手动开启。",
+        title = UiMessage(StringKey.GUIDANCE_PERMISSION_DENIED_TITLE),
+        message = UiMessage(StringKey.GUIDANCE_PERMISSION_DENIED_MESSAGE),
         action = BleGuidanceAction.REQUEST_PERMISSION,
     )
 
     BleAvailability.PERMISSION_PERMANENTLY_DENIED -> BleGuidance(
-        title = "蓝牙权限已被永久拒绝",
-        message = "系统不会再弹出授权窗口。请前往「设置 → 应用 → Valhalla → 权限」开启蓝牙/附近设备权限。",
+        title = UiMessage(StringKey.GUIDANCE_PERMISSION_PERMANENT_TITLE),
+        message = UiMessage(StringKey.GUIDANCE_PERMISSION_PERMANENT_MESSAGE),
         action = BleGuidanceAction.OPEN_SETTINGS,
     )
 
     BleAvailability.BLUETOOTH_OFF -> BleGuidance(
-        title = "蓝牙已关闭",
-        message = "请开启蓝牙后重试；开启后扫描与连接会自动恢复。",
+        title = UiMessage(StringKey.GUIDANCE_BLUETOOTH_OFF_TITLE),
+        message = UiMessage(StringKey.GUIDANCE_BLUETOOTH_OFF_MESSAGE),
         action = BleGuidanceAction.ENABLE_BLUETOOTH,
     )
 
     BleAvailability.BLUETOOTH_RESETTING -> BleGuidance(
-        title = "蓝牙正在重置",
-        message = "系统正在重启蓝牙服务，请稍候再试。",
+        title = UiMessage(StringKey.GUIDANCE_BLUETOOTH_RESETTING_TITLE),
+        message = UiMessage(StringKey.GUIDANCE_BLUETOOTH_RESETTING_MESSAGE),
         action = BleGuidanceAction.RETRY,
     )
 
     BleAvailability.UNSUPPORTED -> BleGuidance(
-        title = "设备不支持蓝牙低功耗",
-        message = "当前设备没有可用的 BLE 适配器，无法扫描或连接 Valhalla 硬件。",
+        title = UiMessage(StringKey.GUIDANCE_UNSUPPORTED_TITLE),
+        message = UiMessage(StringKey.GUIDANCE_UNSUPPORTED_MESSAGE),
     )
 
     BleAvailability.UNKNOWN -> BleGuidance(
-        title = "蓝牙状态未知",
-        message = "暂时无法获取蓝牙状态，请稍后重试。",
+        title = UiMessage(StringKey.GUIDANCE_UNKNOWN_TITLE),
+        message = UiMessage(StringKey.GUIDANCE_UNKNOWN_MESSAGE),
         action = BleGuidanceAction.RETRY,
     )
 }

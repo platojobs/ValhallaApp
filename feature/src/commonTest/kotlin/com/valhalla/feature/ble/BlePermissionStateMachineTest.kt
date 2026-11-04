@@ -2,6 +2,9 @@ package com.valhalla.feature.ble
 
 import com.valhalla.data.ble.BleAdapterState
 import kotlin.test.Test
+import com.valhalla.feature.i18n.AppStrings
+import com.valhalla.feature.i18n.StringKey
+import com.valhalla.feature.i18n.UiMessage
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
@@ -150,8 +153,8 @@ class BlePermissionStateMachineTest {
     fun `每种不可用状态都有可读引导与动作`() {
         BleAvailability.entries.filter { it != BleAvailability.READY }.forEach { availability ->
             val guidance = assertNotNull(availability.guidance(), "缺少引导：$availability")
-            assertTrue(guidance.title.isNotBlank())
-            assertTrue(guidance.message.isNotBlank())
+            assertNotNull(AppStrings.entry(guidance.title.key))
+            assertNotNull(AppStrings.entry(guidance.message.key))
         }
 
         assertNull(BleAvailability.READY.guidance())
@@ -173,7 +176,7 @@ class BlePermissionStateMachineTest {
             BleAvailability.BLUETOOTH_OFF.guidance()?.action,
         )
         assertEquals(
-            "去系统设置",
+            UiMessage(StringKey.ACTION_OPEN_SETTINGS),
             BleAvailability.PERMISSION_PERMANENTLY_DENIED.guidance()?.actionLabel,
         )
     }

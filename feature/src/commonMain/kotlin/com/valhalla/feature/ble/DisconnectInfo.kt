@@ -1,6 +1,8 @@
 package com.valhalla.feature.ble
 
 import com.valhalla.data.ble.BleAdapterState
+import com.valhalla.feature.i18n.StringKey
+import com.valhalla.feature.i18n.UiMessage
 
 /** 链路断开的原因分类。 */
 enum class DisconnectReason {
@@ -38,19 +40,19 @@ enum class DisconnectAction {
 /** 面向 UI 的断连说明。 */
 data class DisconnectInfo(
     val reason: DisconnectReason,
-    val title: String,
-    val message: String,
+    val title: UiMessage,
+    val message: UiMessage,
     val action: DisconnectAction = DisconnectAction.NONE,
     /** 是否允许自动重连（权限/主动断开等场景为 false）。 */
     val autoReconnectAllowed: Boolean = false,
 ) {
-    val actionLabel: String?
+    val actionLabel: UiMessage?
         get() = when (action) {
             DisconnectAction.NONE -> null
-            DisconnectAction.RECONNECT -> "重新连接"
-            DisconnectAction.OPEN_SETTINGS -> "去系统设置"
-            DisconnectAction.ENABLE_BLUETOOTH -> "开启蓝牙"
-            DisconnectAction.RESCAN -> "返回扫描"
+            DisconnectAction.RECONNECT -> UiMessage(StringKey.RECONNECT_NOW)
+            DisconnectAction.OPEN_SETTINGS -> UiMessage(StringKey.ACTION_OPEN_SETTINGS)
+            DisconnectAction.ENABLE_BLUETOOTH -> UiMessage(StringKey.ACTION_ENABLE_BLUETOOTH)
+            DisconnectAction.RESCAN -> UiMessage(StringKey.ACTION_RESCAN)
         }
 }
 
@@ -76,8 +78,8 @@ data class DisconnectSignals(
 fun classifyDisconnect(signals: DisconnectSignals): DisconnectInfo = when {
     signals.userRequested -> DisconnectInfo(
         reason = DisconnectReason.USER_REQUESTED,
-        title = "已断开连接",
-        message = "你主动断开了与设备的连接。",
+        title = UiMessage(StringKey.DISCONNECT_USER_TITLE),
+        message = UiMessage(StringKey.DISCONNECT_USER_MESSAGE),
         action = DisconnectAction.RESCAN,
         autoReconnectAllowed = false,
     )
@@ -86,56 +88,56 @@ fun classifyDisconnect(signals: DisconnectSignals): DisconnectInfo = when {
         signals.permissionState == BlePermissionState.DENIED ||
         signals.adapterState == BleAdapterState.UNAUTHORIZED -> DisconnectInfo(
         reason = DisconnectReason.PERMISSION_LOST,
-        title = "蓝牙权限丢失",
-        message = "系统收回了蓝牙权限，无法继续与设备通信。请重新授权后连接。",
+        title = UiMessage(StringKey.DISCONNECT_PERMISSION_TITLE),
+        message = UiMessage(StringKey.DISCONNECT_PERMISSION_MESSAGE),
         action = DisconnectAction.OPEN_SETTINGS,
         autoReconnectAllowed = false,
     )
 
     signals.adapterState == BleAdapterState.POWERED_OFF -> DisconnectInfo(
         reason = DisconnectReason.BLUETOOTH_OFF,
-        title = "蓝牙已关闭",
-        message = "蓝牙关闭导致链路中断，开启蓝牙后将自动尝试重连。",
+        title = UiMessage(StringKey.DISCONNECT_BLUETOOTH_OFF_TITLE),
+        message = UiMessage(StringKey.DISCONNECT_BLUETOOTH_OFF_MESSAGE),
         action = DisconnectAction.ENABLE_BLUETOOTH,
         autoReconnectAllowed = true,
     )
 
     signals.adapterState == BleAdapterState.RESETTING -> DisconnectInfo(
         reason = DisconnectReason.BLUETOOTH_OFF,
-        title = "蓝牙正在重置",
-        message = "系统正在重启蓝牙服务，链路暂时不可用，稍后会自动重连。",
+        title = UiMessage(StringKey.DISCONNECT_RESETTING_TITLE),
+        message = UiMessage(StringKey.DISCONNECT_RESETTING_MESSAGE),
         action = DisconnectAction.RECONNECT,
         autoReconnectAllowed = true,
     )
 
     signals.timeout -> DisconnectInfo(
         reason = DisconnectReason.TIMEOUT,
-        title = "连接超时",
-        message = "在限定时间内未能完成连接。请确认设备已上电并靠近手机后重试。",
+        title = UiMessage(StringKey.DISCONNECT_TIMEOUT_TITLE),
+        message = UiMessage(StringKey.DISCONNECT_TIMEOUT_MESSAGE),
         action = DisconnectAction.RECONNECT,
         autoReconnectAllowed = true,
     )
 
     signals.peerTerminated -> DisconnectInfo(
         reason = DisconnectReason.DEVICE_SIDE,
-        title = "设备已断开连接",
-        message = "设备侧断开了链路，可能已关机、超出范围或正在重启。",
+        title = UiMessage(StringKey.DISCONNECT_DEVICE_TITLE),
+        message = UiMessage(StringKey.DISCONNECT_DEVICE_MESSAGE),
         action = DisconnectAction.RECONNECT,
         autoReconnectAllowed = true,
     )
 
     signals.transportError -> DisconnectInfo(
         reason = DisconnectReason.CONNECT_FAILED,
-        title = "连接失败",
-        message = "与设备建立链路失败，请靠近设备后重试。",
+        title = UiMessage(StringKey.DISCONNECT_CONNECT_FAILED_TITLE),
+        message = UiMessage(StringKey.DISCONNECT_CONNECT_FAILED_MESSAGE),
         action = DisconnectAction.RECONNECT,
         autoReconnectAllowed = true,
     )
 
     else -> DisconnectInfo(
         reason = DisconnectReason.UNKNOWN,
-        title = "连接已断开",
-        message = "未知原因导致链路中断，可尝试重新连接。",
+        title = UiMessage(StringKey.DISCONNECT_UNKNOWN_TITLE),
+        message = UiMessage(StringKey.DISCONNECT_UNKNOWN_MESSAGE),
         action = DisconnectAction.RECONNECT,
         autoReconnectAllowed = true,
     )

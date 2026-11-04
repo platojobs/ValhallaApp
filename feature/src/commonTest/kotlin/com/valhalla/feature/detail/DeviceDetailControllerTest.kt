@@ -27,6 +27,8 @@ import com.valhalla.core.security.InMemoryTokenStore
 import com.valhalla.core.state.DeviceState
 import com.valhalla.data.ble.BleException
 import com.valhalla.feature.FakeFrameLink
+import com.valhalla.feature.i18n.StringKey
+import com.valhalla.feature.i18n.asChinese
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -103,9 +105,9 @@ class DeviceDetailControllerTest {
         assertEquals(DeviceState.FAULT, controller.state.value.deviceState)
         val error = controller.state.value.error
         assertNotNull(error)
-        assertTrue(error.contains("鉴权失败"))
-        assertTrue(error.contains("0x05"))
-        assertTrue(error.contains("令牌已过期"))
+        assertTrue(error.asChinese().contains("鉴权失败"))
+        assertTrue(error.asChinese().contains("0x05"))
+        assertTrue(error.asChinese().contains("令牌已过期"))
         assertEquals(DeviceStatus.AUTH_FAILED, controller.state.value.errorCode)
         assertTrue(controller.state.value.logs.any { it.contains("鉴权失败") && it.contains("0x05") })
     }
@@ -120,7 +122,7 @@ class DeviceDetailControllerTest {
 
         assertFalse(success)
         assertEquals(DeviceState.FAULT, controller.state.value.deviceState)
-        assertTrue(controller.state.value.error!!.contains("写入超时"))
+        assertTrue(controller.state.value.error!!.asChinese().contains("写入超时"))
         assertTrue(controller.state.value.logs.any { it.contains("鉴权失败") && it.contains("写入超时") })
         // 调度器按重试策略共尝试 3 次
         assertEquals(3, link.frames.size)
@@ -195,7 +197,8 @@ class DeviceDetailControllerTest {
 
         controller.refreshInfo()
 
-        assertEquals("设备信息读取失败", controller.state.value.error)
+        assertEquals(StringKey.INFO_REFRESH_FAILED, controller.state.value.error?.key)
+        assertTrue(controller.state.value.error!!.asChinese().contains("设备信息读取失败"))
         assertNull(controller.state.value.firmwareVersion)
         assertEquals(DeviceStatus.INTERNAL_ERROR, controller.state.value.errorCode)
     }
@@ -326,7 +329,7 @@ class DeviceDetailControllerTest {
 
         assertFalse(success)
         assertEquals(DeviceState.FAULT, controller.state.value.deviceState)
-        assertTrue(controller.state.value.error!!.contains("鉴权失败"))
+        assertTrue(controller.state.value.error!!.asChinese().contains("鉴权失败"))
     }
 
     @Test

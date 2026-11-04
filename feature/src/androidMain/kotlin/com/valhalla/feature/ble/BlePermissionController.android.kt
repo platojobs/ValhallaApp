@@ -20,6 +20,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.valhalla.data.ble.BleClient
+import com.valhalla.data.settings.StorageKeys
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -52,7 +53,9 @@ actual fun rememberBlePermissionController(bleClient: BleClient): BlePermissionC
     }
 
     val machine = remember(activity) { BlePermissionStateMachine() }
-    val prefs = remember(activity) { activity.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE) }
+    val prefs = remember(activity) {
+        activity.getSharedPreferences(StorageKeys.ANDROID_BLE_PERMISSION_PREFS, Context.MODE_PRIVATE)
+    }
     val mutableState = remember(activity) {
         MutableStateFlow(
             activity.readPermissionState(machine, prefs),
@@ -62,7 +65,7 @@ actual fun rememberBlePermissionController(bleClient: BleClient): BlePermissionC
     val launcher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
     ) {
-        prefs.edit().putBoolean(KEY_REQUESTED, true).apply()
+        prefs.edit().putBoolean(StorageKeys.ANDROID_BLE_PERMISSION_KEY, true).apply()
         val granted = requiredBlePermissions.all {
             activity.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED
         }
@@ -93,7 +96,7 @@ actual fun rememberBlePermissionController(bleClient: BleClient): BlePermissionC
                     mutableState.value = machine.onRequestResult(granted = true, canAskAgain = false)
                     return
                 }
-                prefs.edit().putBoolean(KEY_REQUESTED, true).apply()
+                prefs.edit().putBoolean(StorageKeys.ANDROID_BLE_PERMISSION_KEY, true).apply()
                 launcher.launch(missing.toTypedArray())
             }
 
@@ -141,7 +144,7 @@ private fun ComponentActivity.readPermissionState(
     val granted = requiredBlePermissions.all {
         checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED
     }
-    val hasRequestedBefore = prefs.getBoolean(KEY_REQUESTED, false)
+    val hasRequestedBefore = prefs.getBoolean(StorageKeys.ANDROID_BLE_PERMISSION_KEY, false)
     val canAskAgain = requiredBlePermissions.any { shouldShowRequestPermissionRationale(it) }
     return machine.syncFromSystem(granted, canAskAgain, hasRequestedBefore)
 }
@@ -155,5 +158,3 @@ private fun Context.findActivity(): ComponentActivity? {
     return null
 }
 
-private const val PREFS_NAME = "valhalla_ble_permission"
-private const val KEY_REQUESTED = "requested"

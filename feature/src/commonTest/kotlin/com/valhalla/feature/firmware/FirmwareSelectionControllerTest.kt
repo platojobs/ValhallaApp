@@ -8,6 +8,7 @@ import com.valhalla.core.firmware.InMemoryOtaCheckpointStore
 import com.valhalla.core.firmware.OtaResumePoint
 import com.valhalla.core.protocol.Crc16
 import com.valhalla.core.protocol.message.FirmwareVersion
+import com.valhalla.feature.i18n.asChinese
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -108,7 +109,7 @@ class FirmwareSelectionControllerTest {
         assertFalse(passed)
         assertNull(state.precheck)
         assertEquals("firmware.magic", state.errorCode)
-        assertTrue(state.error!!.contains("魔数"))
+        assertTrue(state.error!!.asChinese().contains("魔数"))
         assertNull(controller.firmware)
     }
 
@@ -150,7 +151,7 @@ class FirmwareSelectionControllerTest {
         assertFalse(controller.state.value.canResume)
         assertNull(controller.state.value.resumePoint)
         assertNotNull(controller.state.value.resumeBlockedReason)
-        assertTrue(controller.state.value.resumeBlockedReason!!.contains("版本/总长/CRC32"))
+        assertTrue(controller.state.value.resumeBlockedReason!!.asChinese().contains("版本/总长/CRC32"))
         assertNotNull(store.load())
     }
 
@@ -169,7 +170,7 @@ class FirmwareSelectionControllerTest {
         assertFalse(state.canResume)
         assertNull(state.resumePoint)
         assertNotNull(state.resumeBlockedReason)
-        assertTrue(state.resumeBlockedReason!!.contains("CRC16"))
+        assertTrue(state.resumeBlockedReason!!.asChinese().contains("CRC16"))
         assertNotNull(store.load())
     }
 
@@ -190,7 +191,7 @@ class FirmwareSelectionControllerTest {
         assertFalse(state.canResume)
         assertNull(state.resumePoint)
         assertNotNull(state.resumeBlockedReason)
-        assertTrue(state.resumeBlockedReason!!.contains("预检未通过"))
+        assertTrue(state.resumeBlockedReason!!.asChinese().contains("预检未通过"))
     }
 
     @Test

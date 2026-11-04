@@ -8,6 +8,7 @@ package com.valhalla.data.security
 import com.valhalla.core.security.AuthToken
 import com.valhalla.core.security.AuthTokenCodec
 import com.valhalla.core.security.TokenStore
+import com.valhalla.data.settings.StorageKeys
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.alloc
 import kotlinx.cinterop.allocArrayOf
@@ -112,19 +113,14 @@ private class KeychainTokenStore : TokenStore {
         val dictionary = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, null, null)
             ?: error("无法创建 Keychain 查询字典")
         val retained = mutableListOf<CFTypeRef?>()
-        val service = CFBridgingRetain(SERVICE)
-        val account = CFBridgingRetain(ACCOUNT)
+        val service = CFBridgingRetain(StorageKeys.IOS_KEYCHAIN_SERVICE)
+        val account = CFBridgingRetain(StorageKeys.IOS_KEYCHAIN_ACCOUNT)
         retained += service
         retained += account
         CFDictionaryAddValue(dictionary, kSecClass, kSecClassGenericPassword)
         CFDictionaryAddValue(dictionary, kSecAttrService, service)
         CFDictionaryAddValue(dictionary, kSecAttrAccount, account)
         return KeychainQuery(dictionary, retained)
-    }
-
-    private companion object {
-        const val SERVICE = "com.valhalla.auth.token"
-        const val ACCOUNT = "session"
     }
 }
 

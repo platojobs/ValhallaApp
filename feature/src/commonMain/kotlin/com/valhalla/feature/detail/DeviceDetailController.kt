@@ -28,6 +28,8 @@ import com.valhalla.core.security.AuthSignatureMessage
 import com.valhalla.core.security.AuthSigner
 import com.valhalla.core.security.AuthToken
 import com.valhalla.core.security.TokenStore
+import com.valhalla.feature.i18n.StringKey
+import com.valhalla.feature.i18n.UiMessage
 import com.valhalla.feature.toFailureInfo
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
@@ -50,7 +52,7 @@ data class DeviceDetailState(
     val deviceInfo: DeviceInfoResponse? = null,
     val configuration: Map<String, ByteArray> = emptyMap(),
     val logs: List<String> = emptyList(),
-    val error: String? = null,
+    val error: UiMessage? = null,
     val errorCode: DeviceStatus? = null,
 )
 
@@ -132,7 +134,7 @@ class DeviceDetailController(
             transition(DeviceEvent.AuthFailed(info.message))
             log(LogLevel.ERROR, "鉴权失败：${info.message}")
             mutableState.value = mutableState.value.copy(
-                error = "鉴权失败：${info.message}",
+                error = UiMessage(StringKey.AUTH_FAILED, nested = mapOf("detail" to info.ui)),
                 errorCode = info.status,
             )
             false
@@ -165,7 +167,10 @@ class DeviceDetailController(
             val info = error.toFailureInfo()
             log(LogLevel.ERROR, "请求挑战失败：${info.message}")
             mutableState.value = mutableState.value.copy(
-                error = "请求挑战失败：${info.message}",
+                error = UiMessage(
+                    StringKey.AUTH_CHALLENGE_FAILED,
+                    nested = mapOf("detail" to info.ui),
+                ),
                 errorCode = info.status,
             )
             null
@@ -228,7 +233,7 @@ class DeviceDetailController(
             transition(DeviceEvent.AuthFailed(info.message))
             log(LogLevel.ERROR, "签名鉴权失败：${info.message}")
             mutableState.value = mutableState.value.copy(
-                error = "鉴权失败：${info.message}",
+                error = UiMessage(StringKey.AUTH_FAILED, nested = mapOf("detail" to info.ui)),
                 errorCode = info.status,
             )
             false
@@ -294,7 +299,13 @@ class DeviceDetailController(
             charging = battery?.charging ?: mutableState.value.charging,
             voltageMillivolts = battery?.voltageMillivolts ?: mutableState.value.voltageMillivolts,
             error = if (info == null && firmware == null && battery == null) {
-                "设备信息读取失败"
+                UiMessage(
+                    StringKey.INFO_REFRESH_FAILED,
+                    nested = mapOf(
+                        "detail" to (failures.firstOrNull()?.toFailureInfo()?.ui
+                            ?: UiMessage.of(StringKey.FAILURE_UNKNOWN, "detail" to StringKey.UNKNOWN.name)),
+                    ),
+                )
             } else {
                 null
             },
@@ -340,7 +351,10 @@ class DeviceDetailController(
             val info = error.toFailureInfo()
             log(LogLevel.WARN, "读取配置 $key 失败：${info.message}")
             mutableState.value = mutableState.value.copy(
-                error = "读取配置失败：${info.message}",
+                error = UiMessage(
+                    StringKey.DEVICE_CONFIG_READ_FAILED,
+                    nested = mapOf("detail" to info.ui),
+                ),
                 errorCode = info.status,
             )
             null
@@ -366,7 +380,10 @@ class DeviceDetailController(
             val info = error.toFailureInfo()
             log(LogLevel.WARN, "写入配置 $key 失败：${info.message}")
             mutableState.value = mutableState.value.copy(
-                error = "写入配置失败：${info.message}",
+                error = UiMessage(
+                    StringKey.DEVICE_CONFIG_WRITE_FAILED,
+                    nested = mapOf("detail" to info.ui),
+                ),
                 errorCode = info.status,
             )
             false

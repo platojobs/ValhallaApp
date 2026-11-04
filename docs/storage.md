@@ -112,3 +112,20 @@ P|...
 - Android `SharedPreferences` 在真机上的实际落盘、进程重启后读取；
 - iOS `NSUserDefaults` 在真机/模拟器上的持久化与 App 删除后的清理；
 - 多进程并发写入（当前约定单进程使用）。
+
+## 7. 隐私清单单一来源（v1.8.0）
+
+隐私页展示的存储位置、键名与「是否持久化」不再手写，而是来自
+`data/src/commonMain/kotlin/com/valhalla/data/settings/StorageInventory.kt`：
+
+- `StorageItem` 枚举覆盖设备档案、OTA 断点、鉴权令牌、报文日志、应用偏好、蓝牙权限标记；
+- `StorageKeys` 是 Android/iOS 平台 actual 代码与隐私页共用的常量，避免文案与真实 key 漂移；
+- `StorageInventory.forPlatform(platform)` 返回该平台全部条目，`StorageLocation.persistent`
+  与实现一致（JVM 宿主全部为内存实现，报文日志在所有平台均不落盘）；
+- 应用偏好通过 `AppSettingsStore` 持久化（`SettingsKeys.LANGUAGE` / `SettingsKeys.THEME`），
+  Android 为 `SharedPreferences(valhalla_settings)`，iOS 为 `NSUserDefaults` 加
+  `valhalla.settings.` 前缀，JVM 为内存实现。
+
+`StorageInventoryTest` 断言每个平台覆盖全部类别、键非空且不重复、令牌条目引用真实的
+Keystore/Keychain 常量；`PrivacyDisclosureTest` 断言隐私页条目与清单一致、声明「没有网络上传」。
+

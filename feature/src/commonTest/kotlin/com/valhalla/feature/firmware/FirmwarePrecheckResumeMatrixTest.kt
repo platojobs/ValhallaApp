@@ -10,6 +10,7 @@ import com.valhalla.core.firmware.HmacSha256TestVerifier
 import com.valhalla.core.firmware.OtaResumePoint
 import com.valhalla.core.protocol.Crc16
 import com.valhalla.core.protocol.message.FirmwareVersion
+import com.valhalla.feature.i18n.asChinese
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -285,7 +286,7 @@ class FirmwarePrecheckResumeMatrixTest {
                 state.canResume,
                 "case=${case.name} canResume 不符",
             )
-            val reason = state.resumeBlockedReason
+            val reason = state.resumeBlockedReason?.asChinese()
             if (case.expectReasonContains != null) {
                 assertTrue(
                     reason?.contains(case.expectReasonContains) == true,

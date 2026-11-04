@@ -389,3 +389,57 @@ AutoReconnectController (执行器)
 
 权限与蓝牙不可用优先于「无设备」，不会把「没有权限」误报成「暂未发现设备」。
 
+## 8. 国际化、主题与产品信息页（v1.8.0）
+
+### 8.1 文案资源与切换机制
+
+```
+StringKey（枚举，唯一 key 集合）
+        │
+AppStrings（Map<StringKey, StringsEntry(zh, en)>）
+        │ StringResolver(language).t / render(UiMessage)
+        ▼
+CompositionLocalProvider(LocalStrings) → 全部 Composable 页面
+```
+
+- 选择 commonMain 纯 Kotlin 文案表而不是 Compose Resources：语言切换后无需重建
+  Activity/页面，`LocalStrings` 变化会让所有读取文案的 Composable 立即重组；
+  key 完整性与占位符一致性可以在 `commonTest` 直接断言。
+- 语言偏好 `AppLanguageMode(SYSTEM / CHINESE / ENGLISH)` 存于 `AppSettingsStore`
+  （Android SharedPreferences、iOS NSUserDefaults、JVM 内存）。`resolveLanguage`
+  是纯函数：`zh*` 映射中文，其余回退英文；`SYSTEM` 读取 `Locale.current.language`。
+- 逻辑层不拼文案：`UiMessage(key, args, nested)` 由控制器产出，UI 用
+  `StringResolver.render()` 渲染；`nested` 用于「失败原因本身也需要本地化」的嵌套文案。
+- 日期时间与数字统一走 `LocaleFormat`：时间复用 `core` 的 `formatAbsoluteTime` /
+  `formatRelativeTime`（后者新增可本地化的「刚刚 / 前 / 未来」标签）；数字仅英文加千位
+  分隔，中文保留原始数字。
+
+### 8.2 设计令牌与主题
+
+- `DesignTokens`：`Spacing(xxs..xxl)`、`Radius(sm/md/lg)`、`Sizes` 与
+  `StatusColors(success/warning/error/inProgress)`，页面不再散落 `.dp` 魔法数字。
+- `ThemeMode(SYSTEM / LIGHT / DARK)` + `resolveDarkTheme(mode, systemDark)` 纯函数；
+  `ValhallaTheme` 根据解析结果套用 `lightScheme` / `darkScheme`，亮暗各一套状态色。
+- 状态色只从 `statusColors()` 获取，扫描/详情/配置/OTA/日志/导出页统一：成功 → success、
+  警告（扫描超时）→ warning、失败 → error、进行中 → inProgress。
+
+### 8.3 关于、帮助与隐私页
+
+- 关于页版本来自 `core` 构建期生成的 `AppBuildInfo`（`generateAppInfo` 读取
+  `gradle.properties`），与 Android/iOS 版本号同源。
+- 帮助页只描述已实现行为：权限申请路径、自动重连退避与次数、OTA 续传/断点、日志仅在
+  内存并支持保存/分享。
+- 隐私页数据全部来自 `data/settings/StorageInventory`：按当前平台列出存储项、位置、
+  key 与实际持久化属性；`StorageKeys` 同时被各平台 actual 引用，文案不会与实现漂移。
+  当前版本无网络上传能力（Android manifest 未声明 `INTERNET`），页面如实声明。
+
+### 8.4 测试边界
+
+`StringsCompletenessTest`（key 集合、空值、占位符、英文无中文、错误文案含建议）、
+`NoHardcodedChineseTest`（扫描 `ui`/`theme`/`composeApp`，忽略注释与 i18n 目录）、
+`AppPreferencesTest`（主题解析与偏好读写/回退）、`PrivacyDisclosureTest`（存储项覆盖与
+无上传声明）、`StorageInventoryTest`（平台覆盖、键唯一、令牌加密键一致）、
+`VersionConsistencyTest`（`AppBuildInfo` 与 `gradle.properties` 一致）均在 JVM 宿主运行。
+系统语言切换、系统深浅色、真机字体与排版只能人工验收，自动化测试不覆盖渲染效果。
+
+

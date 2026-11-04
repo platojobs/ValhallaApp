@@ -23,6 +23,8 @@ import com.valhalla.core.protocol.message.OtaDataResponse
 import com.valhalla.core.protocol.message.StartOtaRequest
 import com.valhalla.core.protocol.message.StartOtaResponse
 import com.valhalla.feature.FakeFrameLink
+import com.valhalla.feature.i18n.UiMessage
+import com.valhalla.feature.i18n.asChinese
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -241,7 +243,7 @@ class OtaControllerPackageTest {
         val transferring = observed as? OtaState.Transferring
         assertNotNull(transferring)
         assertNotNull(transferring.resumeFallbackReason)
-        assertTrue(transferring.resumeFallbackReason!!.contains("回退"))
+        assertTrue(transferring.resumeFallbackReason!!.asChinese().contains("回退"))
         assertEquals(0, transferring.initialOffset)
     }
 
@@ -265,7 +267,7 @@ class OtaControllerPackageTest {
 
         assertTrue(result is OtaState.Failed)
         val failed = result
-        assertTrue(failed.reason.contains("大于请求偏移"))
+        assertTrue(failed.reason.asChinese().contains("大于请求偏移"))
         assertTrue(link.requests.filterIsInstance<OtaDataRequest>().isEmpty())
         // 新会话已建立但未传输：旧断点必须清除。
         assertNull(store.load())
@@ -290,7 +292,7 @@ class OtaControllerPackageTest {
         val result = controller.startPackage(firmware, resumeFrom = point)
 
         assertTrue(result is OtaState.Failed)
-        assertTrue(result.reason.contains("超出范围"))
+        assertTrue(result.reason.asChinese().contains("超出范围"))
     }
 
     @Test
@@ -304,7 +306,7 @@ class OtaControllerPackageTest {
         val result = controller.startPackage(buildPackage(payload))
 
         assertTrue(result is OtaState.Failed)
-        assertTrue(result.reason.contains("未请求续传"))
+        assertTrue(result.reason.asChinese().contains("未请求续传"))
     }
 
     @Test
@@ -491,7 +493,7 @@ class OtaControllerPackageTest {
         store.save(stalePoint)
 
         lateinit var controller: OtaController
-        var reasonAtFirstChunk: String? = null
+        var reasonAtFirstChunk: UiMessage? = null
         val link = FakeFrameLink { request ->
             when (request) {
                 is StartOtaRequest -> StartOtaResponse(DeviceStatus.OK, 42, 64)
@@ -518,7 +520,7 @@ class OtaControllerPackageTest {
         assertTrue(result is OtaState.Succeeded)
         assertEquals(0L, link.requests.filterIsInstance<OtaDataRequest>().first().offset)
         assertTrue(
-            reasonAtFirstChunk?.contains("本地断点") == true,
+            reasonAtFirstChunk?.asChinese()?.contains("不匹配") == true,
             "本地门控拒绝续传时应给出可操作原因，实际 $reasonAtFirstChunk",
         )
     }
@@ -549,7 +551,10 @@ class OtaControllerPackageTest {
             "复用预检 CRC16 时不应在 START_OTA 前重扫 payload",
         )
         assertTrue(result is OtaState.Failed)
-        assertTrue(result.reason.contains("读取固件失败"), "读取失败应给出可操作提示: ${result.reason}")
+        assertTrue(
+            result.reason.asChinese().contains("读取固件失败"),
+            "读取失败应给出可操作提示: ${result.reason.asChinese()}",
+        )
 
         // 反证：不传 CRC16 时会先重扫 payload，因此 START_OTA 根本发不出去。
         val withoutReuse = FakeFrameLink(responder(sessionId = 42))

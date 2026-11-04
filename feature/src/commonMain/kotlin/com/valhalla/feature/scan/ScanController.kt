@@ -3,6 +3,8 @@ package com.valhalla.feature.scan
 import com.valhalla.data.ble.BleClient
 import com.valhalla.data.ble.BleDevice
 import com.valhalla.data.ble.ScanFilter
+import com.valhalla.feature.i18n.StringKey
+import com.valhalla.feature.i18n.UiMessage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -17,7 +19,7 @@ import kotlinx.coroutines.launch
 data class ScanUiState(
     val scanning: Boolean = false,
     val devices: List<BleDevice> = emptyList(),
-    val error: String? = null,
+    val error: UiMessage? = null,
     /** 扫描持续超过阈值仍无设备；与「无权限 / 蓝牙关闭」区分展示。 */
     val timedOut: Boolean = false,
 )
@@ -59,7 +61,10 @@ class ScanController(
                         timeoutJob?.cancel()
                         mutableState.value = mutableState.value.copy(
                             scanning = false,
-                            error = error.message ?: "扫描失败",
+                            error = UiMessage(
+                                StringKey.SCAN_EMPTY_ERROR,
+                                mapOf("detail" to (error.message ?: StringKey.UNKNOWN.name)),
+                            ),
                         )
                     }
                     .collect { device -> upsert(device) }

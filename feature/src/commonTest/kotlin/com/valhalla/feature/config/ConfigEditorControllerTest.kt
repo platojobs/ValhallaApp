@@ -14,6 +14,8 @@ import com.valhalla.core.protocol.message.GetConfigRequest
 import com.valhalla.core.protocol.message.SetConfigRequest
 import com.valhalla.core.protocol.message.SetConfigResponse
 import com.valhalla.feature.FakeFrameLink
+import com.valhalla.feature.i18n.AppStrings
+import com.valhalla.feature.i18n.asChinese
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
@@ -116,7 +118,7 @@ class ConfigEditorControllerTest {
         assertEquals("新名字", field.originalText)
         assertFalse(field.dirty)
         assertNotNull(field.lastSavedAtEpochMillis)
-        assertTrue(controller.state.value.message!!.contains("已保存"))
+        assertTrue(controller.state.value.message!!.asChinese().contains("已保存"))
     }
 
     @Test
@@ -129,11 +131,11 @@ class ConfigEditorControllerTest {
 
         val serial = controller.save("serial_number")
         assertFalse(serial)
-        assertTrue(controller.state.value.error!!.contains("只读"))
+        assertTrue(controller.state.value.error!!.asChinese().contains("只读"))
 
         val unknown = controller.save("mystery")
         assertFalse(unknown)
-        assertTrue(controller.state.value.error!!.contains("未知配置项"))
+        assertTrue(controller.state.value.error!!.asChinese().contains("未知配置项"))
         assertTrue(link.requests.isEmpty())
     }
 
@@ -172,7 +174,7 @@ class ConfigEditorControllerTest {
 
         val second = controller.save("device_name")
         assertFalse(second)
-        assertTrue(controller.state.value.error!!.contains("正在保存"))
+        assertTrue(controller.state.value.error!!.asChinese().contains("正在保存"))
         assertEquals(1, link.requests.filterIsInstance<SetConfigRequest>().size)
 
         gate.complete(Unit)
@@ -255,9 +257,9 @@ class ConfigEditorControllerTest {
             state.visibleFields.map { it.spec.key },
         )
         assertEquals(3, link.requests.filterIsInstance<GetConfigRequest>().size)
-        val notice = state.capabilityNotice
-        assertNotNull(notice)
-        assertTrue(notice.contains("刷新设备信息"))
+        val noticeKey = state.capabilityNoticeKey
+        assertNotNull(noticeKey)
+        assertTrue(AppStrings.entry(noticeKey)!!.zh.contains("刷新设备信息"))
     }
 
     @Test
@@ -325,7 +327,7 @@ class ConfigEditorControllerTest {
         val saved = controller.save("tx_power_dbm")
 
         assertFalse(saved)
-        assertTrue(controller.state.value.error!!.contains("不支持"))
+        assertTrue(controller.state.value.error!!.asChinese().contains("不支持"))
         assertTrue(link.requests.none { it is SetConfigRequest }, "能力失效时不得下发 SET_CONFIG")
         val field = field(controller.state.value, "tx_power_dbm")
         assertEquals("5", field.text, "失败时保留用户输入")

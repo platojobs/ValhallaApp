@@ -38,7 +38,15 @@ data class ScanFilter(
 }
 
 /** BLE 层统一异常，避免上层直接依赖 Android/iOS 平台异常类型。 */
-class BleException(message: String, cause: Throwable? = null) : Exception(message, cause)
+open class BleException(message: String, cause: Throwable? = null) : Exception(message, cause)
+
+/**
+ * 连接阶段超时：与普通失败区分开，便于上层给出「靠近设备后重试」的针对性提示。
+ *
+ * 平台侧超时实现各异（Android 的 `withTimeout` 会抛取消异常），统一转成该类型后
+ * 上层不再靠字符串匹配判断超时。
+ */
+class BleTimeoutException(message: String) : BleException(message)
 
 /** 常用 GATT UUID（16 位标准服务扩写为 128 位）。 */
 object BleUuids {
