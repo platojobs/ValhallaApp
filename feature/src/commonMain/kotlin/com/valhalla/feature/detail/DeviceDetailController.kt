@@ -170,7 +170,8 @@ class DeviceDetailController(
         signer: AuthSigner,
         clientNonce: ByteArray,
         deviceDigest: String,
-        challenge: ByteArray? = serverChallenge,
+        /** 显式传入 [requestChallenge] 得到的挑战；为 null 时自动获取一次新挑战。 */
+        challenge: ByteArray? = null,
     ): Boolean {
         mutableState.value = mutableState.value.copy(error = null, errorCode = null)
         transition(DeviceEvent.AuthenticationStarted)

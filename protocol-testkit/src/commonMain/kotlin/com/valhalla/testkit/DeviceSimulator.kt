@@ -287,7 +287,8 @@ class DeviceSimulator(
                     credential = credential.clientNonce,
                     deviceDigest = credential.deviceDigest,
                 )
-                val valid = credential.deviceDigest == scenario.deviceDigest &&
+                val valid = credential.challenge.contentEquals(scenario.authChallenge) &&
+                    credential.deviceDigest == scenario.deviceDigest &&
                     HmacSha256.verify(scenario.authSecret, message, credential.signature)
                 respond(
                     frame,
