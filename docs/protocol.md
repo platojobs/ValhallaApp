@@ -15,6 +15,14 @@
   - `str2`：2 字节长度（0..65535）。
 - 单帧 payload 最大 1024 字节（`FrameCodec.MAX_PAYLOAD_SIZE`）。
 - BLE 通知可能分包/粘包，接收侧必须使用增量分帧器 `FrameParser`，不要假设「一次通知 = 一帧」。
+- v1 帧在 BLE 上使用独立协议通道（`BleUuids`）：
+  | 特征 | UUID | 用途 |
+  | --- | --- | --- |
+  | `PROTOCOL_SERVICE` | `0000f1b0-0000-1000-8000-00805f9b34fb` | 协议服务 |
+  | `PROTOCOL_WRITE` | `0000f1b1-0000-1000-8000-00805f9b34fb` | App → 设备，写完整帧 |
+  | `PROTOCOL_NOTIFY` | `0000f1b2-0000-1000-8000-00805f9b34fb` | 设备 → App，notify / indicate |
+- 下行写入必须串行化（`BleFrameLink` 使用 `Mutex`），避免并发请求与 OTA 分片在 GATT 层互相覆盖；
+  上行通知与应答统一进入 `FrameLink.incoming`，由调度器分流。
 
 ## 2. 帧格式
 

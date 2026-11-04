@@ -27,8 +27,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.valhalla.core.command.ConcurrentCommandDispatcher
 import com.valhalla.data.ble.BleConnection
 import com.valhalla.data.ble.BleDevice
+import com.valhalla.data.ble.BleFrameLink
 import com.valhalla.data.ble.createBleClient
 import com.valhalla.feature.detail.DeviceDetailController
 import com.valhalla.feature.ota.OtaController
@@ -38,10 +40,18 @@ import com.valhalla.feature.scan.ScanUiState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
+/** 一次已建立连接对应的协议栈与控制器，详情页与 OTA 页共享同一调度器。 */
+private class DeviceSession(
+    val connection: BleConnection,
+    val dispatcher: ConcurrentCommandDispatcher,
+    val detail: DeviceDetailController,
+    val ota: OtaController,
+)
+
 private sealed interface Route {
     data object Scan : Route
-    data class Detail(val controller: DeviceDetailController, val connection: BleConnection) : Route
-    data class Ota(val ota: OtaController) : Route
+    data class Detail(val session: DeviceSession) : Route
+    data class Ota(val session: DeviceSession) : Route
 }
 
 /**
@@ -82,7 +92,18 @@ fun ValhallaApp() {
                     try {
                         val connection = bleClient.connect(device.deviceId)
                         scanController.stopScan()
-                        route = Route.Detail(DeviceDetailController(connection), connection)
+                        val dispatcher = ConcurrentCommandDispatcher(BleFrameLink(connection))
+                        val session = DeviceSession(
+                            connection = connection,
+                            dispatcher = dispatcher,
+                            detail = DeviceDetailController(
+                                dispatcher = dispatcher,
+                                deviceId = connection.deviceId,
+                                disconnectLink = { connection.disconnect() },
+                            ),
+                            ota = OtaController(dispatcher),
+                        )
+                        route = Route.Detail(session)
                     } catch (cancellation: CancellationException) {
                         throw cancellation
                     } catch (error: Throwable) {
@@ -95,19 +116,20 @@ fun ValhallaApp() {
         )
 
         is Route.Detail -> DetailScreen(
-            controller = current.controller,
+            controller = current.session.detail,
             onBack = {
                 scope.launch {
-                    current.controller.disconnect()
+                    current.session.detail.disconnect()
+                    current.session.dispatcher.close()
                     route = Route.Scan
                 }
             },
-            onOpenOta = { route = Route.Ota(OtaController(current.connection)) },
+            onOpenOta = { route = Route.Ota(current.session) },
         )
 
         is Route.Ota -> OtaScreen(
-            controller = current.ota,
-            onBack = { route = Route.Scan },
+            controller = current.session.ota,
+            onBack = { route = Route.Detail(current.session) },
         )
     }
 }
@@ -199,7 +221,10 @@ private fun DetailScreen(
         Text(state.deviceId, style = MaterialTheme.typography.titleMedium)
         Text("状态：${state.deviceState}")
         Text("固件版本：${state.firmwareVersion ?: "未知"}")
-        Text("电量：${state.batteryPercent?.let { "$it%" } ?: "未知"}")
+        Text("电量：${state.batteryPercent?.let { "$it%" } ?: "未知"}" + if (state.charging == true) "（充电中）" else "")
+        state.deviceInfo?.let { info ->
+            Text("型号：${info.vendor} ${info.model} · 序列号 ${info.serialNumber}")
+        }
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = { scope.launch { controller.authenticate("demo-token") } }) {
@@ -247,7 +272,7 @@ private fun OtaScreen(
         }
 
         Text(
-            "当前为占位流程：分片写入 + CRC16 记录，真实设备需要补齐开始/结束指令与校验回执。",
+            "流程：START_OTA（总长度 + CRC16）→ 逐片 OTA_DATA（按协议偏移）→ FINISH_OTA 校验。",
             style = MaterialTheme.typography.bodySmall,
         )
 

@@ -49,4 +49,13 @@ object BleUuids {
     const val OTA_SERVICE = "0000f1a0-0000-1000-8000-00805f9b34fb"
     const val OTA_CONTROL = "0000f1a1-0000-1000-8000-00805f9b34fb"
     const val OTA_DATA = "0000f1a2-0000-1000-8000-00805f9b34fb"
+
+    /**
+     * v1 报文协议通道：下行帧写入 [PROTOCOL_WRITE]，设备应答与主动通知从 [PROTOCOL_NOTIFY] 上报。
+     *
+     * 通知特征同时支持 notify 与 indicate，平台实现需按特征属性选择使能方式。
+     */
+    const val PROTOCOL_SERVICE = "0000f1b0-0000-1000-8000-00805f9b34fb"
+    const val PROTOCOL_WRITE = "0000f1b1-0000-1000-8000-00805f9b34fb"
+    const val PROTOCOL_NOTIFY = "0000f1b2-0000-1000-8000-00805f9b34fb"
 }

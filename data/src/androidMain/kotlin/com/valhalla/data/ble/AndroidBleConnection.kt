@@ -141,7 +141,17 @@ internal class AndroidBleConnection private constructor(
     private fun enableNotifications(characteristic: BluetoothGattCharacteristic) {
         val descriptor = characteristic.getDescriptor(UUID.fromString(BleUuids.CLIENT_CHARACTERISTIC_CONFIG))
             ?: return
-        descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+        // 协议通道可能只支持 indicate：按特征属性选择使能值，两种模式都走 onCharacteristicChanged 回调。
+        val enableValue = when {
+            characteristic.properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY != 0 ->
+                BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+
+            characteristic.properties and BluetoothGattCharacteristic.PROPERTY_INDICATE != 0 ->
+                BluetoothGattDescriptor.ENABLE_INDICATION_VALUE
+
+            else -> return
+        }
+        descriptor.value = enableValue
         runCatching { gatt.writeDescriptor(descriptor) }
     }
 

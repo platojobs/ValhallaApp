@@ -2,6 +2,50 @@
 
 本文件记录 ValhallaApp 的版本演进，按「阶段完成即提交 + 打 annotated tag」的节奏维护。
 
+## v0.6.0 - 特性层接入新协议栈
+
+### 新增
+
+- `data/ble/BleFrameLink`：把 BLE GATT 链路适配为 `FrameLink`。
+  - 上行：订阅 `PROTOCOL_NOTIFY` 通知/指示，数据块经 `FrameParser` 增量分帧后，
+    应答与设备通知统一进入 `FrameLink.incoming`；
+  - 下行：`FrameCodec` 编码后用 `Mutex` 串行写入 `PROTOCOL_WRITE`，避免并发请求、
+    鉴权与 OTA 分片在 GATT 层互相覆盖。
+- `BleUuids` 新增协议通道 `PROTOCOL_SERVICE` / `PROTOCOL_WRITE` / `PROTOCOL_NOTIFY`。
+- Android `AndroidBleConnection` 订阅通知时按特征属性选择 notify 或 indicate 使能值，
+  两种上报都经 `onCharacteristicChanged` 进入统一通知流；iOS `IosBleConnection` 由
+  `CBPeripheral.writeValue` + `didUpdateValueForCharacteristic` 承担，两条平台路径共用同一适配器。
+- `DeviceDetailController` 改为持有 `ConcurrentCommandDispatcher`：
+  - 鉴权使用 `AuthRequest` / `AuthResponse`，保存会话令牌、有效期与服务端挑战；
+  - 设备信息、固件版本、电量使用 `GET_DEVICE_INFO` / `GET_FIRMWARE_VERSION` / `GET_BATTERY`
+    强类型请求，并经 `supervisorScope + async` 并行发起，乱序应答按 sequence 精确配对；
+  - 配置读写使用 `SET_CONFIG` / `GET_CONFIG` 强类型消息并同步本地缓存；
+  - 设备错误码经 `DeviceStatus.describe()` 翻译为 UI 文案，`errorCode` 暴露原始状态码。
+- `OtaController` 改为协议会话：`START_OTA`（总长 + CRC16 + 分片大小 + 固件版本）→
+  按绝对偏移逐片 `OTA_DATA` → `FINISH_OTA`，并接受设备返回的实际分片大小。
+- `feature/CommandFailureInfo`：统一把 `CommandFailure.*` 与 `DeviceStatus` 翻译为中文可读错误。
+- Compose UI 以 `DeviceSession` 共享同一调度器，详情页与 OTA 页复用一条链路；
+  详情页展示型号、充电状态与错误码文案。
+- `FakeFrameLink` 测试桩：按 `MessageCodec.decodeRequest` 解析请求、生成强类型应答回灌上行。
+- 新增 5 项特性层测试（feature 13 → 18）：完整会话（鉴权 → 读信息/版本/电量）、
+  并行请求乱序应答、设备拒绝错误码传播、配置读写、OTA 分片大小协商与设备拒绝。
+- `docs/architecture.md`：说明特性层与调度器接入方式、`BleFrameLink` 平台落地与 OTA 时序。
+
+### 变更
+
+- `DeviceDetailController` 构造参数由 `BleConnection` 改为
+  `(dispatcher, deviceId, logger, disconnectLink)`；
+  `OtaController` 构造参数由 `BleConnection` 改为 `(dispatcher, chunkSize, firmwareVersion)`。
+  既有测试已同步改写，覆盖点未删减、断言未削弱。
+- `feature` 层不再直接调用 `connection.write` / `connection.read`，裸字节读写全部收敛到 `data` 与 `core`。
+
+### 验证
+
+- `JAVA_HOME=$(/usr/libexec/java_home -v 21) ./gradlew :core:jvmTest :data:jvmTest :feature:jvmTest`：
+  core 86 + data 11 + feature 18 = 115 项全部通过。
+- `:composeApp:assembleDebug` 与 `:composeApp:linkDebugFrameworkIosSimulatorArm64` 均通过。
+- 协议通道 UUID、设备分片大小协商与错误码映射仍为自定义假设，未与真实固件联调。
+
 ## v0.5.0 - 协议层完整落地
 
 ### 新增
