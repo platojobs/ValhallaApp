@@ -2,6 +2,36 @@
 
 本文件记录 ValhallaApp 的版本演进，按「阶段完成即提交 + 打 annotated tag」的节奏维护。
 
+## v0.4.0 - 特性层 UI 与 App 壳工程
+
+### 新增
+
+- `feature/scan`：`ScanController` 将无限扫描流收敛为 `ScanUiState` 快照，按 `deviceId` 去重并按 RSSI 降序排列；
+  支持开始/停止/清空与错误上报。
+- `feature/detail`：`DeviceDetailController` 复用状态机，完成鉴权（AUTH 报文经 `FrameCodec` 编码写入）、
+  固件/电量读取、日志聚合与断开流程。
+- `feature/ota`：`OtaController` 占位实现，按分片写入 OTA 数据特征、实时进度、CRC16 记录与失败/取消状态。
+- `feature/ui`：Compose Multiplatform 三段式界面（扫描页 → 设备详情页 → OTA 页），Android / iOS 共用。
+- `composeApp`：Android `MainActivity`（初始化 BLE、申请蓝牙运行时权限）与 `AndroidManifest.xml`（BLE 权限声明）；
+  iOS `MainViewController` 与 `ValhallaApp.framework` 输出。
+- `iosApp`：SwiftUI 启动壳、Info.plist（含蓝牙用途说明）、Xcode 工程与共享 scheme；
+  Xcode 构建阶段自动按架构链接 Kotlin Framework。
+- 13 项 feature 单元测试：扫描去重/错误/停止，鉴权成功/失败、信息读取、断开，OTA 分片成功/失败/空包/重置。
+
+### 变更
+
+- Compose Multiplatform 由 1.12.2 调整为 1.10.3：1.12.x 的 Android 产物要求 compileSdk 37 / AGP 9.1.0，
+  与当前 AGP 8.13.1 + compileSdk 36 冲突。
+- 移除 `iosX64` 目标，仅保留 `iosArm64` 与 `iosSimulatorArm64`。
+
+### 验证
+
+- `./gradlew :core:jvmTest :data:jvmTest :feature:jvmTest`：50 + 11 + 13 = 74 项全部通过。
+- `./gradlew :composeApp:assembleDebug`：通过，产出 `composeApp-debug.apk`（约 11 MB）。
+- `./gradlew :composeApp:linkDebugFrameworkIosSimulatorArm64`：通过。
+- `xcodebuild ... ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO build`：iOS 模拟器 App 构建通过；
+  未做真机签名验证。
+
 ## v0.3.0 - BLE 抽象与 Android/iOS 平台实现
 
 ### 新增

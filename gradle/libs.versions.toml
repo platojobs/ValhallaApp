@@ -1,7 +1,7 @@
 [versions]
 kotlin = "2.3.20"
 agp = "8.13.1"
-composeMultiplatform = "1.12.2"
+composeMultiplatform = "1.10.3"
 coroutines = "1.10.2"
 activityCompose = "1.13.0"
 androidMinSdk = "26"

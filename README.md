@@ -12,10 +12,14 @@ Android / iOS 之间共享，设备能力通过 `expect/actual` 分别落到 And
 | 语言 | Kotlin 2.3.20 |
 | 构建 | Gradle 8.14.3 + Kotlin DSL + Version Catalog (`gradle/libs.versions.toml`) |
 | 跨端 | Kotlin Multiplatform（Android / iOS / JVM 测试宿主） |
-| UI | Compose Multiplatform 1.12.2 + Material 3 |
+| UI | Compose Multiplatform 1.10.3 + Material 3 |
 | 异步 | kotlinx-coroutines 1.10.2（`StateFlow` / `SharedFlow`） |
 | Android | AGP 8.13.1，minSdk 26，compileSdk 36 |
-| iOS | Xcode 工程 + CoreBluetooth（Kotlin/Native cinterop） |
+| iOS | Xcode 工程 + CoreBluetooth（Kotlin/Native 2.3.20） |
+
+> iOS 目标保留 `iosArm64`（真机）与 `iosSimulatorArm64`（Apple Silicon 模拟器），不再声明 `iosX64`。
+> Compose Multiplatform 由 1.12.2 调整为 1.10.3：1.12.x 的 Android 产物要求 compileSdk 37 / AGP 9.1，
+> 与当前 AGP 8.13.1 + compileSdk 36 的工具链冲突。
 
 ## 模块划分
 
@@ -94,11 +98,16 @@ DISCONNECTING --Disconnected--> DISCONNECTED；连接丢失（LinkLost）回落 
 
 # iOS Framework（需 Kotlin/Native 工具链）
 ./gradlew :composeApp:linkDebugFrameworkIosSimulatorArm64
+
+# iOS App 壳工程（Xcode，Apple Silicon 模拟器）
+xcodebuild -project iosApp/iosApp.xcodeproj -scheme iosApp \
+  -configuration Debug -destination 'generic/platform=iOS Simulator' \
+  ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO build
 ```
 
-Android 端在 `AndroidBleSupport.init(context)` 之后才可使用真实 BLE；示例入口已在
-`composeApp` 中完成初始化。iOS 端需要 `NSBluetoothAlwaysUsageDescription`，
-已在 `iosApp` 的 Info.plist 中声明。
+Android 端在 `AndroidBleSupport.init(context)` 之后才可使用真实 BLE，示例入口已在
+`composeApp` 中完成初始化并申请运行时权限。iOS 端需要 `NSBluetoothAlwaysUsageDescription`，
+已在 `iosApp` 的 Info.plist 中声明；Xcode 构建阶段会自动调用 Gradle 链接对应架构的 Framework。
 
 ## 环境验证记录
 
