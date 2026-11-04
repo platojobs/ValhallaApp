@@ -210,3 +210,38 @@ ConcurrentCommandDispatcher → GET_CONFIG / SET_CONFIG
 - 每条日志包含方向（TX/RX）、命令、seq、完整 HEX、解析摘要与错误标记；
 - UI 在详情页提供「报文日志」入口：按时间倒序、按命令/错误过滤、关键字搜索、单条复制与清空。
 - 运行时开销只在帧边界做一次解析摘要与字符串拼接，不阻塞传输；极端并发下允许丢日志。
+
+### 6.4 配置能力协商（v1.4.0）
+
+```
+DeviceDetailController.refreshInfo()
+        │ firmware / deviceInfo(model, vendor)
+        ▼
+ConfigEditorController.updateTarget(DeviceConfigTarget)
+        │ ConfigCatalog.capability(spec, target)
+        ▼
+ConfigEditorState.visibleFields / hiddenFields + capabilityNotice
+```
+
+- `ConfigScope` 声明版本区间（`major.minor.patch.build`，忽略渠道）与型号白名单；
+  未声明约束的键是「通用键」，在固件/型号未知时仍可读写。
+- 判定结果 `SUPPORTED` / `VERSION_TOO_OLD` / `VERSION_TOO_NEW` / `MODEL_UNSUPPORTED` /
+  `TARGET_UNKNOWN`。除 `SUPPORTED` 外一律 `visible = false`，UI 不请求、不下发该键。
+- 降级策略：固件版本或型号缺失时只展示通用键，其余键隐藏并在配置区提示
+  「先刷新设备信息」；刷新后由 `updateTarget` 重新判定，已输入文本与校验错误保留。
+- 保存前用当前 `DeviceConfigTarget` 再次调用 `capability()`；若能力已失效（例如读取版本后
+  设备降级），直接拒绝并提示原因，不发 `SET_CONFIG`。
+
+### 6.5 报文日志导出与索引（v1.4.0）
+
+- `PacketLogExporter`（`core/logging`）把日志渲染为纯文本：绝对时间（含时区偏移）+ 相对时间、
+  方向、`RESPONSE`/`NOTIFY` 标记、seq、命令、摘要、错误与 HEX；
+- 导出按 `timestampMillis` 倒序、同时间戳按 id 倒序，截断后仍保持「最新在前」；
+- 上限保护：`PacketLogExportOptions` 默认 200 条 / 512 KiB / 单条 HEX 4096 字符，
+  超限丢弃更旧条目并在头部标注「已按上限截断」；
+- 平台分享：`data/share/TextShare.kt` 定义 `TextSharer` 与 `createTextSharer()`，
+  Android 写 cache 后经 `FileProvider` 走 `ACTION_SEND`，iOS 写临时目录后走
+  `UIActivityViewController`，JVM 返回 `UNAVAILABLE`；
+- 时区：`currentTimeZoneOffsetMinutes()` 由平台实现，`core` 只接收偏移参数，保证可测试；
+- 检索性能：`PacketLogIndex` 在日志快照变化时构建一次小写索引，搜索只做一次 `contains`；
+  UI 对输入做 150ms 去抖，不随每次按键全量重算。

@@ -2,6 +2,55 @@
 
 本文件记录 ValhallaApp 的版本演进，按「阶段完成即提交 + 打 annotated tag」的节奏维护。
 
+## v1.4.0 - 配置能力协商、日志导出与交互稳健性
+
+### 新增
+
+- **配置能力协商**
+  - `core/config` 新增 `ConfigScope`（最低/最高固件版本 + 型号白名单）、
+    `DeviceConfigTarget`（固件版本/型号/厂商快照）与 `ConfigCapabilityResult`；
+    版本比较沿用 `major.minor.patch.build`，忽略渠道；
+  - `ConfigCatalog` 为 `led_enabled`（≥1.0.0）、`sample_interval_ms`（≥1.2.0）、
+    `tx_power_dbm`（≥1.3.0 且型号 VH-1000/VH-2000）声明能力；`device_name` 与只读键为通用键；
+  - `ConfigEditorController` 新增 `updateTarget()`：按快照重算可见性，只读取可见键，
+    隐藏项汇总展示原因；
+  - 降级策略：固件版本或型号未知时仅保留通用键，配置区提示「先刷新设备信息」；
+  - 保存前二次能力校验：能力失效（如读取版本后设备降级）直接拒绝，不发 `SET_CONFIG`。
+- **报文日志导出**
+  - `PacketLogExporter` 输出本地化文本：绝对时间（含时区偏移）+ 相对时间、方向、
+    `RESPONSE/NOTIFY`、seq、命令、摘要、错误与 HEX；
+  - `PacketLogExportOptions` 默认 200 条 / 512 KiB / 单条 HEX 4096 字符，
+    超限截断更旧条目并在头部标注；
+  - 文件名带本地时间戳，避免重复导出覆盖；
+  - `data/share` 新增 `TextSharer` / `createTextSharer()`：Android 写 cache 后经
+    `FileProvider` 发 `ACTION_SEND`（新增 provider 与 `xml/valhalla_file_paths.xml`），
+    iOS 写临时目录后展示 `UIActivityViewController`，JVM 返回 `UNAVAILABLE`；
+  - `currentTimeZoneOffsetMinutes()` 由平台实现，`core` 只接收偏移参数。
+- **检索与交互**
+  - `PacketLogIndex` 在日志快照变化时构建一次索引，关键字搜索只做一次小写 `contains`；
+  - 日志页输入 150ms 去抖，过滤结果不再随每次按键全量重算；
+  - 日志卡片展示「本地绝对时间 · 相对时间」，「复制单条」使用同一本地化格式；
+  - 配置保存失败保留用户输入，不清空表单。
+
+### 测试
+
+- 新增 24 项测试：
+  - `core`：能力矩阵（未知快照、版本下限/上限、型号白名单与大小写、渠道忽略、可见键顺序），
+    导出字段与文件名、条目/字节上限截断、HEX 超长截断、绝对时间负值与跨日时区、
+    相对时间边界；索引与线性过滤结果一致、数量上限与空快照；
+  - `feature`：未知快照仅读通用键、低版本/型号不匹配隐藏、保存前二次校验拒绝且保留输入、
+    能力未知时通用键仍可保存、保存失败保留输入。
+- 全量 `:core:jvmTest :data:jvmTest :feature:jvmTest`：335 项通过
+  （core 230 + data 11 + feature 94；v1.3.0 为 311 项，既有断言未削弱）。
+- `:composeApp:assembleDebug` 与 `:composeApp:linkDebugFrameworkIosSimulatorArm64` 构建通过。
+
+### 未验证
+
+- Android FileProvider 分享、iOS `UIActivityViewController` 在真机/模拟器上的实际弹窗与
+  第三方应用接收行为未实机验证（JVM 仅验证导出内容与上限）；
+- 能力声明的版本锚点当前来自命令表约定，未与真实设备固件版本矩阵联调；
+- 设备固件实际拒绝 `SET_CONFIG` 的错误码口径未变，仍以 `DeviceStatus` 文案展示。
+
 ## v1.3.0 - 新增功能：设备档案、配置编辑与报文日志
 
 ### 新增

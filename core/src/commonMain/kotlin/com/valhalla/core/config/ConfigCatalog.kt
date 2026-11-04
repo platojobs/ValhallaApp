@@ -1,5 +1,7 @@
 package com.valhalla.core.config
 
+import com.valhalla.core.protocol.message.FirmwareVersion
+
 /** 配置项的基础类型；协议层 value 仍是裸字节，由命令表约定解释方式。 */
 enum class ConfigValueType {
     STRING,
@@ -20,6 +22,8 @@ data class ConfigKeySpec(
     val maxLength: Int = 64,
     val intRange: IntRange = 0..0,
     val readOnlyReason: String? = null,
+    /** 固件版本/型号能力约束；默认通用键，对所有设备可见。 */
+    val scope: ConfigScope = ConfigScope.UNRESTRICTED,
 ) {
 
     init {
@@ -52,6 +56,11 @@ sealed interface ConfigValidation {
  */
 object ConfigCatalog {
 
+    /** 能力协商用的版本锚点：固件 v1.0.0 起支持 LED，v1.2.0 起支持采样间隔，v1.3.0 起支持发射功率。 */
+    private val v1_0_0 = FirmwareVersion(1, 0, 0, 0, "stable")
+    private val v1_2_0 = FirmwareVersion(1, 2, 0, 0, "stable")
+    private val v1_3_0 = FirmwareVersion(1, 3, 0, 0, "stable")
+
     val keys: List<ConfigKeySpec> = listOf(
         ConfigKeySpec(
             key = "device_name",
@@ -65,6 +74,7 @@ object ConfigCatalog {
             displayName = "LED 指示",
             type = ConfigValueType.BOOLEAN,
             editable = true,
+            scope = ConfigScope(minVersion = v1_0_0),
         ),
         ConfigKeySpec(
             key = "sample_interval_ms",
@@ -72,6 +82,7 @@ object ConfigCatalog {
             type = ConfigValueType.INTEGER,
             editable = true,
             intRange = 100..60_000,
+            scope = ConfigScope(minVersion = v1_2_0),
         ),
         ConfigKeySpec(
             key = "tx_power_dbm",
@@ -79,6 +90,10 @@ object ConfigCatalog {
             type = ConfigValueType.INTEGER,
             editable = true,
             intRange = 0..8,
+            scope = ConfigScope(
+                minVersion = v1_3_0,
+                models = setOf("VH-1000", "VH-2000"),
+            ),
         ),
         ConfigKeySpec(
             key = "serial_number",
@@ -109,6 +124,73 @@ object ConfigCatalog {
             editable = false,
             readOnlyReason = "未在命令表定义，仅只读",
         )
+
+    /**
+     * 按设备快照判定单个配置键的能力。
+     *
+     * 规则：
+     * - 通用键（无版本/型号约束）始终可用，不依赖是否读到固件版本；
+     * - 声明了约束但固件版本或型号缺失时返回 `TARGET_UNKNOWN`，UI 隐藏该键并提示刷新设备信息；
+     * - 版本低于下限/高于上限、型号不在白名单时返回对应状态，UI 隐藏并展示原因。
+     */
+    fun capability(spec: ConfigKeySpec, target: DeviceConfigTarget): ConfigCapabilityResult {
+        val scope = spec.scope
+        if (!scope.restricted) return ConfigCapabilityResult.SUPPORTED
+
+        val version = target.firmwareVersion
+        if (version == null) {
+            return ConfigCapabilityResult(
+                status = ConfigCapabilityStatus.TARGET_UNKNOWN,
+                supported = false,
+                visible = false,
+                reason = "未读取固件版本，先刷新设备信息后再判定「${spec.displayName}」",
+            )
+        }
+        scope.minVersion?.let { min ->
+            if (compareFirmwareVersions(version, min) < 0) {
+                return ConfigCapabilityResult(
+                    status = ConfigCapabilityStatus.VERSION_TOO_OLD,
+                    supported = false,
+                    visible = false,
+                    reason = "固件 ${version.shortText()} 低于最低要求 ${min.shortText()}，不支持「${spec.displayName}」",
+                )
+            }
+        }
+        scope.maxVersion?.let { max ->
+            if (compareFirmwareVersions(version, max) > 0) {
+                return ConfigCapabilityResult(
+                    status = ConfigCapabilityStatus.VERSION_TOO_NEW,
+                    supported = false,
+                    visible = false,
+                    reason = "固件 ${version.shortText()} 高于支持上限 ${max.shortText()}，不支持「${spec.displayName}」",
+                )
+            }
+        }
+        if (scope.models.isNotEmpty()) {
+            val model = target.model?.trim().orEmpty()
+            if (model.isEmpty()) {
+                return ConfigCapabilityResult(
+                    status = ConfigCapabilityStatus.TARGET_UNKNOWN,
+                    supported = false,
+                    visible = false,
+                    reason = "未读取设备型号，先刷新设备信息后再判定「${spec.displayName}」",
+                )
+            }
+            if (scope.models.none { it.equals(model, ignoreCase = true) }) {
+                return ConfigCapabilityResult(
+                    status = ConfigCapabilityStatus.MODEL_UNSUPPORTED,
+                    supported = false,
+                    visible = false,
+                    reason = "型号 $model 不支持「${spec.displayName}」（支持 ${scope.models.joinToString("/")}）",
+                )
+            }
+        }
+        return ConfigCapabilityResult.SUPPORTED
+    }
+
+    /** 按设备快照返回可见配置键；顺序与 [keys] 一致。 */
+    fun visibleKeys(target: DeviceConfigTarget): List<ConfigKeySpec> =
+        keys.filter { capability(it, target).visible }
 
     fun validate(spec: ConfigKeySpec, text: String): ConfigValidation {
         if (!spec.editable) {

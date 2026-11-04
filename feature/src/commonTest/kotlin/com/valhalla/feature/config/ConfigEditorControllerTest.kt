@@ -1,12 +1,15 @@
 package com.valhalla.feature.config
 
 import com.valhalla.core.command.ConcurrentCommandDispatcher
+import com.valhalla.core.config.ConfigCapabilityStatus
+import com.valhalla.core.config.DeviceConfigTarget
 import com.valhalla.core.protocol.CommandType
 import com.valhalla.core.protocol.message.ConfigResponse
 import com.valhalla.core.protocol.message.DeviceRequest
 import com.valhalla.core.protocol.message.DeviceResponse
 import com.valhalla.core.protocol.message.DeviceStatus
 import com.valhalla.core.protocol.message.ErrorResponse
+import com.valhalla.core.protocol.message.FirmwareVersion
 import com.valhalla.core.protocol.message.GetConfigRequest
 import com.valhalla.core.protocol.message.SetConfigRequest
 import com.valhalla.core.protocol.message.SetConfigResponse
@@ -35,6 +38,12 @@ class ConfigEditorControllerTest {
         "hardware_version" to "HW-1",
     )
 
+    /** 全功能设备快照：v1.3.0 + VH-1000，命令表全部键可见。 */
+    private val capableTarget = DeviceConfigTarget(
+        firmwareVersion = FirmwareVersion(1, 3, 0, 0, "stable"),
+        model = "VH-1000",
+    )
+
     private fun responder(): suspend (DeviceRequest) -> DeviceResponse? = { request ->
         when (request) {
             is GetConfigRequest -> ConfigResponse(
@@ -51,7 +60,10 @@ class ConfigEditorControllerTest {
     @Test
     fun `读取命令表全部配置并格式化`() = runTest {
         val link = FakeFrameLink(responder())
-        val controller = ConfigEditorController(ConcurrentCommandDispatcher(link, scope = backgroundScope))
+        val controller = ConfigEditorController(
+            ConcurrentCommandDispatcher(link, scope = backgroundScope),
+            initialTarget = capableTarget,
+        )
 
         assertTrue(controller.load())
         val state = controller.state.value
@@ -68,7 +80,10 @@ class ConfigEditorControllerTest {
     @Test
     fun `本地校验失败不发请求并提示原因`() = runTest {
         val link = FakeFrameLink(responder())
-        val controller = ConfigEditorController(ConcurrentCommandDispatcher(link, scope = backgroundScope))
+        val controller = ConfigEditorController(
+            ConcurrentCommandDispatcher(link, scope = backgroundScope),
+            initialTarget = capableTarget,
+        )
         controller.load()
 
         controller.updateText("sample_interval_ms", "20")
@@ -84,7 +99,10 @@ class ConfigEditorControllerTest {
     @Test
     fun `保存成功更新原值与状态`() = runTest {
         val link = FakeFrameLink(responder())
-        val controller = ConfigEditorController(ConcurrentCommandDispatcher(link, scope = backgroundScope))
+        val controller = ConfigEditorController(
+            ConcurrentCommandDispatcher(link, scope = backgroundScope),
+            initialTarget = capableTarget,
+        )
         controller.load()
 
         controller.updateText("device_name", "新名字")
@@ -104,7 +122,10 @@ class ConfigEditorControllerTest {
     @Test
     fun `只读与未知键拒绝保存`() = runTest {
         val link = FakeFrameLink(responder())
-        val controller = ConfigEditorController(ConcurrentCommandDispatcher(link, scope = backgroundScope))
+        val controller = ConfigEditorController(
+            ConcurrentCommandDispatcher(link, scope = backgroundScope),
+            initialTarget = capableTarget,
+        )
 
         val serial = controller.save("serial_number")
         assertFalse(serial)
@@ -135,7 +156,10 @@ class ConfigEditorControllerTest {
                 else -> null
             }
         }
-        val controller = ConfigEditorController(ConcurrentCommandDispatcher(link, scope = backgroundScope))
+        val controller = ConfigEditorController(
+            ConcurrentCommandDispatcher(link, scope = backgroundScope),
+            initialTarget = capableTarget,
+        )
         controller.load()
         controller.updateText("device_name", "排队中")
 
@@ -177,7 +201,10 @@ class ConfigEditorControllerTest {
                 else -> null
             }
         }
-        val controller = ConfigEditorController(ConcurrentCommandDispatcher(link, scope = backgroundScope))
+        val controller = ConfigEditorController(
+            ConcurrentCommandDispatcher(link, scope = backgroundScope),
+            initialTarget = capableTarget,
+        )
         controller.load()
         controller.updateText("device_name", "非法名称")
 
@@ -188,6 +215,7 @@ class ConfigEditorControllerTest {
         assertNotNull(controller.state.value.error)
         assertEquals(DeviceStatus.INVALID_PARAMETER, controller.state.value.errorCode)
         assertFalse(field(controller.state.value, "device_name").saving)
+        assertEquals("非法名称", field(controller.state.value, "device_name").text, "失败后不得清空用户输入")
     }
 
     @Test
@@ -199,7 +227,10 @@ class ConfigEditorControllerTest {
                 responder().invoke(request)
             }
         }
-        val controller = ConfigEditorController(ConcurrentCommandDispatcher(link, scope = backgroundScope))
+        val controller = ConfigEditorController(
+            ConcurrentCommandDispatcher(link, scope = backgroundScope),
+            initialTarget = capableTarget,
+        )
 
         controller.load()
 
@@ -208,6 +239,109 @@ class ConfigEditorControllerTest {
         assertNotNull(failed.loadError)
         assertTrue(field(controller.state.value, "device_name").loaded)
         assertFalse(controller.state.value.loading)
+    }
+
+    @Test
+    fun `能力未知时仅读取通用键并提示刷新设备信息`() = runTest {
+        val link = FakeFrameLink(responder())
+        val controller = ConfigEditorController(ConcurrentCommandDispatcher(link, scope = backgroundScope))
+
+        assertTrue(controller.load())
+
+        val state = controller.state.value
+        assertEquals(6, state.fields.size)
+        assertEquals(
+            listOf("device_name", "serial_number", "hardware_version"),
+            state.visibleFields.map { it.spec.key },
+        )
+        assertEquals(3, link.requests.filterIsInstance<GetConfigRequest>().size)
+        val notice = state.capabilityNotice
+        assertNotNull(notice)
+        assertTrue(notice.contains("刷新设备信息"))
+    }
+
+    @Test
+    fun `低版本设备隐藏高版本配置且不发起读取`() = runTest {
+        val link = FakeFrameLink(responder())
+        val controller = ConfigEditorController(
+            ConcurrentCommandDispatcher(link, scope = backgroundScope),
+            initialTarget = DeviceConfigTarget(
+                firmwareVersion = FirmwareVersion(1, 0, 0, 0, "stable"),
+                model = "VH-1000",
+            ),
+        )
+
+        controller.load()
+
+        val state = controller.state.value
+        assertEquals(
+            listOf("device_name", "led_enabled", "serial_number", "hardware_version"),
+            state.visibleFields.map { it.spec.key },
+        )
+        assertEquals(listOf("sample_interval_ms", "tx_power_dbm"), state.hiddenFields.map { it.spec.key })
+        assertEquals(4, link.requests.filterIsInstance<GetConfigRequest>().size)
+        assertTrue(state.hiddenFields.first { it.spec.key == "sample_interval_ms" }
+            .capability.reason!!.contains("1.2.0"))
+    }
+
+    @Test
+    fun `型号不匹配时隐藏发射功率`() = runTest {
+        val link = FakeFrameLink(responder())
+        val controller = ConfigEditorController(
+            ConcurrentCommandDispatcher(link, scope = backgroundScope),
+            initialTarget = DeviceConfigTarget(
+                firmwareVersion = FirmwareVersion(1, 3, 0, 0, "stable"),
+                model = "VH-3000",
+            ),
+        )
+
+        controller.load()
+
+        val state = controller.state.value
+        val txPower = field(state, "tx_power_dbm")
+        assertFalse(txPower.visible)
+        assertTrue(txPower.capability.reason!!.contains("VH-3000"))
+        assertEquals(5, link.requests.filterIsInstance<GetConfigRequest>().size)
+    }
+
+    @Test
+    fun `下发前二次能力校验阻止已失效的配置`() = runTest {
+        val link = FakeFrameLink(responder())
+        val controller = ConfigEditorController(
+            ConcurrentCommandDispatcher(link, scope = backgroundScope),
+            initialTarget = capableTarget,
+        )
+        controller.load()
+        controller.updateText("tx_power_dbm", "5")
+
+        // 读取版本后设备信息发生变化（这里模拟固件降级），保存前必须重新判定能力。
+        controller.updateTarget(
+            DeviceConfigTarget(
+                firmwareVersion = FirmwareVersion(1, 2, 0, 0, "stable"),
+                model = "VH-1000",
+            ),
+        )
+
+        val saved = controller.save("tx_power_dbm")
+
+        assertFalse(saved)
+        assertTrue(controller.state.value.error!!.contains("不支持"))
+        assertTrue(link.requests.none { it is SetConfigRequest }, "能力失效时不得下发 SET_CONFIG")
+        val field = field(controller.state.value, "tx_power_dbm")
+        assertEquals("5", field.text, "失败时保留用户输入")
+        assertEquals(ConfigCapabilityStatus.VERSION_TOO_OLD, field.capability.status)
+    }
+
+    @Test
+    fun `能力未知时通用键仍可保存`() = runTest {
+        val link = FakeFrameLink(responder())
+        val controller = ConfigEditorController(ConcurrentCommandDispatcher(link, scope = backgroundScope))
+        controller.load()
+        controller.updateText("device_name", "通用键改名")
+
+        assertTrue(controller.save("device_name"))
+        assertEquals(1, link.requests.filterIsInstance<SetConfigRequest>().size)
+        assertEquals("通用键改名", field(controller.state.value, "device_name").originalText)
     }
 
     private fun field(state: ConfigEditorState, key: String): ConfigFieldState =

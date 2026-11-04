@@ -1,9 +1,11 @@
 package com.valhalla.feature.config
 
 import com.valhalla.core.command.ConcurrentCommandDispatcher
+import com.valhalla.core.config.ConfigCapabilityResult
 import com.valhalla.core.config.ConfigCatalog
 import com.valhalla.core.config.ConfigKeySpec
 import com.valhalla.core.config.ConfigValidation
+import com.valhalla.core.config.DeviceConfigTarget
 import com.valhalla.core.protocol.message.ConfigResponse
 import com.valhalla.core.protocol.message.DeviceStatus
 import com.valhalla.core.protocol.message.GetConfigRequest
@@ -31,9 +33,12 @@ data class ConfigFieldState(
     val loadError: String? = null,
     val validationError: String? = null,
     val lastSavedAtEpochMillis: Long? = null,
+    /** 基于当前设备快照的能力判定；不支持时 UI 隐藏该键。 */
+    val capability: ConfigCapabilityResult = ConfigCapabilityResult.SUPPORTED,
 ) {
     val dirty: Boolean get() = text != originalText
-    val editable: Boolean get() = spec.editable
+    val editable: Boolean get() = spec.editable && capability.supported
+    val visible: Boolean get() = capability.visible
 }
 
 /** 配置区整体状态。 */
@@ -44,8 +49,22 @@ data class ConfigEditorState(
     val message: String? = null,
     val error: String? = null,
     val errorCode: DeviceStatus? = null,
+    /** 当前用于能力判定的设备快照。 */
+    val target: DeviceConfigTarget = DeviceConfigTarget(),
 ) {
     val saving: Boolean get() = savingKey != null
+    val visibleFields: List<ConfigFieldState> get() = fields.filter { it.visible }
+    val hiddenFields: List<ConfigFieldState> get() = fields.filterNot { it.visible }
+
+    /** 能力提示：未知快照时优先提示刷新设备信息，否则说明因能力隐藏。 */
+    val capabilityNotice: String?
+        get() = when {
+            hiddenFields.isEmpty() -> null
+            hiddenFields.any { it.capability.status == com.valhalla.core.config.ConfigCapabilityStatus.TARGET_UNKNOWN } ->
+                "已隐藏 ${hiddenFields.size} 项配置：当前固件版本/型号未知，请先刷新设备信息后再判定"
+
+            else -> "已隐藏 ${hiddenFields.size} 项配置：当前设备（固件 ${target.firmwareVersion?.let { "${it.major}.${it.minor}.${it.patch}" } ?: "未知"}，型号 ${target.model ?: "未知"}）不支持"
+        }
 }
 
 /**
@@ -62,20 +81,59 @@ class ConfigEditorController(
     private val dispatcher: ConcurrentCommandDispatcher,
     private val catalog: ConfigCatalog = ConfigCatalog,
     private val clockMillis: () -> Long = { Clock.System.now().toEpochMilliseconds() },
+    initialTarget: DeviceConfigTarget = DeviceConfigTarget(),
 ) {
 
     private val mutableState = MutableStateFlow(
-        ConfigEditorState(fields = catalog.keys.map { ConfigFieldState(spec = it) }),
+        ConfigEditorState(
+            fields = catalog.keys.map { spec ->
+                ConfigFieldState(spec = spec, capability = catalog.capability(spec, initialTarget))
+            },
+            target = initialTarget,
+        ),
     )
     val state: StateFlow<ConfigEditorState> = mutableState.asStateFlow()
 
-    /** 读取命令表中的全部配置键；已在读取中时直接返回 false，避免重复请求。 */
+    /**
+     * 更新用于能力判定的设备快照（固件版本、型号）。
+     *
+     * 仅在能力发生变化时重算；已输入文本、校验错误与最近保存时间都保留，
+     * 因此刷新设备信息不会清空用户正在编辑的内容。
+     */
+    fun updateTarget(target: DeviceConfigTarget) {
+        mutableState.update { state ->
+            if (state.target == target) {
+                state
+            } else {
+                state.copy(
+                    target = target,
+                    fields = state.fields.map { field ->
+                        field.copy(capability = catalog.capability(field.spec, target))
+                    },
+                )
+            }
+        }
+    }
+
+    /** 读取当前能力下可见的配置键；已在读取中时直接返回 false，避免重复请求。 */
     suspend fun load(): Boolean {
         if (mutableState.value.loading) return false
+        val visible = mutableState.value.visibleFields
+        if (visible.isEmpty()) {
+            mutableState.update {
+                it.copy(
+                    loading = false,
+                    message = null,
+                    error = "当前设备没有可读取的配置项，请先刷新设备信息",
+                    errorCode = null,
+                )
+            }
+            return false
+        }
         mutableState.update { it.copy(loading = true, message = null, error = null, errorCode = null) }
         try {
             supervisorScope {
-                val jobs = mutableState.value.fields.map { field ->
+                val jobs = visible.map { field ->
                     async { loadOne(field.spec) }
                 }
                 jobs.forEach { it.await() }
@@ -102,7 +160,15 @@ class ConfigEditorController(
         val snapshot = mutableState.value
         val field = snapshot.fields.firstOrNull { it.spec.key == key }
             ?: return fail("未知配置项：$key")
-        if (!field.editable) {
+        // 下发前用最新设备快照二次校验能力，避免读取版本后设备状态变化导致设备回 INVALID_PARAM。
+        val capability = catalog.capability(field.spec, snapshot.target)
+        if (capability != field.capability) {
+            updateField(key) { it.copy(capability = capability) }
+        }
+        if (!capability.supported || !capability.visible) {
+            return fail(capability.reason ?: "当前设备不支持该配置项")
+        }
+        if (!field.spec.editable) {
             return fail(field.spec.readOnlyReason ?: "该配置项只读")
         }
         if (snapshot.savingKey != null) {

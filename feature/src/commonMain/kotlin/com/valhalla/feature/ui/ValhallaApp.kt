@@ -36,11 +36,16 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import com.valhalla.core.command.ConcurrentCommandDispatcher
 import com.valhalla.core.command.PacketRecordingFrameLink
+import com.valhalla.core.config.DeviceConfigTarget
 import com.valhalla.core.firmware.OtaCheckpointStore
 import com.valhalla.core.logging.InMemoryPacketLog
 import com.valhalla.core.logging.PacketLogEntry
+import com.valhalla.core.logging.PacketLogExporter
 import com.valhalla.core.logging.PacketLogFilter
-import com.valhalla.core.logging.filterPacketEntries
+import com.valhalla.core.logging.PacketLogIndex
+import com.valhalla.core.logging.formatAbsoluteTime
+import com.valhalla.core.logging.formatForCopy
+import com.valhalla.core.logging.formatRelativeTime
 import com.valhalla.core.profile.DeviceProfile
 import com.valhalla.core.profile.DeviceProfileRepository
 import com.valhalla.core.profile.OtaOutcome
@@ -52,6 +57,10 @@ import com.valhalla.data.ble.createBleClient
 import com.valhalla.data.firmware.createOtaCheckpointStore
 import com.valhalla.data.profile.createDeviceProfileStore
 import com.valhalla.data.security.createTokenStore
+import com.valhalla.data.share.ShareStatus
+import com.valhalla.data.share.ShareableText
+import com.valhalla.data.share.createTextSharer
+import com.valhalla.data.share.currentTimeZoneOffsetMinutes
 import com.valhalla.feature.config.ConfigEditorController
 import com.valhalla.feature.config.ConfigEditorState
 import com.valhalla.feature.config.ConfigFieldState
@@ -65,7 +74,9 @@ import com.valhalla.core.protocol.message.OtaStage
 import com.valhalla.feature.scan.ScanController
 import com.valhalla.feature.scan.ScanUiState
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
 
@@ -273,7 +284,19 @@ private fun DetailScreen(
     val scope = rememberCoroutineScope()
     val profile = session.profileRepository.get(state.deviceId)
 
-    LaunchedEffect(session.config) { session.config.load() }
+    LaunchedEffect(session.config, state.firmware, state.deviceInfo?.model) {
+        session.config.updateTarget(
+            DeviceConfigTarget(
+                firmwareVersion = state.firmware,
+                model = state.deviceInfo?.model,
+                vendor = state.deviceInfo?.vendor,
+            ),
+        )
+        // 首次进入或能力从未判定过时才读取；已加载的键不因刷新设备信息被清空。
+        if (session.config.state.value.fields.none { it.loaded }) {
+            session.config.load()
+        }
+    }
 
     Column(
         modifier = Modifier.fillMaxSize().padding(16.dp),
@@ -333,7 +356,13 @@ private fun DetailScreen(
                 item { ProfileCard(snapshot) }
             }
 
-            item { ConfigSection(controller = session.config, state = configState) }
+            item {
+                ConfigSection(
+                    controller = session.config,
+                    state = configState,
+                    onRefreshDevice = { scope.launch { controller.refreshInfo() } },
+                )
+            }
 
             item { Text("设备日志", style = MaterialTheme.typography.titleMedium) }
             items(state.logs) { line ->
@@ -372,7 +401,11 @@ private fun ProfileCard(profile: DeviceProfile) {
 }
 
 @Composable
-private fun ConfigSection(controller: ConfigEditorController, state: ConfigEditorState) {
+private fun ConfigSection(
+    controller: ConfigEditorController,
+    state: ConfigEditorState,
+    onRefreshDevice: () -> Unit,
+) {
     val scope = rememberCoroutineScope()
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -388,10 +421,26 @@ private fun ConfigSection(controller: ConfigEditorController, state: ConfigEdito
                 ) { Text(if (state.loading) "读取中…" else "重新读取") }
             }
             Text(
-                "只有命令表定义的可编辑键允许下发；未知键与设备只读键会标注原因。",
+                "配置键能力按固件版本与型号判定；不支持的键已隐藏，避免下发后设备返回 INVALID_PARAM。",
                 style = MaterialTheme.typography.bodySmall,
             )
-            state.fields.forEach { field ->
+            state.capabilityNotice?.let { notice ->
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        notice,
+                        color = MaterialTheme.colorScheme.secondary,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = onRefreshDevice) { Text("刷新设备信息") }
+                }
+                state.hiddenFields.forEach { field ->
+                    field.capability.reason?.let { reason ->
+                        Text("· $reason", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+            state.visibleFields.forEach { field ->
                 ConfigFieldRow(
                     field = field,
                     savingAny = state.saving,
@@ -458,6 +507,7 @@ private fun ConfigFieldRow(
     }
 }
 
+@OptIn(ExperimentalTime::class)
 @Composable
 private fun PacketLogScreen(
     packetLog: InMemoryPacketLog,
@@ -465,14 +515,30 @@ private fun PacketLogScreen(
 ) {
     val entries by packetLog.entries.collectAsState()
     var query by remember { mutableStateOf("") }
+    var appliedQuery by remember { mutableStateOf("") }
     var errorsOnly by remember { mutableStateOf(false) }
     var command by remember { mutableStateOf<CommandType?>(null) }
+    var exporting by remember { mutableStateOf(false) }
+    var exportMessage by remember { mutableStateOf<String?>(null) }
     val clipboard = LocalClipboardManager.current
+    val sharer = remember { createTextSharer() }
+    val scope = rememberCoroutineScope()
+    // 索引只在日志快照变化时重建；输入关键字只做一次包含判断，不逐条重新拼接。
+    val logIndex = remember(entries) { PacketLogIndex(entries) }
+    val nowMillis = Clock.System.now().toEpochMilliseconds()
+    val zoneOffsetMinutes = remember { currentTimeZoneOffsetMinutes(nowMillis) }
 
-    val filtered = remember(entries, query, errorsOnly, command) {
-        filterPacketEntries(
-            entries = entries,
-            filter = PacketLogFilter(command = command, errorsOnly = errorsOnly, keyword = query),
+    // 输入去抖：停止输入 150ms 后才切换过滤结果，避免每个按键触发全量过滤。
+    LaunchedEffect(query) {
+        if (query != appliedQuery) {
+            delay(150)
+            appliedQuery = query
+        }
+    }
+
+    val filtered = remember(logIndex, appliedQuery, errorsOnly, command) {
+        logIndex.query(
+            filter = PacketLogFilter(command = command, errorsOnly = errorsOnly, keyword = appliedQuery),
             limit = InMemoryPacketLog.DEFAULT_CAPACITY,
         )
     }
@@ -483,6 +549,34 @@ private fun PacketLogScreen(
     ) {
         Row(modifier = Modifier.fillMaxWidth()) {
             Text("报文日志", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
+            TextButton(
+                enabled = entries.isNotEmpty() && !exporting,
+                onClick = {
+                    scope.launch {
+                        exporting = true
+                        try {
+                            val now = Clock.System.now().toEpochMilliseconds()
+                            val export = PacketLogExporter.build(
+                                entries = packetLog.entries.value,
+                                nowMillis = now,
+                                zoneOffsetMinutes = currentTimeZoneOffsetMinutes(now),
+                            )
+                            val result = sharer.share(ShareableText(export.fileName, export.text))
+                            exportMessage = when (result.status) {
+                                ShareStatus.SHARED ->
+                                    "已导出 ${export.entryCount} 条（${export.byteSize} 字节，${export.fileName}）"
+
+                                ShareStatus.UNAVAILABLE ->
+                                    "已生成 ${export.entryCount} 条日志，但当前平台不支持系统分享"
+
+                                ShareStatus.FAILED -> "导出失败：${result.message ?: "未知原因"}"
+                            }
+                        } finally {
+                            exporting = false
+                        }
+                    }
+                },
+            ) { Text(if (exporting) "导出中…" else "导出") }
             TextButton(onClick = onBack) { Text("返回") }
         }
 
@@ -526,6 +620,8 @@ private fun PacketLogScreen(
             TextButton(onClick = { packetLog.clear() }) { Text("清空") }
         }
 
+        exportMessage?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+
         if (filtered.isEmpty()) {
             Text("暂无报文。连接设备并触发鉴权/信息/OTA 后，这里会记录 TX/RX 报文。")
         }
@@ -537,7 +633,13 @@ private fun PacketLogScreen(
             items(filtered, key = { it.id }) { entry ->
                 PacketLogCard(
                     entry = entry,
-                    onCopy = { clipboard.setText(AnnotatedString(entry.formatForCopy())) },
+                    nowMillis = nowMillis,
+                    zoneOffsetMinutes = zoneOffsetMinutes,
+                    onCopy = {
+                        clipboard.setText(
+                            AnnotatedString(entry.formatForCopy(nowMillis, zoneOffsetMinutes)),
+                        )
+                    },
                 )
             }
         }
@@ -545,7 +647,12 @@ private fun PacketLogScreen(
 }
 
 @Composable
-private fun PacketLogCard(entry: PacketLogEntry, onCopy: () -> Unit) {
+private fun PacketLogCard(
+    entry: PacketLogEntry,
+    nowMillis: Long,
+    zoneOffsetMinutes: Int,
+    onCopy: () -> Unit,
+) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(modifier = Modifier.fillMaxWidth()) {
@@ -556,6 +663,12 @@ private fun PacketLogCard(entry: PacketLogEntry, onCopy: () -> Unit) {
                 )
                 TextButton(onClick = onCopy) { Text("复制") }
             }
+            Text(
+                "${formatAbsoluteTime(entry.timestampMillis, zoneOffsetMinutes)} · " +
+                    formatRelativeTime(entry.timestampMillis, nowMillis),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             Text(entry.summary, style = MaterialTheme.typography.bodySmall)
             entry.error?.let { error ->
                 Text("错误：$error", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
