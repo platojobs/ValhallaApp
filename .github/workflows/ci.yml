@@ -1,115 +1,134 @@
 name: CI
 
-# 触发条件：
-# - 推送到 main 或推送任意 v* 标签；
-# - 针对 main 的 Pull Request；
-# - 手动触发（workflow_dispatch）。
 on:
   push:
-    branches: [ main ]
-    tags: [ 'v*' ]
+    branches: [main]
+    tags: ["v*"]
   pull_request:
-    branches: [ main ]
   workflow_dispatch:
 
-# 同一分支/标签的新流水线会取消尚未完成的旧流水线，节省 runner 时间。
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
-  # ---------------------------------------------------------------------------
-  # 第一档：三个纯 JVM 模块的单元测试。
-  # 用矩阵拆分，失败时能直接看出是 core / data / feature 哪一层出问题。
-  # ---------------------------------------------------------------------------
-  jvm-tests:
-    name: JVM 测试 (${{ matrix.module }})
+  version-check:
+    name: 版本一致性
+    # composeApp 是 Android 工程，配置阶段依赖 Android SDK；使用预装 SDK 的 macOS runner。
     runs-on: macos-14
-    strategy:
-      fail-fast: false
-      matrix:
-        module: [ core, data, feature ]
+    timeout-minutes: 15
     steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
-
-      - name: 安装 JDK 21
-        uses: actions/setup-java@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '21'
-
-      - name: 配置 Gradle 缓存
-        uses: gradle/actions/setup-gradle@v4
-
-      - name: 运行 :${{ matrix.module }}:jvmTest
-        run: ./gradlew :${{ matrix.module }}:jvmTest --console=plain --stacktrace
-
-      - name: 上传测试报告（仅失败时）
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+      - name: 校验 Android/iOS 版本号来源
+        run: ./gradlew :composeApp:verifyVersionConsistency --stacktrace 2>&1 | tee version-check.log
+      - name: 上传日志（失败时）
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: test-report-${{ matrix.module }}
+          name: logs-version-check
           path: |
-            ${{ matrix.module }}/build/reports/tests/jvmTest
-            ${{ matrix.module }}/build/test-results/jvmTest
+            version-check.log
+            build/reports/problems/**
           if-no-files-found: ignore
 
-  # ---------------------------------------------------------------------------
-  # 第二档：Android 调试包。macOS runner 预装 Android SDK，若缺少 compileSdk 36
-  # 由 AGP 自动下载（setup-android 保证 licenses 已接受）。
-  # ---------------------------------------------------------------------------
-  android-build:
-    name: Android 调试包
-    runs-on: macos-14
+  jvm-tests:
+    name: JVM 测试（${{ matrix.module }}）
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [core, data, feature]
     steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
-
-      - name: 安装 JDK 21
-        uses: actions/setup-java@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '21'
-
-      - name: 准备 Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: 配置 Gradle 缓存
-        uses: gradle/actions/setup-gradle@v4
-
-      - name: 构建 :composeApp:assembleDebug
-        run: ./gradlew :composeApp:assembleDebug --console=plain --stacktrace
-
-      - name: 上传调试包
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: 运行 :${{ matrix.module }}:jvmTest
+        run: ./gradlew :${{ matrix.module }}:jvmTest --stacktrace 2>&1 | tee gradle-${{ matrix.module }}.log
+      - name: 上传测试报告与日志（失败时）
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: valhalla-debug-apk
-          path: composeApp/build/outputs/apk/debug/*.apk
-          if-no-files-found: warn
+          name: logs-jvm-${{ matrix.module }}
+          path: |
+            gradle-${{ matrix.module }}.log
+            ${{ matrix.module }}/build/reports/tests/**
+            ${{ matrix.module }}/build/test-results/**
+          if-no-files-found: ignore
 
-  # ---------------------------------------------------------------------------
-  # 第三档：iOS 模拟器（Apple Silicon）Framework 链接。
-  # macos-14 为 Apple Silicon，自带 Xcode，可直接产出 iosSimulatorArm64 静态库。
-  # ---------------------------------------------------------------------------
-  ios-framework:
-    name: iOS 模拟器 Framework
+  android:
+    name: Android 构建（debug + release 未签名）
     runs-on: macos-14
+    timeout-minutes: 40
     steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
-
-      - name: 安装 JDK 21
-        uses: actions/setup-java@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '21'
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: 准备 Android SDK（使用 runner 预装工具）
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-$HOME/Library/Android/sdk}}"
+          SDKMANAGER="$(find "$SDK_ROOT/cmdline-tools" -name sdkmanager -type f | sort | tail -n1)"
+          echo "sdkmanager=$SDKMANAGER"
+          "$SDKMANAGER" --install "platforms;android-36" "build-tools;36.0.0" "platform-tools"
+          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+      - name: 构建 debug
+        run: ./gradlew :composeApp:assembleDebug --stacktrace 2>&1 | tee android-debug.log
+      - name: 构建 release（R8，未配置签名）
+        run: ./gradlew :composeApp:assembleRelease :composeApp:verifyReleaseArtifact --stacktrace 2>&1 | tee android-release.log
+      - name: 上传 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apks
+          path: composeApp/build/outputs/apk/**/*.apk
+          if-no-files-found: error
+      - name: 上传日志（失败时）
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-android
+          path: |
+            android-debug.log
+            android-release.log
+            composeApp/build/reports/**
+          if-no-files-found: ignore
 
-      - name: 配置 Gradle 缓存
-        uses: gradle/actions/setup-gradle@v4
-
-      - name: 链接 :composeApp:linkDebugFrameworkIosSimulatorArm64
-        run: ./gradlew :composeApp:linkDebugFrameworkIosSimulatorArm64 --console=plain --stacktrace
+  ios:
+    name: iOS Framework（模拟器 Debug）
+    runs-on: macos-14
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: 链接 iosSimulatorArm64 Debug Framework
+        run: ./gradlew :composeApp:linkDebugFrameworkIosSimulatorArm64 --stacktrace 2>&1 | tee ios-framework.log
+      - name: 上传日志（失败时）
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-ios
+          path: |
+            ios-framework.log
+            composeApp/build/reports/**
+          if-no-files-found: ignore

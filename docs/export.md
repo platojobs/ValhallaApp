@@ -100,3 +100,48 @@ HEX 若包含逗号会被整体加引号；`error` 为空时保留空列。
 - UI 在 `Dispatchers.Default` 执行，期间可点「取消」；
 - 只有内容完全构建成功后才会调用平台保存/分享，因此取消不会在用户目录留下半文件；
   iOS 的临时文件仅是内容快照，未选择保存位置时不会被导出。
+
+## 流式拼装（v1.6.0）
+
+导出内容不再一次性拼装成超大字符串：
+
+1. **预算阶段**：按「最新优先」逐条渲染，只累计每条条目的 UTF-8 字节数（`IntArray`），
+   同时处理条数上限与字节上限；不保留条目文本。
+2. **拼装阶段**：确定最终条数与截断标记后，重新逐条渲染并写入 `ChunkedTextBuilder`，
+   按 8192 字符（`PacketLogExporter.STREAM_CHUNK_CHARS`）切块缓冲，最后顺序拼接。
+3. **等价性**：头部、分隔符、条目与尾部片段仍由同一 renderer 产出，分块只改变拼接方式，
+   因此 TEXT/JSON/CSV 输出与 v1.5.0 字节层面等价（含截断元数据与空结果语义）。
+4. **可观测峰值**：`PacketLogExportResult.peakBufferChars` 返回单块缓冲的峰值字符数，
+   恒 ≤ 8192；测试断言该值不随条目数增长（200 条与 2000 条均达到块上限）。
+5. **预估**：`estimate()` 只走预算阶段（`assembleOutput = false`），字节数由片段求和得到，
+   与 `build()` 的 `byteSize` 完全一致。
+
+## 基准（v1.6.0）
+
+基准不进入常规单测 / CI，手动执行：
+
+```bash
+JAVA_HOME=$(/usr/libexec/java_home -v 21) ./gradlew :core:benchmarkExport
+# 可传参数（示例）：./gradlew :core:benchmarkExport --args="--entries=5000 --iterations=3"
+```
+
+样本：5000 条报文，每条 HEX 约 3.6 KiB 字符；JSON 上限 16 MiB（超出部分从最旧端截断）。
+本机（macOS aarch64 / JVM 21.0.6，Apple Silicon）实测：
+
+| 指标 | 结果 |
+| --- | --- |
+| 样本 | 5000 条 → 实际导出 4251 条 / 16.00 MiB |
+| 生成耗时（平均） | 2 ms |
+| 导出耗时（平均 / 最小） | 117 ms / 113 ms |
+| 导出吞吐 | 约 137 MiB/s |
+| 峰值单块缓冲 | 8192 字符（= 块上限） |
+| 导出后堆占用（未 GC，含待回收临时对象） | 约 273 MiB |
+| 导出后保留堆（GC 后） | 约 53 MiB |
+| 输出体积/条 | 约 3946 B |
+
+说明：
+
+- 堆占用取自 `Runtime.totalMemory - freeMemory`，受 GC 时机影响，仅作量级参考；
+- 真正的内存上限证据是 `peakBufferChars`：无论 200 条还是 5000 条，单块缓冲都不超过 8192 字符；
+- 预算阶段与拼装阶段各渲染一次（时间换内存），因此耗时约为单次渲染的两倍。
+

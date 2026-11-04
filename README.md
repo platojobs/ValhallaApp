@@ -87,7 +87,7 @@ DISCONNECTING --Disconnected--> DISCONNECTED；连接丢失（LinkLost）回落 
 
 ## 构建与运行
 
-前置条件：JDK 17+（本机验证使用 JDK 21）、Android SDK（compileSdk 36）、macOS 上的 Xcode。
+前置条件：JDK 17+（本机验证使用 JDK 21）、Android SDK（compileSdk 36 / build-tools 36）、macOS 上的 Xcode。
 
 ```bash
 # 共享层单元测试（JVM 宿主，最快反馈）
@@ -95,6 +95,13 @@ DISCONNECTING --Disconnected--> DISCONNECTED；连接丢失（LinkLost）回落 
 
 # Android Debug 包
 ./gradlew :composeApp:assembleDebug
+
+# Android Release 包（R8/资源压缩；未配置签名时产出 unsigned APK）
+./gradlew :composeApp:assembleRelease
+./gradlew :composeApp:verifyReleaseArtifact   # 校验 release APK 存在
+
+# 导出基准（5000 条 / 16 MiB，独立任务，不进常规测试）
+./gradlew :core:benchmarkExport
 
 # iOS Framework（需 Kotlin/Native 工具链）
 ./gradlew :composeApp:linkDebugFrameworkIosSimulatorArm64
@@ -109,6 +116,67 @@ Android 端在 `AndroidBleSupport.init(context)` 之后才可使用真实 BLE，
 `composeApp` 中完成初始化并申请运行时权限。iOS 端需要 `NSBluetoothAlwaysUsageDescription`，
 已在 `iosApp` 的 Info.plist 中声明；Xcode 构建阶段会自动调用 Gradle 链接对应架构的 Framework。
 
+## 版本号
+
+唯一来源是 [gradle.properties](gradle.properties)
+
+```properties
+valhalla.versionName=1.6.0
+valhalla.versionCode=16
+```
+
+- Android：`composeApp/build.gradle.kts` 通过 `providers.gradleProperty` 读取，写入
+  `defaultConfig.versionName/versionCode`；
+- iOS：`Version.xcconfig` 由 `:composeApp:syncIosVersion` 从同一组值生成，
+  Xcode 工程通过 `baseConfigurationReference` 读取，`Info.plist` 使用
+  `$(MARKETING_VERSION)` / `$(CURRENT_PROJECT_VERSION)`；
+- 改动版本后执行 `./gradlew :composeApp:syncIosVersion`，并在提交前运行
+  `./gradlew :composeApp:verifyVersionConsistency`（CI 也会执行）。
+
+## Release 构建与签名
+
+Release 已启用 R8（`isMinifyEnabled` + `isShrinkResources`），规则见
+[composeApp/proguard-rules.pro](composeApp/proguard-rules.pro)：保留 Compose 运行时与
+组合函数、Kotlin 协程、Kotlinx 序列化（预置）与枚举名，并用
+`-assumenosideeffects` 移除 `Log.v/d/i` 调试输出。
+
+签名从环境变量或本地 `keystore.properties`（已 gitignore）读取，不硬编码密钥：
+
+```properties
+# keystore.properties（不要提交）
+storeFile=/absolute/path/valhalla-release.keystore
+storePassword=***
+keyAlias=valhalla
+keyPassword=***
+```
+
+对应环境变量为 `VALHALLA_KEYSTORE_PATH`、`VALHALLA_KEYSTORE_PASSWORD`、
+`VALHALLA_KEY_ALIAS`、`VALHALLA_KEY_PASSWORD`。
+
+- 四项全部提供：`assembleRelease` 产出签名 APK；
+- 只提供一部分：Gradle 直接报错并列出缺失项；
+- 全部缺失：允许构建，但产物为 `composeApp-release-unsigned.apk`，不可直接分发。
+
+产物位于 `composeApp/build/outputs/apk/release/`；`verifyReleaseArtifact` 会检查 APK
+是否存在，签名已配置时还会拒绝 unsigned 产物。
+
+## CI
+
+[.github/workflows/ci.yml](.github/workflows/ci.yml) 分四档，全部使用 JDK 21 与
+`gradle/actions/setup-gradle` 缓存：
+
+| Job | Runner | 内容 |
+| --- | --- | --- |
+| `version-check` | macos-14 | `verifyVersionConsistency` |
+| `jvm-tests` | ubuntu-latest | core / data / feature 三模块 `jvmTest` |
+| `android` | macos-14 | 安装 SDK 平台 → `assembleDebug` → `assembleRelease`（unsigned）→ 上传 APK |
+| `ios` | macos-14 | `linkDebugFrameworkIosSimulatorArm64` |
+
+失败时会上传控制台日志与测试报告（`actions/upload-artifact`），便于定位；Android
+不再使用会因 `sdkmanager tools` 缺失而失败的第三方 setup 步骤，改用 runner 预装 SDK。
+支持 `workflow_dispatch` 手动触发，也可用 `gh workflow run CI --ref main`。
+
+
 ## 环境验证记录
 
 本机工具链与实际执行结果记录在 [docs/environment-report.md](docs/environment-report.md)。
@@ -118,4 +186,4 @@ Android 端在 `AndroidBleSupport.init(context)` 之后才可使用真实 BLE，
 - 接入真实设备协议字典（按产品型号生成 `CommandType` 与 payload 编解码）。
 - OTA 增加断点续传与固件签名校验。
 - 引入 Ktor/SQLDelight 做设备档案与升级记录持久化。
-- CI：Android 编译 + JVM 单测 + iOS Framework 编译三档流水线。
+- 配置正式 release keystore 与分发渠道（当前 CI 仅构建 unsigned release）。

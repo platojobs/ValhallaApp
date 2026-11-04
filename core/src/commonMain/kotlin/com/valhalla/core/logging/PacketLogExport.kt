@@ -121,6 +121,11 @@ data class PacketLogExportResult(
     val truncationTarget: PacketLogTruncationTarget? = null,
     val byteSize: Int,
     val notice: String? = null,
+    /**
+     * 流式拼装期间单块缓冲达到过的最大字符数；恒 ≤ [PacketLogExporter.STREAM_CHUNK_CHARS]，
+     * 用于验证峰值缓冲不随条目数线性增长。预估（不拼装）时为 0。
+     */
+    val peakBufferChars: Int = 0,
 ) {
     val empty: Boolean get() = entryCount == 0 || text.isEmpty()
 }
@@ -151,11 +156,20 @@ data class PacketLogExportProgress(
 object PacketLogExporter {
 
     /**
+     * 流式拼装的分块大小（字符）。条目逐条序列化后写入 [ChunkedTextBuilder]，
+     * 单块缓冲从不超过该值，因此拼装阶段的内存占用与条目总数无关。
+     */
+    const val STREAM_CHUNK_CHARS = 8192
+
+    /**
      * 构建导出内容。
      *
      * 该函数是 `suspend` 的：过滤、渲染与拼装阶段都会周期性 `yield()` 并检查协程取消，
      * UI 应放在后台调度器执行，进度通过 [onProgress] 回传。内容全部构建完成后才返回，
      * 平台写文件发生在调用方，因此取消不会留下半成品文件。
+     *
+     * 拼装采用流式写入：条目逐条序列化并追加到分块缓冲，不再保留全部条目字符串，
+     * 最终文本只是各分块的顺序拼接，输出与整体拼装字节层面等价。
      */
     suspend fun build(
         entries: List<PacketLogEntry>,
@@ -174,6 +188,7 @@ object PacketLogExporter {
             format = format,
             options = options,
             onProgress = onProgress,
+            assembleOutput = true,
         )
         return PacketLogExportResult(
             text = computed.text,
@@ -186,6 +201,7 @@ object PacketLogExporter {
             truncationTarget = if (computed.truncated) PacketLogTruncationTarget.OLDEST else null,
             byteSize = computed.byteSize,
             notice = computed.notice,
+            peakBufferChars = computed.peakBufferChars,
         )
     }
 
@@ -206,6 +222,7 @@ object PacketLogExporter {
             format = format,
             options = options,
             onProgress = {},
+            assembleOutput = false,
         )
         return PacketLogExportEstimate(
             sourceCount = entries.size,
@@ -225,6 +242,7 @@ object PacketLogExporter {
         val truncated: Boolean,
         val byteSize: Int,
         val notice: String?,
+        val peakBufferChars: Int = 0,
     )
 
     private suspend fun compute(
@@ -235,6 +253,7 @@ object PacketLogExporter {
         format: PacketLogExportFormat,
         options: PacketLogExportOptions,
         onProgress: (PacketLogExportProgress) -> Unit,
+        assembleOutput: Boolean,
     ): Computed {
         currentCoroutineContext().ensureActive()
 
@@ -259,28 +278,30 @@ object PacketLogExporter {
         currentCoroutineContext().ensureActive()
 
         val renderer = rendererFor(format, nowMillis, zoneOffsetMinutes, filter, entries.size, matched.size, options)
-        val blocks = ArrayList<String>(minOf(matched.size, options.maxEntries))
+        // 预算阶段只保留每条条目的字节数，不保留渲染结果，避免整份导出内容常驻内存。
+        val sizes = IntArray(minOf(matched.size, options.maxEntries))
+        var selectedCount = 0
         var bodyBytes = 0
         var truncated = false
 
         for ((index, entry) in matched.withIndex()) {
-            if (blocks.size >= options.maxEntries) {
+            if (selectedCount >= options.maxEntries) {
                 truncated = true
                 break
             }
-            val block = renderer.entry(entry)
-            val blockBytes = block.encodeToByteArray().size
-            val separatorBytes = if (blocks.isEmpty()) 0 else renderer.separatorBytes
-            val count = blocks.size + 1
+            val blockBytes = renderer.entry(entry).encodeToByteArray().size
+            val separatorBytes = if (selectedCount == 0) 0 else renderer.separatorBytes
+            val count = selectedCount + 1
             // 若不是最后一条，停下就意味着截断，预算时按带“已截断”标注的头部计算。
             val willTruncate = count < matched.size
             val projected = renderer.headerBytes(count, willTruncate) +
-                bodyBytes + separatorBytes + blockBytes + renderer.footerBytes()
+                bodyBytes + separatorBytes + blockBytes + renderer.footerBytes
             if (projected > options.maxBytes) {
                 truncated = true
                 break
             }
-            blocks += block
+            sizes[selectedCount] = blockBytes
+            selectedCount = count
             bodyBytes += separatorBytes + blockBytes
 
             if (index % 64 == 0 || index == matched.lastIndex) {
@@ -290,20 +311,20 @@ object PacketLogExporter {
             }
         }
 
-        var finalTruncated = truncated || blocks.size < matched.size
-        var total = renderer.headerBytes(blocks.size, finalTruncated) + bodyBytes + renderer.footerBytes()
+        var finalTruncated = truncated || selectedCount < matched.size
+        var total = renderer.headerBytes(selectedCount, finalTruncated) + bodyBytes + renderer.footerBytes
         // 头部会随导出的条数/截断标记变化，极端情况下需要继续从最旧一端丢弃。
-        while (blocks.isNotEmpty() && total > options.maxBytes) {
-            val removed = blocks.removeAt(blocks.lastIndex)
-            val removedBytes = removed.encodeToByteArray().size +
-                if (blocks.isEmpty()) 0 else renderer.separatorBytes
+        while (selectedCount > 0 && total > options.maxBytes) {
+            val removedBytes = sizes[selectedCount - 1] +
+                if (selectedCount - 1 == 0) 0 else renderer.separatorBytes
+            selectedCount--
             bodyBytes -= removedBytes
             finalTruncated = true
-            total = renderer.headerBytes(blocks.size, finalTruncated) + bodyBytes + renderer.footerBytes()
+            total = renderer.headerBytes(selectedCount, finalTruncated) + bodyBytes + renderer.footerBytes
             currentCoroutineContext().ensureActive()
         }
 
-        if (blocks.isEmpty()) {
+        if (selectedCount == 0) {
             onProgress(PacketLogExportProgress(1, 1, PacketLogExportPhase.ASSEMBLING))
             return Computed(
                 text = "",
@@ -319,14 +340,38 @@ object PacketLogExporter {
         yield()
         currentCoroutineContext().ensureActive()
 
-        val text = renderer.assemble(blocks, finalTruncated)
+        // 预估只走预算，不拼装文本；字节数由头部/条目/分隔符/尾部的字节数求和得出，与拼装结果一致。
+        if (!assembleOutput) {
+            return Computed(
+                text = "",
+                selectedCount = selectedCount,
+                matchedCount = matched.size,
+                truncated = finalTruncated,
+                byteSize = total,
+                notice = null,
+            )
+        }
+
+        val builder = ChunkedTextBuilder()
+        builder.append(renderer.header(selectedCount, finalTruncated))
+        for (index in 0 until selectedCount) {
+            if (index > 0) builder.append(renderer.separator)
+            builder.append(renderer.entry(matched[index]))
+            if (index % 64 == 0 || index == selectedCount - 1) {
+                currentCoroutineContext().ensureActive()
+                yield()
+            }
+        }
+        builder.append(renderer.footer)
+
         return Computed(
-            text = text,
-            selectedCount = blocks.size,
+            text = builder.assemble(),
+            selectedCount = selectedCount,
             matchedCount = matched.size,
             truncated = finalTruncated,
-            byteSize = text.encodeToByteArray().size,
+            byteSize = total,
             notice = null,
+            peakBufferChars = builder.peakBufferedChars,
         )
     }
 
@@ -385,13 +430,64 @@ object PacketLogExporter {
     }
 }
 
-/** 各格式的头部/条目/拼接策略；字节预算与截断逻辑在 [PacketLogExporter.compute] 中统一。 */
+/** 各格式的头部/分隔符/条目/尾部片段；字节预算与截断逻辑在 [PacketLogExporter.compute] 中统一。 */
 private interface FormatRenderer {
+    val separator: String
     val separatorBytes: Int
-    fun headerBytes(exported: Int, truncated: Boolean): Int
-    fun footerBytes(): Int
+    val footer: String
+    val footerBytes: Int
+    fun header(exported: Int, truncated: Boolean): String
+    fun headerBytes(exported: Int, truncated: Boolean): Int =
+        header(exported, truncated).encodeToByteArray().size
     fun entry(entry: PacketLogEntry): String
-    fun assemble(blocks: List<String>, truncated: Boolean): String
+}
+
+/**
+ * 分块文本缓冲：追加内容按 [chunkChars] 切块，任何时刻待写入的单块不超过该值。
+ *
+ * 导出时条目逐条序列化后写入，不会像 `joinToString` 那样同时持有「全部条目字符串 + 完整结果」；
+ * [peakBufferedChars] 记录单块达到过的最大字符数，可直接断言峰值不随条目数增长。
+ */
+internal class ChunkedTextBuilder(
+    private val chunkChars: Int = PacketLogExporter.STREAM_CHUNK_CHARS,
+) {
+    init {
+        require(chunkChars > 0) { "chunkChars 必须为正数" }
+    }
+
+    private val chunks = ArrayList<String>()
+    private val current = StringBuilder(chunkChars)
+
+    /** 单块缓冲达到过的最大字符数；恒 ≤ [chunkChars]。 */
+    var peakBufferedChars: Int = 0
+        private set
+
+    fun append(text: String) {
+        if (text.isEmpty()) return
+        var start = 0
+        while (start < text.length) {
+            val room = chunkChars - current.length
+            val end = minOf(start + room, text.length)
+            current.append(text, start, end)
+            if (current.length > peakBufferedChars) peakBufferedChars = current.length
+            start = end
+            if (current.length == chunkChars) flush()
+        }
+    }
+
+    private fun flush() {
+        if (current.isEmpty()) return
+        chunks += current.toString()
+        current.clear()
+    }
+
+    /** 顺序拼接所有分块；拼接前的待写入缓冲始终不超过 [chunkChars]。 */
+    fun assemble(): String {
+        flush()
+        val builder = StringBuilder(chunks.sumOf { it.length })
+        chunks.forEach { builder.append(it) }
+        return builder.toString()
+    }
 }
 
 private class TextRenderer(
@@ -403,27 +499,15 @@ private class TextRenderer(
     private val options: PacketLogExportOptions,
 ) : FormatRenderer {
 
+    override val separator: String = "\n"
     override val separatorBytes: Int = 1
-
-    override fun headerBytes(exported: Int, truncated: Boolean): Int =
-        header(exported, truncated).encodeToByteArray().size + 1
-
-    override fun footerBytes(): Int = 1
+    override val footer: String = "\n"
+    override val footerBytes: Int = 1
 
     override fun entry(entry: PacketLogEntry): String =
         formatTextEntry(entry, nowMillis, zoneOffsetMinutes, options.maxHexCharsPerEntry)
 
-    override fun assemble(blocks: List<String>, truncated: Boolean): String = buildString {
-        append(header(blocks.size, truncated))
-        append('\n')
-        blocks.forEachIndexed { index, block ->
-            if (index > 0) append('\n')
-            append(block)
-        }
-        append('\n')
-    }
-
-    private fun header(exported: Int, truncated: Boolean): String = buildString {
+    override fun header(exported: Int, truncated: Boolean): String = buildString {
         append("ValhallaApp 报文日志\n")
         append("导出时间：")
         append(formatAbsoluteTime(nowMillis, zoneOffsetMinutes))
@@ -445,6 +529,7 @@ private class TextRenderer(
                 "${options.maxHexCharsPerEntry} 字符\n",
         )
         append("字段：时间（绝对 | 相对） 方向 [RESPONSE/NOTIFY] seq 命令 / 摘要 / 错误 / HEX")
+        append('\n')
     }
 }
 
@@ -457,14 +542,10 @@ private class JsonRenderer(
     private val options: PacketLogExportOptions,
 ) : FormatRenderer {
 
+    override val separator: String = ",\n"
     override val separatorBytes: Int = 2
-
-    private val footer: String = "\n  ]\n}\n"
-
-    override fun headerBytes(exported: Int, truncated: Boolean): Int =
-        header(exported, truncated).encodeToByteArray().size
-
-    override fun footerBytes(): Int = footer.encodeToByteArray().size
+    override val footer: String = "\n  ]\n}\n"
+    override val footerBytes: Int = footer.encodeToByteArray().size
 
     override fun entry(entry: PacketLogEntry): String = buildString {
         append("    {")
@@ -486,13 +567,7 @@ private class JsonRenderer(
         append('}')
     }
 
-    override fun assemble(blocks: List<String>, truncated: Boolean): String = buildString {
-        append(header(blocks.size, truncated))
-        append(blocks.joinToString(",\n"))
-        append(footer)
-    }
-
-    private fun header(exported: Int, truncated: Boolean): String = buildString {
+    override fun header(exported: Int, truncated: Boolean): String = buildString {
         append("{\n")
         append("  \"schemaVersion\": 1,\n")
         append("  \"exportedAt\": ").append(jsonString(formatAbsoluteTime(nowMillis, zoneOffsetMinutes))).append(",\n")
@@ -527,16 +602,16 @@ private class CsvRenderer(
     private val options: PacketLogExportOptions,
 ) : FormatRenderer {
 
+    override val separator: String = "\n"
     override val separatorBytes: Int = 1
+    override val footer: String = "\n"
+    override val footerBytes: Int = 1
 
-    private val header: String =
+    private val headerLine: String =
         "id,timestampMillis,timestamp,timezoneOffsetMinutes,direction,command,sequence," +
             "response,notification,hex,hexOmittedChars,summary,error\n"
 
-    override fun headerBytes(exported: Int, truncated: Boolean): Int =
-        header.encodeToByteArray().size
-
-    override fun footerBytes(): Int = 1
+    override fun header(exported: Int, truncated: Boolean): String = headerLine
 
     override fun entry(entry: PacketLogEntry): String {
         val hex = hexSlice(entry.hex, options.maxHexCharsPerEntry)
@@ -555,12 +630,6 @@ private class CsvRenderer(
             entry.summary,
             entry.error ?: "",
         ).joinToString(",") { csvField(it) }
-    }
-
-    override fun assemble(blocks: List<String>, truncated: Boolean): String = buildString {
-        append(header)
-        append(blocks.joinToString("\n"))
-        append('\n')
     }
 }
 

@@ -287,3 +287,20 @@ UI 筛选状态（命令集合 / 仅错误 / 时间 / 关键字）
 - **重名冲突**：文件名 `valhalla-packet-log-<YYYYMMDD-HHMMSS>.<ext>`；
   `resolveFileName()` 在会话内维护已用文件名，冲突时追加 `-1`、`-2`…（忽略大小写）；
   系统 SAF / 文档选择器仍可能在覆盖确认上二次提示。
+
+### 6.7 导出流式拼装与基准（v1.6.0）
+
+- **逐条序列化**：`PacketLogExporter.compute` 分两阶段。预算阶段逐条渲染并只记录
+  `IntArray` 字节数（不保留条目字符串）；拼装阶段按最终条数/截断标记重新逐条渲染，
+  直接写入 `ChunkedTextBuilder`。因此拼装时不会同时持有「全部条目字符串 + 完整结果」。
+- **分块缓冲上限**：`ChunkedTextBuilder` 以 8192 字符（`STREAM_CHUNK_CHARS`）为块，
+  追加内容按剩余空间切片并 flush；`peakBufferedChars` 记录单块达到过的最大字符数，
+  恒不超过块大小。`PacketLogExportResult.peakBufferChars` 将该值暴露给调用方/测试。
+- **字节等价**：头部/分隔符/条目/尾部仍由同一套 renderer 生成，分块只是顺序拼接，
+  输出与整体拼装字节层面等价；`byteSize` 由各片段字节数求和得出（`estimate()` 不再拼装
+  文本），因此预估与导出条数/字节严格一致。
+- **基准**：`./gradlew :core:benchmarkExport` 独立运行 5000 条 / 16 MiB 量级的
+  JSON 导出（`core/src/jvmTest/.../PacketLogExportBenchmark.kt`），输出耗时、吞吐、
+  峰值单块缓冲与堆占用概览；任务不挂到 `check`/`jvmTest`，不阻塞 CI。实测结果见
+  [export.md](export.md#基准v160)。
+

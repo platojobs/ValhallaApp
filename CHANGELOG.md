@@ -2,6 +2,61 @@
 
 本文件记录 ValhallaApp 的版本演进，按「阶段完成即提交 + 打 annotated tag」的节奏维护。
 
+## v1.6.0 - 工程质量与构建基础
+
+### 新增
+
+- **导出流式拼装**
+  - `PacketLogExporter` 改为两阶段：预算阶段逐条渲染并只累计 UTF-8 字节数（`IntArray`），
+    拼装阶段按最终条数/截断标记逐条渲染，直接写入 `ChunkedTextBuilder`；
+  - 分块缓冲上限 8192 字符（`PacketLogExporter.STREAM_CHUNK_CHARS`），
+    `PacketLogExportResult.peakBufferChars` 暴露单块峰值，恒不超过块大小；
+  - TEXT / JSON / CSV 输出与 v1.5.0 字节层面等价，截断元数据与空结果语义不变；
+    `estimate()` 不再拼装文本，字节数由片段求和得出，与 `build()` 严格一致。
+- **导出基准**
+  - 新增 `core/src/jvmTest/.../PacketLogExportBenchmark.kt` 与独立 Gradle 任务
+    `:core:benchmarkExport`：5000 条 / 16 MiB 量级 JSON 导出，输出耗时、吞吐、
+    峰值单块缓冲与堆占用概览；不挂到 `check`/`jvmTest`，不阻塞 CI；
+  - 本机实测约 117 ms / 16 MiB（约 137 MiB/s），峰值缓冲 8192 字符，结果记入 `docs/export.md`。
+- **版本号单一来源**
+  - `gradle.properties` 新增 `valhalla.versionName=1.6.0`、`valhalla.versionCode=16`；
+    Android 直接读取，iOS 由 `:composeApp:syncIosVersion` 生成 `Version.xcconfig`，
+    `Info.plist` 使用 `$(MARKETING_VERSION)` / `$(CURRENT_PROJECT_VERSION)`；
+  - 新增 `:composeApp:verifyVersionConsistency`，校验两侧版本与硬编码回归。
+- **Release 构建**
+  - 启用 R8（`isMinifyEnabled` + `isShrinkResources`）并新增
+    `composeApp/proguard-rules.pro`：保留 Compose 运行时/组合函数、协程、Kotlinx 序列化
+    （预置）与枚举名，移除 `Log.v/d/i` 调试输出；
+  - 签名占位配置：从环境变量（`VALHALLA_KEYSTORE_*`）或本地 `keystore.properties` 读取，
+    部分配置直接报错，全部缺失时产出 unsigned APK；
+  - 新增 `:composeApp:verifyReleaseArtifact`，校验 release APK 存在并拒绝已配置签名时的 unsigned 产物。
+
+### 修改
+
+- GitHub Actions 重写为四档：`version-check`、`jvm-tests`（ubuntu，三模块矩阵）、
+  `android`（macos-14，debug + unsigned release + APK 上传）、`ios`（macos-14，模拟器 Framework）；
+  Android 移除会因 `sdkmanager tools` 失败的三方 setup 步骤，改用 runner 预装 SDK；
+  保留 Gradle 缓存，失败时上传日志与测试报告。
+
+### 文档
+
+- `docs/architecture.md` 新增 6.7 节（流式拼装、缓冲上限、基准）；
+- `docs/export.md` 新增「流式拼装」与「基准」章节，记录实测耗时/内存；
+- `README.md` 补充构建/打包/签名/版本号/CI 说明。
+
+### 测试
+
+- 新增 15 项：
+  - `core` 流式导出 10 项：TEXT/JSON/CSV 完整输出快照、JSON 多条目分隔与截断元数据、
+    字节上限下三格式不超限、分块峰值不随条目数增长、预估与导出一致、
+    `ChunkedTextBuilder` 切分顺序与非法块大小、空结果不记录峰值；
+  - `core` 版本一致性 5 项：gradle.properties、iOS xcconfig、Info.plist、
+    Xcode baseConfigurationReference、Android 构建读取。
+- 全量 `:core:jvmTest :data:jvmTest :feature:jvmTest`：368 项通过
+  （core 263 + data 11 + feature 94；v1.5.0 为 353 项）。
+- `:composeApp:assembleDebug`、`:composeApp:assembleRelease`（unsigned，1.9 MiB）、
+  `:composeApp:linkDebugFrameworkIosSimulatorArm64` 构建通过。
+
 ## v1.5.0 - 报文日志导出增强
 
 ### 新增
