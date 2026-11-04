@@ -84,6 +84,7 @@ class ConfigEditorController(
     private val catalog: ConfigCatalog = ConfigCatalog,
     private val clockMillis: () -> Long = { Clock.System.now().toEpochMilliseconds() },
     initialTarget: DeviceConfigTarget = DeviceConfigTarget(),
+    private val onError: (Throwable) -> Unit = {},
 ) {
 
     private val mutableState = MutableStateFlow(
@@ -139,6 +140,20 @@ class ConfigEditorController(
                     async { loadOne(field.spec) }
                 }
                 jobs.forEach { it.await() }
+            }
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (error: Throwable) {
+            // 兜底：单个键的失败已在 loadOne 内消化，这里只处理框架级异常，
+            // 保证 loading 一定归零且界面拿到可展示的错误。
+            onError(error)
+            mutableState.update {
+                it.copy(
+                    error = UiMessage(
+                        StringKey.CONFIG_LOAD_FAILED,
+                        mapOf("detail" to (error.message ?: StringKey.UNKNOWN.name)),
+                    ),
+                )
             }
         } finally {
             mutableState.update { it.copy(loading = false) }

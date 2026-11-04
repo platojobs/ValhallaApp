@@ -16,6 +16,10 @@ import kotlinx.coroutines.launch
  * - 指数退避等待由 [delayMillis] 注入，测试可用虚拟时间精确核对序列；
  * - 蓝牙关闭时立即暂停并取消在途等待/连接，重新开启后从当前次数继续；
  * - 重连期间（WAITING / CONNECTING）[start] 不会产生第二条协程，避免重复发起。
+ *
+ * 异常边界：连接尝试抛出的非取消异常会经 [onError] 上报并记作一次失败，
+ * 由调度器推进到下一次等待或耗尽；若异常发生在 CONNECTING 之后，
+ * 不会让状态永久停在 CONNECTING。
  */
 class AutoReconnectController(
     policy: ReconnectPolicy = ReconnectPolicy(),
@@ -24,6 +28,7 @@ class AutoReconnectController(
     private val attemptConnect: suspend () -> BleConnection?,
     private val onConnected: (BleConnection) -> Unit,
     private val delayMillis: suspend (Long) -> Unit = { delay(it) },
+    private val onError: (Throwable) -> Unit = {},
 ) {
 
     private val scheduler = ReconnectScheduler(policy)
@@ -40,7 +45,7 @@ class AutoReconnectController(
         scheduler.onDisconnected(bluetoothAvailable = bluetoothOn)
         publish()
         if (bluetoothOn && scheduler.state.phase == ReconnectPhase.WAITING) {
-            job = scope.launch { loop() }
+            job = scope.launch { loopSafely() }
         }
     }
 
@@ -60,9 +65,38 @@ class AutoReconnectController(
             job?.cancel()
             job = null
         } else if (wasPaused && job?.isActive != true) {
-            job = scope.launch { loop() }
+            job = scope.launch { loopSafely() }
         }
         publish()
+    }
+
+    /**
+     * 异常收敛包装：任何非取消异常都上报并推进调度器，避免停留在 CONNECTING。
+     *
+     * - 异常发生在 CONNECTING：记作一次失败，由调度器推进到下一次等待或耗尽；
+     * - 异常发生在等待/蓝牙检查阶段（例如注入的 delay 抛错）：直接进入 CANCELLED 终态，
+     *   避免「同一异常反复触发、无限重试」的死循环。
+     */
+    private suspend fun loopSafely() {
+        while (true) {
+            try {
+                loop()
+                return
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (error: Throwable) {
+                onError(error)
+                if (scheduler.state.phase == ReconnectPhase.CONNECTING) {
+                    scheduler.onAttemptResult(succeeded = false)
+                    publish()
+                    if (scheduler.state.phase != ReconnectPhase.WAITING) return
+                } else {
+                    scheduler.cancel()
+                    publish()
+                    return
+                }
+            }
+        }
     }
 
     private suspend fun loop() {

@@ -26,6 +26,7 @@ import com.valhalla.core.profile.OtaHistoryRecord
 import com.valhalla.core.profile.OtaOutcome
 import com.valhalla.data.ble.BleException
 import com.valhalla.feature.FailureInfo
+import com.valhalla.feature.error.ErrorReporter
 import com.valhalla.feature.i18n.StringKey
 import com.valhalla.feature.i18n.UiMessage
 import com.valhalla.feature.toFailureInfo
@@ -141,6 +142,8 @@ class OtaController(
     private val deviceId: String? = null,
     private val profileRepository: DeviceProfileRepository? = null,
     private val clockMillis: () -> Long = { Clock.System.now().toEpochMilliseconds() },
+    /** 进度收集协程异常的结构化记录出口；生产环境由界面层注入。 */
+    private val errorReporter: ErrorReporter? = null,
 ) {
 
     init {
@@ -536,9 +539,16 @@ class OtaController(
         val scope = scope ?: return
         progressJob?.cancel()
         progressJob = scope.launch {
-            dispatcher.notifications
-                .filterIsInstance<OtaProgressNotification>()
-                .collect { notification -> applyProgress(notification) }
+            try {
+                dispatcher.notifications
+                    .filterIsInstance<OtaProgressNotification>()
+                    .collect { notification -> applyProgress(notification) }
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (error: Throwable) {
+                // 进度通知只是 UI 增强，收集失败不应中断传输或让协程崩溃。
+                errorReporter?.record("ota-progress", error)
+            }
         }
     }
 

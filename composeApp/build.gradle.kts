@@ -12,8 +12,8 @@ plugins {
 // 版本号：唯一来源是 gradle.properties 的 valhalla.versionName / valhalla.versionCode。
 // Android 直接读取；iOS 通过生成的 Version.xcconfig 读取同一组值。
 // ---------------------------------------------------------------------------
-val appVersionName: String = providers.gradleProperty("valhalla.versionName").getOrElse("1.8.0")
-val appVersionCode: Int = providers.gradleProperty("valhalla.versionCode").getOrElse("18").toInt()
+val appVersionName: String = providers.gradleProperty("valhalla.versionName").getOrElse("1.9.0")
+val appVersionCode: Int = providers.gradleProperty("valhalla.versionCode").getOrElse("19").toInt()
 
 // ---------------------------------------------------------------------------
 // Release 签名：从环境变量或本地 keystore.properties 读取，不硬编码密钥。

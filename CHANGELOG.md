@@ -2,6 +2,65 @@
 
 本文件记录 ValhallaApp 的版本演进，按「阶段完成即提交 + 打 annotated tag」的节奏维护。
 
+## v1.9.0 - 稳定性与压力
+
+### 修复
+
+- **协程异常不再导致崩溃或状态卡死**
+  - `ConcurrentCommandDispatcher` 上行收集协程增加 `CoroutineExceptionHandler`：
+    收集流异常只记录原始类型与消息，下一次请求自动重建收集器，在途请求按超时收敛；
+  - `ScanController` 外层兜底捕获去重/`.catch` 自身异常，`finally` 保证 `scanning=false`；
+  - `OtaController` 进度收集协程单独捕获，进度通道故障不再影响传输主流程；
+  - `ConfigEditorController.load` 增加框架级异常兜底，`loading` 必定归零并给出错误；
+  - `AutoReconnectController` 新增 `loopSafely`：连接阶段异常按失败推进，等待阶段异常
+    直接进入 `CANCELLED` 终态，避免无限重试；
+  - Android/iOS BLE 的 `callbackFlow` 生产者协程异常改为 `close(error)`，不再逃逸为未捕获异常。
+- **连接池资源收敛**
+  - 建链失败、超时、取消时关闭已创建但未注册的 `ConnectionSession`；
+  - 超时边界完成注册的竞态会主动摘除并关闭，避免「池内有会话、状态为 DISCONNECTED」；
+  - 调用方取消时状态回落到 `DISCONNECTED`；
+  - `activeSessions()` 改为读取不可变快照，消除与 `stateMutex` 并发读写可变 map 的风险。
+- **报文日志并发安全**
+  - `InMemoryPacketLog` 的 id 改用原子计数、列表改用 CAS 整体替换，TX 发送与 RX 收集
+    可并发写入；500 条环形容量与唯一 id 在 8000 条并发写入下保持不变。
+
+### 新增
+
+- **日志脱敏（默认开启、不可关闭）**
+  - 新增 `PacketLogRedaction`：AUTH 请求 credential、AUTH 成功应答 token/challenge
+    等长掩码；`GET_DEVICE_INFO` 序列号保留前 4 字节；其他命令原样保留；
+  - 脱敏在写入阶段执行，TEXT / JSON / CSV、复制与界面展示使用同一份数据；
+  - 新增 `maskDeviceId`（可读截断）与 `hashDeviceId`（FNV-1a 稳定哈希）；
+  - 规则表与限制写入 [`docs/privacy.md`](docs/privacy.md)，`docs/export.md` 增加脱敏章节。
+- **统一错误边界**
+  - 新增 `feature/error/ErrorReporter`：50 条环形结构化记录，保留原始异常类型、消息与
+    截断栈；`ErrorKind` 区分 `USER_CANCELLED` / `COROUTINE_CANCELLED` / `TIMEOUT` / `FAILURE`；
+  - 新增 `UserCancelledException` 与 `classifyError`，判定顺序保证超时/用户取消不被当成普通取消；
+  - 新增 `CoroutineScope.launchSafely` 与 `LocalErrorReporter`，界面全部 17 处可点击协程
+    改为安全启动，根界面共用一份记录器。
+
+### 测试
+
+- 新增 22 项稳定性/压力/脱敏测试（JVM 宿主，固定种子或纯不变量）：
+  `ConcurrentCommandDispatcherStabilityTest`（200 并发指令 + 收集器异常恢复）、
+  `InMemoryPacketLogConcurrencyTest`（8×1000 并发写入）、
+  `MultiDeviceConnectionPoolStressTest`（16 设备×20 轮、超时/取消收敛）、
+  `BleFrameLinkSerializationTest`（40 并发写在途峰值 = 1）、
+  `PacketLogRedactionTest`（敏感字段不可还原、三格式一致）、
+  `ErrorBoundaryTest`（四类异常分类、重连/OTA 终态）。
+- 测试总数 436 → 458（core 276 / data 21 / feature 161），既有断言未削弱。
+
+### 文档
+
+- `docs/architecture.md` 新增第 9 章：异常分类表、三层错误边界、状态机收敛清单、
+  连接池/日志并发约束与压力测试结论；
+- 新增 `docs/privacy.md` 与 `docs/export.md` 脱敏章节。
+
+### 未验证
+
+- 崩溃埋点/远端上报、真机 BLE 并发与系统断链回调时序、小时级长时间运行；
+- 固件回传自由文本中是否含敏感信息（当前不解析、不脱敏）。
+
 ## v1.8.0 - 产品化界面与文案
 
 ### 新增

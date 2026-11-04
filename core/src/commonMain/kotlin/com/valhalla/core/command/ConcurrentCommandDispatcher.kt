@@ -12,6 +12,7 @@ import com.valhalla.core.protocol.message.MessageCodec
 import com.valhalla.core.protocol.message.MessageDecodeException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -38,6 +39,12 @@ import kotlinx.coroutines.withTimeoutOrNull
  * 失败统一以 [CommandFailure] 的结构化子类抛出：
  * [CommandFailure.Timeout]、[CommandFailure.TransportFailure]、
  * [CommandFailure.InvalidResponse]、[CommandFailure.DeviceRejected]。
+ *
+ * 稳定性约束：
+ * - 上行收集协程带有 [CoroutineExceptionHandler]；收集流意外异常只会记录日志并结束该协程，
+ *   不会沿默认 Handler 崩溃 App，下一次 [execute] 会检测到 job 已结束并重建收集器；
+ * - 收集器死亡瞬间的在途请求无人应答，按各自超时收敛为 [CommandFailure.Timeout]，
+ *   不会永久挂起。
  */
 class ConcurrentCommandDispatcher(
     private val link: FrameLink,
@@ -58,6 +65,21 @@ class ConcurrentCommandDispatcher(
     private var collectorJob: Job? = null
 
     private val notificationSink = MutableSharedFlow<DeviceNotification>(extraBufferCapacity = 64)
+
+    /**
+     * 收集协程的异常边界：把原始异常类型与消息写入日志后结束该协程。
+     * 不使用默认 uncaught handler，避免 Android 主线程默认行为直接崩溃进程。
+     */
+    private val collectorExceptionHandler = CoroutineExceptionHandler { _, error ->
+        if (error !is CancellationException) {
+            logger?.log(
+                LogLevel.ERROR,
+                TAG,
+                "上行收集协程异常终止（${error::class.simpleName}）：${error.message}；" +
+                    "将在下一次请求时重建收集协程",
+            )
+        }
+    }
 
     /** 设备主动通知流。解码失败的通知会被丢弃并记录日志，不打断业务请求。 */
     val notifications: SharedFlow<DeviceNotification> = notificationSink.asSharedFlow()
@@ -164,8 +186,12 @@ class ConcurrentCommandDispatcher(
     private suspend fun ensureCollectorStarted() {
         startMutex.withLock {
             if (collectorJob?.isActive != true) {
-                collectorJob = scope.launch {
+                val previous = collectorJob
+                collectorJob = scope.launch(collectorExceptionHandler) {
                     link.incoming.collect { frame -> dispatch(frame) }
+                }
+                if (previous != null) {
+                    logger?.log(LogLevel.INFO, TAG, "已重建上行收集协程")
                 }
             }
         }

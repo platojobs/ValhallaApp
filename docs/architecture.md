@@ -442,4 +442,71 @@ CompositionLocalProvider(LocalStrings) → 全部 Composable 页面
 `VersionConsistencyTest`（`AppBuildInfo` 与 `gradle.properties` 一致）均在 JVM 宿主运行。
 系统语言切换、系统深浅色、真机字体与排版只能人工验收，自动化测试不覆盖渲染效果。
 
+## 9. 稳定性、异常边界与压力验证（v1.9.0）
+
+### 9.1 异常分类与语义
+
+所有异常在进入边界时先归类，四类语义互不吞并（`ErrorKind` / `classifyError`）：
+
+| 分类 | 判定 | 典型来源 | 处理 |
+| --- | --- | --- | --- |
+| `USER_CANCELLED` | `UserCancelledException` | 用户点击取消、OTA 中止 | 记录并结束操作，保留终态 |
+| `COROUTINE_CANCELLED` | 其他 `CancellationException` | 页面销毁、作用域取消 | 原样重抛，保持结构化并发 |
+| `TIMEOUT` | `TimeoutCancellationException` / `BleTimeoutException` / `CommandFailure.Timeout` | 建链超时、应答超时 | 转成超时 UiMessage 与失败终态 |
+| `FAILURE` | 其余 `Throwable` | 协议异常、IO/平台异常 | 记录原始类型并转成失败终态 |
+
+判定顺序固定：先用户取消与超时，再普通协程取消，最后真实失败；否则超时会被当成
+「正常取消」吞掉。
+
+### 9.2 三层错误边界
+
+1. **协程层（core）**：`ConcurrentCommandDispatcher` 的上行收集协程带
+   `CoroutineExceptionHandler`。收集流异常只记录日志并结束该协程，下一次 `execute`
+   检测到 job 不在活跃状态后重建；收集器死亡瞬间的在途请求按各自超时收敛，不会永久挂起。
+2. **控制器层（feature）**：扫描、配置、OTA、重连的入口都保证 `finally` 或 `catch`
+   把状态推进到终态（`scanning=false` / `loading=false` / `Failed` / `CANCELLED`），
+   异常同时转成 `UiMessage`。`OtaController` 的进度收集协程单独捕获异常，
+   进度增强失败不影响传输主流程。
+3. **界面层（feature/ui）**：根 `ValhallaApp` 创建唯一的 `ErrorReporter` 并放入
+   `LocalErrorReporter`；所有可点击协程改为 `scope.launchSafely(reporter, origin)`，
+   非取消异常被记录（保留原始异常类型、消息、截断栈），不会沿默认未捕获处理器崩溃进程。
+   `ErrorReporter` 为 50 条环形内存记录，id 与写入均为线程安全。
+
+### 9.3 状态机收敛清单
+
+| 状态机 | 已修复的不收敛路径 | 终态 |
+| --- | --- | --- |
+| 扫描 | 扫描流异常、去重逻辑异常 | `scanning=false` + `error` |
+| 详情 | 三项并发刷新单项失败、类型不符 | 各分组错误态，`loading` 归零 |
+| 配置 | 框架级异常越过 `loadOne` | `loading=false` + `error` |
+| OTA | 写入/校验/续传异常、进度收集异常、协程取消 | `Failed` / `Aborted` |
+| 导出 | 渲染/保存/分享意外异常 | `exporting=false` + 失败提示 |
+| 重连 | 连接回调或退避注入异常 | `CANCELLED`（不再停在 `CONNECTING`） |
+
+### 9.4 连接池与并发约束
+
+- `MultiDeviceConnectionPool`：容量信号量覆盖「建链阶段」，成功或失败都会归还；
+  `activeSessions()` 读取独立的不可变快照，不再暴露可变 map。
+- 建链失败、超时、取消都会关闭已创建但未注册的 `ConnectionSession`；超时边界完成注册
+  的极端竞态也会主动摘除并关闭，调用方取消时状态回落到 `DISCONNECTED`。
+- 同一条 BLE 链路的写操作由 `BleFrameLink.writeMutex` 串行化，OTA 分片与普通指令共享
+  同一把锁，压力测试断言在途写峰值恒为 1。
+- `InMemoryPacketLog`：id 通过原子计数分配，列表通过 CAS 整体替换；TX 发送与 RX 收集
+  可并发写入，容量上限（默认 500 条）与唯一 id 在 8000 条并发写入下仍成立。
+
+### 9.5 压力与稳定性测试
+
+新增测试均在 JVM 宿主运行，使用固定种子或纯不变量断言，避免 CI 抖动：
+
+| 测试 | 规模 | 结论 |
+| --- | --- | --- |
+| `ConcurrentCommandDispatcherStabilityTest` | 200 条并发指令、乱序应答 | 序号配对全部正确；收集协程异常被拦截并可重建 |
+| `InMemoryPacketLogConcurrencyTest` | 8 协程 × 1000 条 | 容量恒为 500，id 无重复，保留最新窗口 |
+| `MultiDeviceConnectionPoolStressTest` | 16 设备 × 20 轮 | 并发建链 ≤ 容量，会话连接/断开计数配平，槽位全部归还 |
+| `BleFrameLinkSerializationTest` | 40 次并发写 | 在途写峰值 = 1 |
+| `PacketLogRedactionTest` | AUTH / 设备信息 / 三种导出格式 | 敏感字段不可还原，非敏感命令不受影响 |
+
+真机 BLE 并发、系统断链回调时序、长时间运行（小时级）与崩溃埋点不在本轮自动化范围，
+标注为未验证。
+
 

@@ -28,11 +28,16 @@ data class ScanUiState(
  * 扫描控制器：把无限扫描流收敛成可供 Compose 渲染的快照。
  *
  * 同一 deviceId 只保留最新一条（RSSI 实时变化），按信号强度降序排列。
+ *
+ * 异常边界：扫描流异常会被 `.catch` 转成 [ScanUiState.error] 并停止扫描；
+ * `.catch` 自身或 `upsert` 抛出的异常再由外层 try/catch 兜底，
+ * 无论哪条路径结束，`finally` 都会把 [ScanUiState.scanning] 置回 false，避免永久「扫描中」。
  */
 class ScanController(
     private val bleClient: BleClient,
     private val scope: CoroutineScope,
     private val scanTimeoutMillis: Long = DEFAULT_SCAN_TIMEOUT_MILLIS,
+    private val onError: (Throwable) -> Unit = {},
 ) {
 
     private val mutableState = MutableStateFlow(ScanUiState())
@@ -68,6 +73,19 @@ class ScanController(
                         )
                     }
                     .collect { device -> upsert(device) }
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (error: Throwable) {
+                // 兜底：catch 操作符/去重逻辑自身异常也不能让扫描协程变成未捕获异常。
+                timeoutJob?.cancel()
+                onError(error)
+                mutableState.value = mutableState.value.copy(
+                    scanning = false,
+                    error = UiMessage(
+                        StringKey.SCAN_EMPTY_ERROR,
+                        mapOf("detail" to (error.message ?: StringKey.UNKNOWN.name)),
+                    ),
+                )
             } finally {
                 timeoutJob?.cancel()
                 mutableState.value = mutableState.value.copy(scanning = false)

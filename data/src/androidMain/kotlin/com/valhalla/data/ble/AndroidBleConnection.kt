@@ -8,6 +8,7 @@ import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothProfile
 import android.content.Context
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -103,10 +104,17 @@ internal class AndroidBleConnection private constructor(
             enableNotifications(characteristic)
 
             val job = launch {
-                notifications
-                    .filter { it.first.equals(characteristicUuid, ignoreCase = true) }
-                    .map { it.second }
-                    .collect { trySend(it) }
+                try {
+                    notifications
+                        .filter { it.first.equals(characteristicUuid, ignoreCase = true) }
+                        .map { it.second }
+                        .collect { trySend(it) }
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
+                } catch (error: Throwable) {
+                    // 生产者异常向上游关闭 flow，由收集侧统一处理，避免未捕获异常崩溃进程。
+                    close(error)
+                }
             }
 
             awaitClose {

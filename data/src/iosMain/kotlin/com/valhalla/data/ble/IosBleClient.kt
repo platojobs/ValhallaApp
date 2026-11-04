@@ -4,6 +4,7 @@ import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.ObjCSignatureOverride
 import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.usePinned
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -90,10 +91,16 @@ class IosBleClient : BleClient {
         }
 
         val job = launch {
-            scanSink.collect { device ->
-                if (filter.matchesName(device.name) && filter.matchesService(device.serviceUuids)) {
-                    trySend(device)
+            try {
+                scanSink.collect { device ->
+                    if (filter.matchesName(device.name) && filter.matchesService(device.serviceUuids)) {
+                        trySend(device)
+                    }
                 }
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (error: Throwable) {
+                close(error)
             }
         }
 
@@ -309,10 +316,16 @@ internal class IosBleConnection(
             peripheral.setNotifyValue(true, forCharacteristic = characteristic)
 
             val job = launch {
-                notifications
-                    .filter { it.first.equals(characteristicUuid, ignoreCase = true) }
-                    .map { it.second }
-                    .collect { trySend(it) }
+                try {
+                    notifications
+                        .filter { it.first.equals(characteristicUuid, ignoreCase = true) }
+                        .map { it.second }
+                        .collect { trySend(it) }
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
+                } catch (error: Throwable) {
+                    close(error)
+                }
             }
 
             awaitClose {

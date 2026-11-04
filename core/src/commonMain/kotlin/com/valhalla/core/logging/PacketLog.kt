@@ -27,6 +27,8 @@ import com.valhalla.core.protocol.message.StartOtaResponse
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.updateAndGet
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
 
@@ -155,13 +157,17 @@ fun filterPacketEntries(
  *
  * - 默认保留 [capacity] 条，超出后淘汰最旧记录，避免 OTA 长时间传输导致内存膨胀；
  * - [entries] 按写入顺序（最旧在前）暴露，UI 过滤时再按时间倒序；
- * - 写入采用整体替换不可变快照，读取侧永远拿到一致列表；并发极端场景允许丢日志，
- *   与 [InMemoryDeviceLogger] 的取舍一致。
+ * - 写入前统一执行 [PacketLogRedaction]：敏感字段（AUTH 的 credential/token/challenge、
+ *   设备序列号）以等长掩码替换后再编码 HEX 与生成摘要，导出不可关闭、不可还原；
+ * - 写入采用不可变快照 + CAS 更新，TX 发送与 RX 收集可并发调用：id 通过原子计数分配，
+ *   极端并发下只可能发生条目交错，不会产生重复 id 或超容量列表。
  */
 @OptIn(ExperimentalTime::class)
 class InMemoryPacketLog(
     private val capacity: Int = DEFAULT_CAPACITY,
     private val clockMillis: () -> Long = { Clock.System.now().toEpochMilliseconds() },
+    /** 脱敏开关，仅用于内部对照测试；生产环境恒为 true，不暴露给导出选项。 */
+    internal val redactionEnabled: Boolean = true,
 ) {
 
     init {
@@ -169,36 +175,45 @@ class InMemoryPacketLog(
     }
 
     private val mutableEntries = MutableStateFlow<List<PacketLogEntry>>(emptyList())
-    private var nextId: Long = 0
+    private val idCounter = MutableStateFlow(0L)
 
     val entries: StateFlow<List<PacketLogEntry>> = mutableEntries.asStateFlow()
 
     fun record(direction: FrameDirection, frame: Frame): PacketLogEntry {
+        val safeFrame = if (redactionEnabled) PacketLogRedaction.redactFrame(frame) else frame
         val hex: String = try {
-            Hex.encode(FrameCodec.encode(frame))
+            Hex.encode(FrameCodec.encode(safeFrame))
         } catch (_: Throwable) {
             ""
         }
-        val described = PacketLogFormatter.describe(direction, frame)
+        val described = PacketLogFormatter.describe(direction, safeFrame)
         val entry = PacketLogEntry(
-            id = nextId++,
+            id = nextId(),
             timestampMillis = clockMillis(),
             direction = direction,
-            command = frame.type,
-            sequence = frame.sequence,
-            isResponse = frame.isResponse,
-            isNotification = frame.isNotification,
+            command = safeFrame.type,
+            sequence = safeFrame.sequence,
+            isResponse = safeFrame.isResponse,
+            isNotification = safeFrame.isNotification,
             hex = hex,
             summary = described.summary,
             error = described.error,
         )
-        val appended = mutableEntries.value + entry
-        mutableEntries.value = if (appended.size > capacity) {
-            appended.subList(appended.size - capacity, appended.size).toList()
-        } else {
-            appended
+        mutableEntries.update { current ->
+            val appended = current + entry
+            if (appended.size > capacity) {
+                appended.subList(appended.size - capacity, appended.size).toList()
+            } else {
+                appended
+            }
         }
         return entry
+    }
+
+    private fun nextId(): Long {
+        // StateFlow.updateAndGet 在 KMP 各平台上都是原子的，无需引入 atomicfu。
+        val next = idCounter.updateAndGet { it + 1 } - 1
+        return next
     }
 
     fun filter(filter: PacketLogFilter, limit: Int = Int.MAX_VALUE): List<PacketLogEntry> =

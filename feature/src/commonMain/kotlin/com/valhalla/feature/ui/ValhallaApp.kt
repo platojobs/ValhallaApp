@@ -58,6 +58,9 @@ import com.valhalla.core.logging.validateEntryLimit
 import com.valhalla.core.profile.DeviceProfile
 import com.valhalla.core.profile.DeviceProfileRepository
 import com.valhalla.core.profile.OtaOutcome
+import com.valhalla.feature.error.ErrorReporter
+import com.valhalla.feature.error.LocalErrorReporter
+import com.valhalla.feature.error.launchSafely
 import com.valhalla.core.protocol.CommandType
 import com.valhalla.core.protocol.message.OtaAbortReason
 import com.valhalla.core.protocol.message.OtaStage
@@ -174,8 +177,12 @@ fun ValhallaApp() {
     var preferences by remember { mutableStateOf(AppPreferenceStore.load(settingsStore)) }
     val language = resolveLanguage(preferences.language, Locale.current.language)
     val strings = remember(language) { StringResolver(language) }
+    val errorReporter = remember { ErrorReporter() }
 
-    CompositionLocalProvider(LocalStrings provides strings) {
+    CompositionLocalProvider(
+        LocalStrings provides strings,
+        LocalErrorReporter provides errorReporter,
+    ) {
         ValhallaTheme(preferences.theme) {
             ValhallaContent(
                 preferences = preferences,
@@ -201,7 +208,14 @@ private fun ValhallaContent(
     val bleClient = remember { createBleClient() }
     val permissionController = rememberBlePermissionController(bleClient)
     val scope = rememberCoroutineScope()
-    val scanController = remember { ScanController(bleClient, scope) }
+    val errorReporter = LocalErrorReporter.current
+    val scanController = remember {
+        ScanController(
+            bleClient = bleClient,
+            scope = scope,
+            onError = { error -> errorReporter.record("scan", error) },
+        )
+    }
     // 档案仓储跨连接共享，保证扫描/详情页看到同一份设备历史。
     val profileRepository = remember { DeviceProfileRepository(createDeviceProfileStore()) }
 
@@ -244,9 +258,13 @@ private fun ValhallaContent(
                 checkpointStore = checkpointStore,
                 deviceId = connection.deviceId,
                 profileRepository = profileRepository,
+                errorReporter = errorReporter,
             ),
             checkpointStore = checkpointStore,
-            config = ConfigEditorController(dispatcher),
+            config = ConfigEditorController(
+                dispatcher = dispatcher,
+                onError = { error -> errorReporter.record("config", error) },
+            ),
             packetLog = packetLog,
             profileRepository = profileRepository,
         )
@@ -289,10 +307,13 @@ private fun ValhallaContent(
             isBluetoothOn = { bleClient.adapterState.value == BleAdapterState.POWERED_ON },
             attemptConnect = { runCatching { bleClient.connect(device.deviceId) }.getOrNull() },
             onConnected = { connection ->
-                scope.launch { runCatching { session.dispatcher.close() } }
+                scope.launchSafely(errorReporter, "reconnect-swap") {
+                    runCatching { session.dispatcher.close() }
+                }
                 reconnect = null
                 route = Route.Detail(createSession(connection, device, packetLog))
             },
+            onError = { error -> errorReporter.record("reconnect", error) },
         )
         reconnect = ReconnectSession(device, packetLog, controller)
         controller.start()
@@ -335,7 +356,7 @@ private fun ValhallaContent(
                         ?: UiMessage(StringKey.BLUETOOTH_UNAVAILABLE)
                     return@select
                 }
-                scope.launch {
+                scope.launchSafely(errorReporter, "connect") {
                     connectingDeviceId = device.deviceId
                     errorMessage = null
                     try {
@@ -414,7 +435,7 @@ private fun ValhallaContent(
                     current.session.userDisconnected = true
                     reconnect?.controller?.cancel()
                     reconnect = null
-                    scope.launch {
+                    scope.launchSafely(errorReporter, "disconnect-back") {
                         current.session.detail.disconnect()
                         current.session.dispatcher.close()
                         route = Route.Scan
@@ -702,6 +723,7 @@ private fun DetailScreen(
     val configState by session.config.state.collectAsState()
     val connected by session.connection.connected.collectAsState()
     val scope = rememberCoroutineScope()
+    val errorReporter = LocalErrorReporter.current
     val profile = session.profileRepository.get(state.deviceId)
     val zoneOffsetMinutes = remember { currentTimeZoneOffsetMinutes(Clock.System.now().toEpochMilliseconds()) }
 
@@ -721,7 +743,13 @@ private fun DetailScreen(
         )
         // 首次进入或能力从未判定过时才读取；已加载的键不因刷新设备信息被清空。
         if (session.config.state.value.fields.none { it.loaded }) {
-            session.config.load()
+            try {
+                session.config.load()
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (error: Throwable) {
+                errorReporter.record("config-autoload", error)
+            }
         }
     }
 
@@ -787,10 +815,10 @@ private fun DetailScreen(
 
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm)) {
-                    Button(onClick = { scope.launch { controller.authenticate("demo-token") } }) {
+                    Button(onClick = { scope.launchSafely(errorReporter, "auth") { controller.authenticate("demo-token") } }) {
                         Text(strings.t(StringKey.AUTHENTICATE))
                     }
-                    OutlinedButton(onClick = { scope.launch { controller.refreshInfo() } }) {
+                    OutlinedButton(onClick = { scope.launchSafely(errorReporter, "refresh-info") { controller.refreshInfo() } }) {
                         Text(strings.t(StringKey.REFRESH_INFO))
                     }
                 }
@@ -824,7 +852,7 @@ private fun DetailScreen(
                 ConfigSection(
                     controller = session.config,
                     state = configState,
-                    onRefreshDevice = { scope.launch { controller.refreshInfo() } },
+                    onRefreshDevice = { scope.launchSafely(errorReporter, "refresh-info") { controller.refreshInfo() } },
                 )
             }
 
@@ -913,6 +941,7 @@ private fun ConfigSection(
     val strings = LocalStrings.current
     val status = statusColors()
     val scope = rememberCoroutineScope()
+    val errorReporter = LocalErrorReporter.current
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(DesignTokens.Spacing.md),
@@ -925,7 +954,7 @@ private fun ConfigSection(
                     modifier = Modifier.weight(1f),
                 )
                 TextButton(
-                    onClick = { scope.launch { controller.load() } },
+                    onClick = { scope.launchSafely(errorReporter, "config-load") { controller.load() } },
                     enabled = !state.loading && !state.saving,
                 ) {
                     Text(
@@ -981,7 +1010,7 @@ private fun ConfigSection(
                     field = field,
                     savingAny = state.saving,
                     onTextChange = { controller.updateText(field.spec.key, it) },
-                    onSave = { scope.launch { controller.save(field.spec.key) } },
+                    onSave = { scope.launchSafely(errorReporter, "config-save") { controller.save(field.spec.key) } },
                 )
             }
             state.message?.let { message ->
@@ -1092,6 +1121,7 @@ private fun PacketLogScreen(
     val sharer = remember { createTextSharer() }
     val fileSaver = rememberFileSaver()
     val scope = rememberCoroutineScope()
+    val errorReporter = LocalErrorReporter.current
     // 索引只在日志快照变化时重建；输入关键字只做一次包含判断，不逐条重新拼接。
     val logIndex = remember(entries) { PacketLogIndex(entries) }
     val nowMillis = Clock.System.now().toEpochMilliseconds()
@@ -1189,7 +1219,7 @@ private fun PacketLogScreen(
         exportMessage = null
         exporting = true
         val snapshot = packetLog.entries.value
-        exportJob = scope.launch {
+        exportJob = scope.launchSafely(errorReporter, "packet-export") {
             try {
                 val now = Clock.System.now().toEpochMilliseconds()
                 // 渲染在 Default 调度器执行，避免大日志阻塞 UI；取消会在进度检查点生效。
@@ -1208,7 +1238,7 @@ private fun PacketLogScreen(
                 if (result.empty) {
                     exportSuccess = false
                     exportMessage = strings.t(StringKey.LOGS_ESTIMATE_NO_MATCH)
-                    return@launch
+                    return@launchSafely
                 }
                 val fileName = PacketLogExporter.resolveFileName(result.fileName, exportedNames)
                 when (action) {
@@ -1279,6 +1309,14 @@ private fun PacketLogScreen(
                 exportSuccess = false
                 exportMessage = strings.t(StringKey.LOGS_EXPORT_CANCELLED)
                 throw cancellation
+            } catch (error: Throwable) {
+                // 渲染/保存/分享的意外异常也要展示给用户并收敛 exporting 状态。
+                exportSuccess = false
+                exportMessage = strings.t(
+                    StringKey.FAILURE_UNKNOWN,
+                    "detail" to (error.message ?: error::class.simpleName ?: "unknown"),
+                )
+                errorReporter.record("packet-export", error)
             } finally {
                 exporting = false
                 progress = null
@@ -1619,6 +1657,7 @@ private fun OtaScreen(
     }
     val selectionState by selection.state.collectAsState()
     val scope = rememberCoroutineScope()
+    val errorReporter = LocalErrorReporter.current
     val running = state is OtaState.Preparing || state is OtaState.Transferring || state is OtaState.Verifying
 
     LaunchedEffect(selection) { selection.refreshResume() }
@@ -1644,7 +1683,7 @@ private fun OtaScreen(
             )
             TextButton(
                 onClick = {
-                    if (running) scope.launch { controller.abort() }
+                    if (running) scope.launchSafely(errorReporter, "ota-abort-back") { controller.abort() }
                     onBack()
                 },
             ) { Text(strings.t(StringKey.BACK)) }
@@ -1663,14 +1702,14 @@ private fun OtaScreen(
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.weight(1f),
             )
-            TextButton(onClick = { scope.launch { session.detail.refreshInfo() } }) {
+            TextButton(onClick = { scope.launchSafely(errorReporter, "refresh-device-info") { session.detail.refreshInfo() } }) {
                 Text(strings.t(StringKey.REFRESH_DEVICE_INFO))
             }
         }
 
         Button(
             onClick = {
-                scope.launch {
+                scope.launchSafely(errorReporter, "firmware-pick") {
                     selection.pickAndPrecheck(
                         currentVersion = detailState.firmware,
                         currentModel = detailState.deviceInfo?.model,
@@ -1713,7 +1752,7 @@ private fun OtaScreen(
         FirmwareCard(
             selectionState = selectionState,
             onRecheck = {
-                scope.launch {
+                scope.launchSafely(errorReporter, "firmware-recheck") {
                     selection.recheck(
                         currentVersion = detailState.firmware,
                         currentModel = detailState.deviceInfo?.model,
@@ -1829,7 +1868,7 @@ private fun OtaScreen(
             onClick = {
                 val firmware = selection.firmware
                 if (firmware != null) {
-                    scope.launch {
+                    scope.launchSafely(errorReporter, "ota-start") {
                         controller.startPackage(firmware, knownCrc16 = selectionState.computedCrc16)
                     }
                 }
@@ -1845,7 +1884,7 @@ private fun OtaScreen(
                 val firmware = selection.firmware
                 val point = selectionState.resumePoint
                 if (firmware != null && point != null) {
-                    scope.launch {
+                    scope.launchSafely(errorReporter, "ota-resume") {
                         controller.startPackage(
                             firmware,
                             resumeFrom = point,
@@ -1878,7 +1917,7 @@ private fun OtaScreen(
         }
 
         OutlinedButton(
-            onClick = { scope.launch { controller.abort() } },
+            onClick = { scope.launchSafely(errorReporter, "ota-abort") { controller.abort() } },
             enabled = running,
             modifier = Modifier.fillMaxWidth(),
         ) {
