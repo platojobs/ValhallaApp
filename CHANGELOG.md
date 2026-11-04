@@ -2,6 +2,61 @@
 
 本文件记录 ValhallaApp 的版本演进，按「阶段完成即提交 + 打 annotated tag」的节奏维护。
 
+## v0.8.0 - 固件文件选择、本地预检与断点持久化
+
+### 新增
+
+- 固件包格式（`core/firmware/`）：
+  - `FirmwareHeader`：104 字节固定头，包含魔数 `VF`、格式版本、固件版本
+    （major/minor/patch/build/渠道）、最多 4 个目标型号（支持 `*` 通配）、
+    payload 长度与 CRC-32；头部自身使用协议层 `Crc16`（CCITT-FALSE）校验。
+  - `FirmwareParser` / `FirmwarePackage`：解析头部、核对文件总长与声明 payload 长度，
+    保留 `FirmwareSource` 句柄按偏移分块读取，OTA 分片直接复用。
+  - `Crc32`：CRC-32/IEEE 计算与增量更新；文件头 CRC32 与协议层 CRC16 同时保留，
+    两者针对 payload 独立计算。
+  - `FirmwareException`：截断、魔数、格式、标志、字段、头 CRC、长度、payload CRC、
+    型号未知/不匹配、版本未知/回退、读取失败均有独立错误类型与稳定 `code`。
+- 文件选择（`feature/firmware/`）：
+  - 统一 `FirmwarePicker` 与 `PickedFirmware`，通过 `@Composable expect`
+    `rememberFirmwarePicker()` 暴露平台实现；
+  - Android 使用 SAF（`OpenDocument` + `ContentResolver` + `FileChannel` 随机读取），
+    iOS 使用 `UIDocumentPickerViewController` 导入副本 + POSIX `pread`，均在
+    `Dispatchers.IO`/`Mutex` 下分块读取，不整包进内存；
+  - `FirmwareSelectionController` 管理选择、解析、预检、断点加载与数据源生命周期。
+- 本地预检 `FirmwarePrechecker`：payload 上限（默认 32 MiB）、型号白名单、设备版本
+  未知、版本回退、payload CRC32 完整性；多问题一次性收集，超限时跳过 CRC 读取。
+- 断点持久化：
+  - `OtaResumePoint` 迁移至 `core/firmware` 并扩展 `firmwareVersion` 与 `crc32`；
+  - `OtaResumePointCodec` 固定字符串编码
+    `v1|sessionId|major.minor.patch.build|channel|totalBytes|sentBytes|crc16|crc32`；
+  - `OtaCheckpointStore` + `InMemoryOtaCheckpointStore`，平台实现
+    `createOtaCheckpointStore()`：Android SharedPreferences、iOS NSUserDefaults、JVM 内存；
+  - `OtaController` 新增 `checkpointStore` 与 `startPackage(firmware, resumeFrom)`：
+    流式计算协议 CRC16，每 4 KiB 落盘一次断点，失败/取消记录精确偏移，
+    成功、中止、reset 清除；恢复时校验版本、总长、CRC32、CRC16 与设备 `sessionId`。
+- UI（OTA 页）：
+  - 「选择固件 / 重新选择固件」按钮；
+  - 固件信息卡：文件名、版本、payload 大小、声明/实际 CRC32、预检结果；
+  - 预检失败逐条展示原因，未通过时禁用「开始升级」；
+  - 「继续上次升级」「清除断点」入口，展示断点偏移；
+  - 「刷新设备信息」「重新预检」便于设备版本/型号缺失时恢复。
+- 文档：新增 [docs/firmware.md](docs/firmware.md)，说明固件格式、错误码、预检规则、
+  断点存储结构与失效条件、平台实现与未验证项。
+
+### 变更
+
+- `OtaResumePoint` 从 `feature/ota` 移到 `core/firmware`，并增加固件版本与 CRC32 字段。
+- OTA 页不再使用占位固件，改为必须选择真实固件并通过本地预检后才能启动。
+- `feature` Android 源集新增 `androidx.activity:activity-compose` 依赖。
+
+### 验证
+
+- `JAVA_HOME=$(/usr/libexec/java_home -v 21) ./gradlew :core:jvmTest :data:jvmTest :feature:jvmTest`：
+  core 127 + data 11 + feature 34 = 172 项全部通过。
+- `:composeApp:assembleDebug` 与 `:composeApp:linkDebugFrameworkIosSimulatorArm64` 均通过。
+- 平台文件选择器、SAF/UIDocumentPicker、SharedPreferences/NSUserDefaults 未在真机验证；
+  断点续传依赖设备复用 `sessionId`，当前协议无恢复指令，需真机联调。
+
 ## v0.7.0 - OTA 完整化
 
 ### 新增

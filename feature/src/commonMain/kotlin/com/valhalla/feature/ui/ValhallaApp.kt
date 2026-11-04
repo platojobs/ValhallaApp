@@ -19,6 +19,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -28,11 +29,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.valhalla.core.command.ConcurrentCommandDispatcher
+import com.valhalla.core.firmware.OtaCheckpointStore
 import com.valhalla.data.ble.BleConnection
 import com.valhalla.data.ble.BleDevice
 import com.valhalla.data.ble.BleFrameLink
 import com.valhalla.data.ble.createBleClient
+import com.valhalla.data.firmware.createOtaCheckpointStore
 import com.valhalla.feature.detail.DeviceDetailController
+import com.valhalla.feature.firmware.FirmwareSelectionController
+import com.valhalla.feature.firmware.FirmwareSelectionState
+import com.valhalla.feature.firmware.rememberFirmwarePicker
 import com.valhalla.feature.ota.OtaController
 import com.valhalla.feature.ota.OtaState
 import com.valhalla.core.protocol.message.OtaStage
@@ -41,12 +47,13 @@ import com.valhalla.feature.scan.ScanUiState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
-/** 一次已建立连接对应的协议栈与控制器，详情页与 OTA 页共享同一调度器。 */
+/** 一次已建立连接对应的协议栈与控制器，详情页与 OTA 页共享同一调度器与断点存储。 */
 private class DeviceSession(
     val connection: BleConnection,
     val dispatcher: ConcurrentCommandDispatcher,
     val detail: DeviceDetailController,
     val ota: OtaController,
+    val checkpointStore: OtaCheckpointStore,
 )
 
 private sealed interface Route {
@@ -94,6 +101,7 @@ fun ValhallaApp() {
                         val connection = bleClient.connect(device.deviceId)
                         scanController.stopScan()
                         val dispatcher = ConcurrentCommandDispatcher(BleFrameLink(connection))
+                        val checkpointStore = createOtaCheckpointStore()
                         val session = DeviceSession(
                             connection = connection,
                             dispatcher = dispatcher,
@@ -106,7 +114,9 @@ fun ValhallaApp() {
                                 dispatcher = dispatcher,
                                 scope = scope,
                                 connectionState = connection.connected,
+                                checkpointStore = checkpointStore,
                             ),
+                            checkpointStore = checkpointStore,
                         )
                         route = Route.Detail(session)
                     } catch (cancellation: CancellationException) {
@@ -133,7 +143,7 @@ fun ValhallaApp() {
         )
 
         is Route.Ota -> OtaScreen(
-            controller = current.session.ota,
+            session = current.session,
             onBack = { route = Route.Detail(current.session) },
         )
     }
@@ -260,12 +270,30 @@ private fun DetailScreen(
 
 @Composable
 private fun OtaScreen(
-    controller: OtaController,
+    session: DeviceSession,
     onBack: () -> Unit,
 ) {
+    val controller = session.ota
     val state by controller.state.collectAsState()
+    val detailState by session.detail.state.collectAsState()
+    val picker = rememberFirmwarePicker()
+    val selection = remember(picker, session.checkpointStore) {
+        FirmwareSelectionController(picker, session.checkpointStore)
+    }
+    val selectionState by selection.state.collectAsState()
     val scope = rememberCoroutineScope()
     val running = state is OtaState.Preparing || state is OtaState.Transferring || state is OtaState.Verifying
+
+    LaunchedEffect(selection) { selection.refreshResume() }
+    val terminal = state is OtaState.Succeeded || state is OtaState.Failed || state is OtaState.Aborted
+    LaunchedEffect(terminal) {
+        if (terminal) {
+            if (state is OtaState.Succeeded) selection.clearResume() else selection.refreshResume()
+        }
+    }
+    DisposableEffect(selection) {
+        onDispose { selection.close() }
+    }
 
     Column(
         modifier = Modifier.fillMaxSize().padding(16.dp),
@@ -281,9 +309,46 @@ private fun OtaScreen(
             ) { Text("返回") }
         }
 
-        Text(
-            "流程：START_OTA（总长度 + CRC16）→ 逐片 OTA_DATA（按协议偏移）→ FINISH_OTA 校验。",
-            style = MaterialTheme.typography.bodySmall,
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                "设备版本：${detailState.firmwareVersion ?: "未知"} · 型号：${detailState.deviceInfo?.model ?: "未知"}",
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = { scope.launch { session.detail.refreshInfo() } }) {
+                Text("刷新设备信息")
+            }
+        }
+
+        Button(
+            onClick = {
+                scope.launch {
+                    selection.pickAndPrecheck(
+                        currentVersion = detailState.firmware,
+                        currentModel = detailState.deviceInfo?.model,
+                    )
+                }
+            },
+            enabled = !running && !selectionState.picking,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(if (selectionState.selected) "重新选择固件" else "选择固件")
+        }
+
+        if (selectionState.picking) {
+            Text("正在打开文件选择器…", style = MaterialTheme.typography.bodySmall)
+        }
+
+        FirmwareCard(
+            selectionState = selectionState,
+            onRecheck = {
+                scope.launch {
+                    selection.recheck(
+                        currentVersion = detailState.firmware,
+                        currentModel = detailState.deviceInfo?.model,
+                    )
+                }
+            },
         )
 
         when (val current = state) {
@@ -317,7 +382,7 @@ private fun OtaScreen(
                 Text("已发送 ${current.sentBytes}/${current.totalBytes} 字节")
                 current.resumePoint?.let { point ->
                     Text(
-                        "断点：${point.sentBytes} 字节（会话 ${point.sessionId}），恢复协议待真机确认",
+                        "已保存断点：${point.sentBytes}/${point.totalBytes} 字节（会话 ${point.sessionId}）",
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
@@ -328,13 +393,40 @@ private fun OtaScreen(
 
         Button(
             onClick = {
-                val firmware = ByteArray(2048) { index -> (index % 251).toByte() }
-                scope.launch { controller.start(firmware) }
+                val firmware = selection.firmware
+                if (firmware != null) scope.launch { controller.startPackage(firmware) }
             },
-            enabled = !running,
+            enabled = !running && selectionState.readyForOta,
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text("使用占位固件开始升级")
+            Text("开始升级")
+        }
+
+        OutlinedButton(
+            onClick = {
+                val firmware = selection.firmware
+                val point = selectionState.resumePoint
+                if (firmware != null && point != null) {
+                    scope.launch { controller.startPackage(firmware, resumeFrom = point) }
+                }
+            },
+            enabled = !running && selectionState.canResume,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            val point = selectionState.resumePoint
+            Text(
+                if (point != null) {
+                    "继续上次升级（${point.sentBytes}/${point.totalBytes}）"
+                } else {
+                    "继续上次升级"
+                },
+            )
+        }
+
+        if (selectionState.resumePoint != null) {
+            TextButton(onClick = { selection.clearResume() }, enabled = !running) {
+                Text("清除断点")
+            }
         }
 
         OutlinedButton(
@@ -354,6 +446,61 @@ private fun OtaScreen(
         }
     }
 }
+
+@Composable
+private fun FirmwareCard(
+    selectionState: FirmwareSelectionState,
+    onRecheck: () -> Unit,
+) {
+    if (selectionState.packageName == null && selectionState.error == null) return
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            selectionState.packageName?.let { name ->
+                Text(name, style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "版本 ${selectionState.version} · payload ${formatBytes(selectionState.payloadBytes)}",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Text(
+                    "CRC32 声明 ${hex32(selectionState.declaredCrc32)} · 实际 ${hex32(selectionState.computedCrc32)}",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+
+            val precheck = selectionState.precheck
+            if (precheck == null) {
+                if (selectionState.error == null) {
+                    Text("尚未预检", style = MaterialTheme.typography.bodySmall)
+                }
+            } else if (precheck.passed) {
+                Text("预检通过，可以开始升级", color = MaterialTheme.colorScheme.primary)
+            } else {
+                Text("预检未通过，OTA 不可启动：", color = MaterialTheme.colorScheme.error)
+                precheck.errors.forEach { error ->
+                    Text("· ${error.message}", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+
+            selectionState.error?.let { message ->
+                Text(
+                    "固件读取失败：$message" + (selectionState.errorCode?.let { "（$it）" } ?: ""),
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+
+            TextButton(onClick = onRecheck) { Text("重新预检") }
+        }
+    }
+}
+
+private fun formatBytes(bytes: Long): String = when {
+    bytes >= 1024L * 1024 -> "${bytes / (1024L * 1024)} MiB（$bytes 字节）"
+    bytes >= 1024L -> "${bytes / 1024} KiB（$bytes 字节）"
+    else -> "$bytes 字节"
+}
+
+private fun hex32(value: Long?): String =
+    value?.let { "0x" + it.toString(16).padStart(8, '0') } ?: "—"
 
 private fun OtaStage.label(): String = when (this) {
     OtaStage.PREPARING -> "准备中"

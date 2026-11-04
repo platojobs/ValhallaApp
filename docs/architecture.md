@@ -2,7 +2,7 @@
 
 本文说明 `core` 协议栈如何经 `data` 的 BLE 适配层进入 `feature` 控制器与 Compose UI，
 重点覆盖 `FrameLink`、`ConcurrentCommandDispatcher` 与 OTA 时序。协议字段定义见
-[protocol.md](protocol.md)。
+[protocol.md](protocol.md)；固件包格式、本地预检与断点持久化见 [firmware.md](firmware.md)。
 
 ## 1. 分层与数据流
 
