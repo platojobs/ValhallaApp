@@ -77,4 +77,46 @@ class PacketLogIndexTest {
         assertEquals(0, index.size)
         assertEquals(emptyList(), index.query(PacketLogFilter(keyword = "x")))
     }
+
+    @Test
+    fun `命令集合与时间闭区间筛选与线性过滤一致`() {
+        val index = PacketLogIndex(entries)
+        val filters = listOf(
+            PacketLogFilter(commands = setOf(CommandType.SET_CONFIG, CommandType.OTA_DATA)),
+            PacketLogFilter(fromMillis = 1_000, toMillis = 3_000),
+            PacketLogFilter(fromMillis = 2_000, toMillis = 2_000),
+            PacketLogFilter(errorsOnly = true, fromMillis = 2_000, toMillis = 4_000),
+            PacketLogFilter(
+                commands = setOf(CommandType.SET_CONFIG),
+                keyword = "ok",
+                fromMillis = 3_000,
+                toMillis = 3_000,
+            ),
+            PacketLogFilter(fromMillis = 4_000, toMillis = 1_000),
+        )
+
+        filters.forEach { filter ->
+            val expected = filterPacketEntries(entries, filter, limit = InMemoryPacketLog.DEFAULT_CAPACITY)
+            assertEquals(expected.map { it.id }, index.query(filter).map { it.id }, "过滤条件：$filter")
+        }
+
+        assertEquals(listOf(4L, 3L, 2L), index.query(filters[0]).map { it.id })
+        assertEquals(listOf(3L, 2L, 1L), index.query(filters[1]).map { it.id })
+        assertEquals(listOf(2L), index.query(filters[2]).map { it.id })
+        assertEquals(listOf(4L), index.query(filters[3]).map { it.id })
+        assertEquals(listOf(3L), index.query(filters[4]).map { it.id })
+    }
+
+    @Test
+    fun `多选命令优先于单选命令`() {
+        val single = PacketLogFilter(command = CommandType.GET_CONFIG)
+        val multi = PacketLogFilter(
+            command = CommandType.GET_CONFIG,
+            commands = setOf(CommandType.SET_CONFIG),
+        )
+        assertEquals(setOf(CommandType.GET_CONFIG), single.effectiveCommands)
+        assertEquals(setOf(CommandType.SET_CONFIG), multi.effectiveCommands)
+        assertEquals(listOf(3L, 2L), filterPacketEntries(entries, multi).map { it.id })
+        assertEquals(listOf(1L), filterPacketEntries(entries, single).map { it.id })
+    }
 }

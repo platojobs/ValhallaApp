@@ -245,3 +245,45 @@ ConfigEditorState.visibleFields / hiddenFields + capabilityNotice
 - 时区：`currentTimeZoneOffsetMinutes()` 由平台实现，`core` 只接收偏移参数，保证可测试；
 - 检索性能：`PacketLogIndex` 在日志快照变化时构建一次小写索引，搜索只做一次 `contains`；
   UI 对输入做 150ms 去抖，不随每次按键全量重算。
+
+### 6.6 报文日志导出增强（v1.5.0）
+
+导出流程与格式细节见 [export.md](export.md)。
+
+```
+UI 筛选状态（命令集合 / 仅错误 / 时间 / 关键字）
+        │ PacketLogFilter
+        ├── PacketLogIndex.query()      ← 列表展示
+        └── PacketLogExporter.estimate()/build() ← 预估与导出
+                 │ TEXT / JSON / CSV
+                 ▼
+        rememberFileSaver()（Android SAF / iOS UIDocumentPicker）
+        createTextSharer()（Android ACTION_SEND / iOS UIActivityViewController）
+```
+
+- **筛选单一来源**：`PacketLogFilter` 新增 `commands: Set<CommandType>`、`fromMillis`/`toMillis`
+  （闭区间）与 `matches(entry)`；线性过滤 `filterPacketEntries`、索引 `PacketLogIndex.query`
+  与导出共用同一判断，关键字字段也由 `searchText()` 统一。
+  时间倒序（起 > 止）在语义上不匹配任何条目，线性与索引结果都为空。
+- **上限与预估**：`PacketLogExportOptions` 限定 1..5000 条、512 B..16 MiB、单条 HEX ≤65536；
+  UI 的条数 / KB 输入先经 `validateEntryLimit` / `validateByteLimitKb` 校验，
+  非法输入禁用导出并显示原因。`estimate()` 和 `build()` 走同一套筛选与截断引擎，
+  因此预估条数/字节与实际导出一致；超限时只丢弃最旧条目
+  （`PacketLogTruncationTarget.OLDEST`），并提示「截断最旧的一端」。
+- **空结果**：筛选无命中或上限过小时 `build()` 返回 `empty = true`、`text = ""`，
+  UI 不调用保存/分享，避免产生空文件或只有头部的文件。
+- **格式**：`PacketLogExportFormat` 提供 `TEXT`（既有可读风格）、`JSON`（含元数据与
+  完整结构化字段）与 `CSV`（表头 + 行，逗号/引号/换行转义）；HEX 逐条受
+  `maxHexCharsPerEntry` 限制，JSON/CSV 额外记录 `hexOmittedChars`。
+- **平台差异**：`feature/export` 的 `rememberFileSaver()` 是 expect/actual：
+  Android 用 `ActivityResultContracts.StartActivityForResult` + `ACTION_CREATE_DOCUMENT`
+  写 `content://` URI；iOS 先写临时目录，再展示
+  `UIDocumentPickerViewController(forExportingURLs:asCopy:)`；JVM 返回 `UNAVAILABLE`。
+  分享继续复用 `data/share/TextSharer`，两个入口互不替代。
+- **大日志与取消**：`build()` 为 `suspend`，在筛选/渲染/拼装阶段按批次 `yield()` 并
+  `ensureActive()`；UI 用 `Dispatchers.Default` 执行，进度经 `PacketLogExportProgress`
+  驱动进度条，可随时取消。内容完全构建后才交给平台写文件，取消不会留下半成品；
+  iOS 的临时文件是内容快照，未选中保存位置时不会写入用户目录。
+- **重名冲突**：文件名 `valhalla-packet-log-<YYYYMMDD-HHMMSS>.<ext>`；
+  `resolveFileName()` 在会话内维护已用文件名，冲突时追加 `-1`、`-2`…（忽略大小写）；
+  系统 SAF / 文档选择器仍可能在覆盖确认上二次提示。

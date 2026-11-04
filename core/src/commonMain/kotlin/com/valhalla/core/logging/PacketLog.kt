@@ -77,32 +77,75 @@ data class PacketLogEntry(
     }
 }
 
+/**
+ * 报文日志筛选条件。
+ *
+ * - [commands] 为多选命令集合；为空时退回 [command] 的单选语义，
+ *   两者都为空表示不按命令过滤；
+ * - [fromMillis] / [toMillis] 是闭区间边界（含端点），任一为 null 表示该侧不限；
+ * - [errorsOnly] 只保留 [PacketLogEntry.error] 非空的条目；
+ * - [keyword] 匹配命令名 / 摘要 / HEX / seq / 错误文本，忽略大小写。
+ *
+ * 过滤逻辑集中在 [matches]，UI 线性过滤、索引查询与导出一律复用，避免多处实现分叉。
+ */
 data class PacketLogFilter(
     val command: CommandType? = null,
+    val commands: Set<CommandType> = emptySet(),
     val errorsOnly: Boolean = false,
     val keyword: String = "",
-)
+    val fromMillis: Long? = null,
+    val toMillis: Long? = null,
+) {
 
-/** 按时间倒序过滤报文：命令、错误标记、关键字（匹配命令名/摘要/HEX/seq）。 */
+    /** 实际生效的命令集合：多选优先，否则退回单选。 */
+    val effectiveCommands: Set<CommandType>
+        get() = if (commands.isNotEmpty()) commands else command?.let { setOf(it) } ?: emptySet()
+
+    /** 时间范围是否倒序（起 > 止）；倒序范围在语义上不匹配任何条目。 */
+    val timeRangeReversed: Boolean
+        get() = fromMillis != null && toMillis != null && fromMillis > toMillis
+
+    /** 单条日志是否满足当前筛选条件（含关键字）。 */
+    fun matches(entry: PacketLogEntry): Boolean {
+        if (!matchesFacets(entry)) return false
+        val keyword = keyword.trim()
+        return keyword.isEmpty() || entry.searchText().contains(keyword, ignoreCase = true)
+    }
+}
+
+/** 除关键字外的筛选判断，供索引与预计算 haystack 复用。 */
+internal fun PacketLogFilter.matchesFacets(entry: PacketLogEntry): Boolean {
+    val commands = effectiveCommands
+    if (commands.isNotEmpty() && entry.command !in commands) return false
+    if (errorsOnly && entry.error == null) return false
+    if (fromMillis != null && entry.timestampMillis < fromMillis) return false
+    if (toMillis != null && entry.timestampMillis > toMillis) return false
+    return true
+}
+
+/** 关键字搜索覆盖的原始字段；索引侧对该结果做一次小写缓存。 */
+internal fun PacketLogEntry.searchText(): String = buildString {
+    append(command.name)
+    append('\n')
+    append(summary)
+    append('\n')
+    append(hex)
+    append('\n')
+    append(sequence)
+    append('\n')
+    append(error.orEmpty())
+}
+
+/** 按时间倒序过滤报文：命令集合、错误标记、时间闭区间与关键字。 */
 fun filterPacketEntries(
     entries: List<PacketLogEntry>,
     filter: PacketLogFilter,
     limit: Int = Int.MAX_VALUE,
 ): List<PacketLogEntry> {
-    val keyword = filter.keyword.trim()
+    if (limit <= 0) return emptyList()
     return entries.asReversed()
         .asSequence()
-        .filter { entry -> filter.command == null || entry.command == filter.command }
-        .filter { entry -> !filter.errorsOnly || entry.error != null }
-        .filter { entry ->
-            keyword.isEmpty() || listOf(
-                entry.command.name,
-                entry.summary,
-                entry.hex,
-                entry.sequence.toString(),
-                entry.error.orEmpty(),
-            ).any { it.contains(keyword, ignoreCase = true) }
-        }
+        .filter { entry -> filter.matches(entry) }
         .take(limit)
         .toList()
 }

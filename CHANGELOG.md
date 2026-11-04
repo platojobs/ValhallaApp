@@ -2,6 +2,55 @@
 
 本文件记录 ValhallaApp 的版本演进，按「阶段完成即提交 + 打 annotated tag」的节奏维护。
 
+## v1.5.0 - 报文日志导出增强
+
+### 新增
+
+- **导出筛选**
+  - `PacketLogFilter` 扩展 `commands`（多选命令集合）与 `fromMillis`/`toMillis`（闭区间），
+    新增 `matches()`；`filterPacketEntries`、`PacketLogIndex.query` 与导出共用同一套判断；
+  - 时间范围支持 `YYYY-MM-DD HH:mm:ss[.SSS]` 输入，包含起止端点；起 > 止时线性与索引
+    结果均为空，导出同样为空；
+  - 仅错误过滤、命令集合与关键字可任意组合，导出前提示命中条数。
+- **导出口径**
+  - 自定义条数上限（1..5000）与大小上限（1..16384 KB，即 512 B..16 MiB），
+    `validateEntryLimit` / `validateByteLimitKb` 拒绝空值、非整数与越界并给出中文原因；
+  - `estimate()` 与 `build()` 共用同一筛选/截断引擎，导出前显示预估条数与字节数；
+    超限时明确提示「截断最旧的一端」，保持最新优先语义；
+  - 空结果返回 `empty = true` 且 `text = ""`，UI 不写空文件。
+- **格式与保存**
+  - 新增 `PacketLogExportFormat.TEXT / JSON / CSV`；JSON 含 schemaVersion、导出时间、
+    时区、来源/匹配/导出条数、截断标记、上限与筛选快照，条目字段完整；
+    CSV 带表头并对逗号、引号、换行做标准转义；
+  - `feature/export` 新增 expect/actual `rememberFileSaver()`：Android 走 SAF
+    `ACTION_CREATE_DOCUMENT`，iOS 走 `UIDocumentPickerViewController(forExportingURLs:asCopy:)`，
+    JVM 返回 `UNAVAILABLE`；分享入口继续复用 `data/share/TextSharer`；
+  - 文件名按格式生成后缀，`resolveFileName()` 处理会话内重名冲突（追加 `-1`、`-2`…）。
+- **大日志体验**
+  - 导出在 `Dispatchers.Default` 异步执行，`PacketLogExportProgress` 提供筛选/生成/拼装
+    三阶段进度；UI 可取消，内容构建完成前不触发平台写文件，取消后不留半成品。
+
+### 修改
+
+- 空日志 / 空筛选结果不再输出仅有头部的文本，避免生成误导性的“空导出”文件。
+
+### 文档
+
+- `docs/architecture.md` 新增 6.6 节，说明筛选单一来源、上限/截断、平台保存差异与取消语义；
+- 新增 `docs/export.md`：文件名、筛选与上限规则、TEXT/JSON/CSV 示例与平台差异。
+
+### 测试
+
+- 新增 18 项测试：
+  - `core`：筛选组合（命令集合/时间闭区间/仅错误/关键字）、倒序范围、线性与索引一致性、
+    预估与导出一致、条数/大小输入校验与构造保护、JSON 字段与转义、JSON 截断元数据、
+    CSV 逗号/引号/换行/HEX 转义、文件名与重名冲突、取消不产生结果、进度阶段、
+    本地时间解析、上限过小时拒绝输出；
+  - 既有导出断言保留，空日志断言按“不输出空文件”的新口径加强。
+- 全量 `:core:jvmTest :data:jvmTest :feature:jvmTest`：353 项通过
+  （core 248 + data 11 + feature 94；v1.4.0 为 335 项）。
+- `:composeApp:assembleDebug` 与 `:composeApp:linkDebugFrameworkIosSimulatorArm64` 构建通过。
+
 ## v1.4.0 - 配置能力协商、日志导出与交互稳健性
 
 ### 新增

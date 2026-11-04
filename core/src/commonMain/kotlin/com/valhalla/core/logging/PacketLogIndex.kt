@@ -14,20 +14,7 @@ class PacketLogIndex(entries: List<PacketLogEntry>) {
     private val indexed: List<Indexed> = entries
         .sortedWith(compareByDescending<PacketLogEntry> { it.timestampMillis }.thenByDescending { it.id })
         .map { entry ->
-            Indexed(
-                entry = entry,
-                haystack = buildString {
-                    append(entry.command.name)
-                    append('\n')
-                    append(entry.summary)
-                    append('\n')
-                    append(entry.hex)
-                    append('\n')
-                    append(entry.sequence)
-                    append('\n')
-                    append(entry.error.orEmpty())
-                }.lowercase(),
-            )
+            Indexed(entry = entry, haystack = entry.searchText().lowercase())
         }
 
     val size: Int get() = indexed.size
@@ -38,8 +25,8 @@ class PacketLogIndex(entries: List<PacketLogEntry>) {
         val result = ArrayList<PacketLogEntry>(minOf(limit, indexed.size))
         for (item in indexed) {
             if (result.size >= limit) break
-            if (filter.command != null && item.entry.command != filter.command) continue
-            if (filter.errorsOnly && item.entry.error == null) continue
+            // 命令集合、仅错误与时间闭区间和线性过滤共用同一判断。
+            if (!filter.matchesFacets(item.entry)) continue
             if (keyword.isNotEmpty() && !item.haystack.contains(keyword)) continue
             result += item.entry
         }

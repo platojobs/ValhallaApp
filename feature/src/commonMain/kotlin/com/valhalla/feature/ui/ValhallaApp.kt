@@ -30,6 +30,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
@@ -40,12 +41,20 @@ import com.valhalla.core.config.DeviceConfigTarget
 import com.valhalla.core.firmware.OtaCheckpointStore
 import com.valhalla.core.logging.InMemoryPacketLog
 import com.valhalla.core.logging.PacketLogEntry
+import com.valhalla.core.logging.PacketLogExportEstimate
+import com.valhalla.core.logging.PacketLogExportFormat
+import com.valhalla.core.logging.PacketLogExportOptions
+import com.valhalla.core.logging.PacketLogExportPhase
+import com.valhalla.core.logging.PacketLogExportProgress
 import com.valhalla.core.logging.PacketLogExporter
 import com.valhalla.core.logging.PacketLogFilter
 import com.valhalla.core.logging.PacketLogIndex
 import com.valhalla.core.logging.formatAbsoluteTime
 import com.valhalla.core.logging.formatForCopy
 import com.valhalla.core.logging.formatRelativeTime
+import com.valhalla.core.logging.parseLocalDateTimeMillis
+import com.valhalla.core.logging.validateByteLimitKb
+import com.valhalla.core.logging.validateEntryLimit
 import com.valhalla.core.profile.DeviceProfile
 import com.valhalla.core.profile.DeviceProfileRepository
 import com.valhalla.core.profile.OtaOutcome
@@ -65,6 +74,9 @@ import com.valhalla.feature.config.ConfigEditorController
 import com.valhalla.feature.config.ConfigEditorState
 import com.valhalla.feature.config.ConfigFieldState
 import com.valhalla.feature.detail.DeviceDetailController
+import com.valhalla.feature.export.FileSaveStatus
+import com.valhalla.feature.export.SaveableFile
+import com.valhalla.feature.export.rememberFileSaver
 import com.valhalla.feature.firmware.FirmwareSelectionController
 import com.valhalla.feature.firmware.FirmwareSelectionState
 import com.valhalla.feature.firmware.rememberFirmwarePicker
@@ -74,8 +86,11 @@ import com.valhalla.core.protocol.message.OtaStage
 import com.valhalla.feature.scan.ScanController
 import com.valhalla.feature.scan.ScanUiState
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
@@ -507,6 +522,8 @@ private fun ConfigFieldRow(
     }
 }
 
+private enum class ExportAction { SAVE, SHARE }
+
 @OptIn(ExperimentalTime::class)
 @Composable
 private fun PacketLogScreen(
@@ -517,16 +534,31 @@ private fun PacketLogScreen(
     var query by remember { mutableStateOf("") }
     var appliedQuery by remember { mutableStateOf("") }
     var errorsOnly by remember { mutableStateOf(false) }
-    var command by remember { mutableStateOf<CommandType?>(null) }
+    var selectedCommands by remember { mutableStateOf<Set<CommandType>>(emptySet()) }
+    var fromText by remember { mutableStateOf("") }
+    var toText by remember { mutableStateOf("") }
+    var format by remember { mutableStateOf(PacketLogExportFormat.TEXT) }
+    var maxEntriesText by remember { mutableStateOf(PacketLogExportOptions.DEFAULT.maxEntries.toString()) }
+    var maxBytesKbText by remember {
+        mutableStateOf((PacketLogExportOptions.DEFAULT.maxBytes / 1024).toString())
+    }
     var exporting by remember { mutableStateOf(false) }
+    var progress by remember { mutableStateOf<PacketLogExportProgress?>(null) }
+    var exportJob by remember { mutableStateOf<Job?>(null) }
     var exportMessage by remember { mutableStateOf<String?>(null) }
+    var estimate by remember { mutableStateOf<PacketLogExportEstimate?>(null) }
+
     val clipboard = LocalClipboardManager.current
     val sharer = remember { createTextSharer() }
+    val fileSaver = rememberFileSaver()
     val scope = rememberCoroutineScope()
     // 索引只在日志快照变化时重建；输入关键字只做一次包含判断，不逐条重新拼接。
     val logIndex = remember(entries) { PacketLogIndex(entries) }
     val nowMillis = Clock.System.now().toEpochMilliseconds()
     val zoneOffsetMinutes = remember { currentTimeZoneOffsetMinutes(nowMillis) }
+    // 会话内已使用的文件名，用于重名冲突解析。
+    val exportedNames = remember { mutableListOf<String>() }
+    val availableCommands = remember(entries) { entries.map { it.command }.distinct().sortedBy { it.name } }
 
     // 输入去抖：停止输入 150ms 后才切换过滤结果，避免每个按键触发全量过滤。
     LaunchedEffect(query) {
@@ -536,12 +568,150 @@ private fun PacketLogScreen(
         }
     }
 
-    val filtered = remember(logIndex, appliedQuery, errorsOnly, command) {
-        logIndex.query(
-            filter = PacketLogFilter(command = command, errorsOnly = errorsOnly, keyword = appliedQuery),
-            limit = InMemoryPacketLog.DEFAULT_CAPACITY,
-        )
+    val fromMillis = if (fromText.isBlank()) null else parseLocalDateTimeMillis(fromText, zoneOffsetMinutes)
+    val toMillis = if (toText.isBlank()) null else parseLocalDateTimeMillis(toText, zoneOffsetMinutes)
+    val fromError = if (fromText.isNotBlank() && fromMillis == null) {
+        "格式：YYYY-MM-DD HH:mm:ss"
+    } else {
+        null
     }
+    val toError = if (toText.isNotBlank() && toMillis == null) {
+        "格式：YYYY-MM-DD HH:mm:ss"
+    } else {
+        null
+    }
+    val rangeError = if (fromMillis != null && toMillis != null && fromMillis > toMillis) {
+        "起始时间不能晚于结束时间"
+    } else {
+        null
+    }
+    val entryLimit = validateEntryLimit(maxEntriesText)
+    val byteLimit = validateByteLimitKb(maxBytesKbText)
+    val options = if (entryLimit.valid && byteLimit.valid) {
+        PacketLogExportOptions(maxEntries = entryLimit.value!!, maxBytes = byteLimit.value!!)
+    } else {
+        null
+    }
+
+    val filter = PacketLogFilter(
+        commands = selectedCommands,
+        errorsOnly = errorsOnly,
+        keyword = appliedQuery,
+        fromMillis = fromMillis,
+        toMillis = toMillis,
+    )
+
+    val filtered = remember(logIndex, filter) {
+        logIndex.query(filter = filter, limit = InMemoryPacketLog.DEFAULT_CAPACITY)
+    }
+
+    // 预估与实际导出使用同一套筛选/上限逻辑，避免两处口径分叉。
+    LaunchedEffect(logIndex, filter, format, entryLimit.value, byteLimit.value, rangeError) {
+        val opts = options
+        if (opts == null || rangeError != null) {
+            estimate = null
+            return@LaunchedEffect
+        }
+        delay(200)
+        estimate = withContext(Dispatchers.Default) {
+            PacketLogExporter.estimate(
+                entries = entries,
+                nowMillis = nowMillis,
+                zoneOffsetMinutes = zoneOffsetMinutes,
+                options = opts,
+                filter = filter,
+                format = format,
+            )
+        }
+    }
+
+    fun startExport(action: ExportAction) {
+        if (exporting) return
+        val error = rangeError ?: fromError ?: toError
+        if (error != null) {
+            exportMessage = error
+            return
+        }
+        val opts = options
+        if (opts == null) {
+            exportMessage = entryLimit.error ?: byteLimit.error ?: "上限输入非法"
+            return
+        }
+        if (estimate?.matchedCount == 0) {
+            exportMessage = "没有匹配的报文，未导出空文件"
+            return
+        }
+
+        exportMessage = null
+        exporting = true
+        val snapshot = packetLog.entries.value
+        exportJob = scope.launch {
+            try {
+                val now = Clock.System.now().toEpochMilliseconds()
+                // 渲染在 Default 调度器执行，避免大日志阻塞 UI；取消会在进度检查点生效。
+                val result = withContext(Dispatchers.Default) {
+                    PacketLogExporter.build(
+                        entries = snapshot,
+                        nowMillis = now,
+                        zoneOffsetMinutes = currentTimeZoneOffsetMinutes(now),
+                        options = opts,
+                        filter = filter,
+                        format = format,
+                        onProgress = { progress = it },
+                    )
+                }
+                progress = null
+                if (result.empty) {
+                    exportMessage = result.notice ?: "没有匹配的报文，未导出空文件"
+                    return@launch
+                }
+                val fileName = PacketLogExporter.resolveFileName(result.fileName, exportedNames)
+                when (action) {
+                    ExportAction.SAVE -> {
+                        val save = fileSaver.save(SaveableFile(fileName, result.text, format.mimeType))
+                        when (save.status) {
+                            FileSaveStatus.SAVED -> {
+                                exportedNames += fileName
+                                exportMessage =
+                                    "已保存 $fileName（${result.entryCount} 条，${result.byteSize} 字节）"
+                            }
+
+                            FileSaveStatus.CANCELLED -> exportMessage = "已取消保存，未写入文件"
+                            FileSaveStatus.UNAVAILABLE ->
+                                exportMessage = "当前平台不支持保存为文件，可改用分享"
+
+                            FileSaveStatus.FAILED -> exportMessage = "保存失败：${save.message ?: "未知原因"}"
+                        }
+                    }
+
+                    ExportAction.SHARE -> {
+                        val shared = sharer.share(ShareableText(fileName, result.text, format.mimeType))
+                        when (shared.status) {
+                            ShareStatus.SHARED -> {
+                                exportedNames += fileName
+                                exportMessage =
+                                    "已分享 $fileName（${result.entryCount} 条，${result.byteSize} 字节）"
+                            }
+
+                            ShareStatus.UNAVAILABLE -> exportMessage = "当前平台不支持系统分享"
+                            ShareStatus.FAILED -> exportMessage = "分享失败：${shared.message ?: "未知原因"}"
+                        }
+                    }
+                }
+            } catch (cancellation: CancellationException) {
+                exportMessage = "已取消导出，未写入文件"
+                throw cancellation
+            } finally {
+                exporting = false
+                progress = null
+                exportJob = null
+            }
+        }
+    }
+
+    val canExport = !exporting && entries.isNotEmpty() && options != null &&
+        rangeError == null && fromError == null && toError == null &&
+        estimate?.matchedCount != 0
 
     Column(
         modifier = Modifier.fillMaxSize().padding(16.dp),
@@ -550,33 +720,13 @@ private fun PacketLogScreen(
         Row(modifier = Modifier.fillMaxWidth()) {
             Text("报文日志", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
             TextButton(
-                enabled = entries.isNotEmpty() && !exporting,
-                onClick = {
-                    scope.launch {
-                        exporting = true
-                        try {
-                            val now = Clock.System.now().toEpochMilliseconds()
-                            val export = PacketLogExporter.build(
-                                entries = packetLog.entries.value,
-                                nowMillis = now,
-                                zoneOffsetMinutes = currentTimeZoneOffsetMinutes(now),
-                            )
-                            val result = sharer.share(ShareableText(export.fileName, export.text))
-                            exportMessage = when (result.status) {
-                                ShareStatus.SHARED ->
-                                    "已导出 ${export.entryCount} 条（${export.byteSize} 字节，${export.fileName}）"
-
-                                ShareStatus.UNAVAILABLE ->
-                                    "已生成 ${export.entryCount} 条日志，但当前平台不支持系统分享"
-
-                                ShareStatus.FAILED -> "导出失败：${result.message ?: "未知原因"}"
-                            }
-                        } finally {
-                            exporting = false
-                        }
-                    }
-                },
-            ) { Text(if (exporting) "导出中…" else "导出") }
+                enabled = canExport,
+                onClick = { startExport(ExportAction.SAVE) },
+            ) { Text("保存文件") }
+            TextButton(
+                enabled = canExport,
+                onClick = { startExport(ExportAction.SHARE) },
+            ) { Text("分享") }
             TextButton(onClick = onBack) { Text("返回") }
         }
 
@@ -593,14 +743,21 @@ private fun PacketLogScreen(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             FilterChip(
-                selected = command == null,
-                onClick = { command = null },
+                selected = selectedCommands.isEmpty(),
+                onClick = { selectedCommands = emptySet() },
                 label = { Text("全部命令") },
             )
-            entries.map { it.command }.distinct().forEach { item ->
+            availableCommands.forEach { item ->
+                val selected = item in selectedCommands
                 FilterChip(
-                    selected = command == item,
-                    onClick = { command = if (command == item) null else item },
+                    selected = selected,
+                    onClick = {
+                        selectedCommands = if (selected) {
+                            selectedCommands - item
+                        } else {
+                            selectedCommands + item
+                        }
+                    },
                     label = { Text(item.name) },
                 )
             }
@@ -608,6 +765,116 @@ private fun PacketLogScreen(
                 selected = errorsOnly,
                 onClick = { errorsOnly = !errorsOnly },
                 label = { Text("仅错误") },
+            )
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            OutlinedTextField(
+                value = fromText,
+                onValueChange = { fromText = it },
+                label = { Text("起始时间") },
+                placeholder = { Text("YYYY-MM-DD HH:mm:ss") },
+                singleLine = true,
+                isError = fromError != null || rangeError != null,
+                supportingText = { Text(fromError ?: rangeError ?: "留空表示不限，含边界") },
+                modifier = Modifier.weight(1f),
+            )
+            OutlinedTextField(
+                value = toText,
+                onValueChange = { toText = it },
+                label = { Text("结束时间") },
+                placeholder = { Text("YYYY-MM-DD HH:mm:ss") },
+                singleLine = true,
+                isError = toError != null || rangeError != null,
+                supportingText = { Text(toError ?: rangeError ?: "留空表示不限，含边界") },
+                modifier = Modifier.weight(1f),
+            )
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            PacketLogExportFormat.entries.forEach { item ->
+                FilterChip(
+                    selected = format == item,
+                    onClick = { format = item },
+                    label = { Text(item.name) },
+                )
+            }
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            OutlinedTextField(
+                value = maxEntriesText,
+                onValueChange = { maxEntriesText = it },
+                label = { Text("条数上限") },
+                singleLine = true,
+                isError = !entryLimit.valid,
+                supportingText = {
+                    Text(
+                        entryLimit.error
+                            ?: "允许 ${PacketLogExportOptions.MIN_ENTRIES}..${PacketLogExportOptions.MAX_ENTRIES}",
+                    )
+                },
+                modifier = Modifier.weight(1f),
+            )
+            OutlinedTextField(
+                value = maxBytesKbText,
+                onValueChange = { maxBytesKbText = it },
+                label = { Text("大小上限（KB）") },
+                singleLine = true,
+                isError = !byteLimit.valid,
+                supportingText = {
+                    Text(
+                        byteLimit.error
+                            ?: "允许 1..${PacketLogExportOptions.MAX_BYTES / 1024}",
+                    )
+                },
+                modifier = Modifier.weight(1f),
+            )
+        }
+
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            val estimateLine = when {
+                rangeError != null -> "时间范围无效：$rangeError"
+                fromError != null || toError != null -> "时间格式无效"
+                options == null -> "上限输入无效：${entryLimit.error ?: byteLimit.error}"
+                estimate == null -> "正在估算导出量…"
+                estimate!!.matchedCount == 0 -> "没有匹配的报文，不会导出空文件"
+                estimate!!.notice != null -> estimate!!.notice!!
+                estimate!!.truncated ->
+                    "预计导出 ${estimate!!.estimatedEntries} 条 / ${formatBytes(estimate!!.estimatedBytes.toLong())}" +
+                        "（匹配 ${estimate!!.matchedCount} 条，超出上限将截断最旧的一端）"
+
+                else ->
+                    "预计导出 ${estimate!!.estimatedEntries} 条 / ${formatBytes(estimate!!.estimatedBytes.toLong())}"
+            }
+            Text(
+                estimateLine,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.weight(1f),
+            )
+            if (exporting) {
+                TextButton(onClick = { exportJob?.cancel() }) { Text("取消") }
+            }
+        }
+
+        if (exporting) {
+            val current = progress
+            Text(
+                "导出中 · ${current?.phase?.label() ?: "准备"} ${current?.processed ?: 0}/${current?.total ?: 0}",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            LinearProgressIndicator(
+                progress = { current?.fraction ?: 0f },
+                modifier = Modifier.fillMaxWidth(),
             )
         }
 
@@ -644,6 +911,12 @@ private fun PacketLogScreen(
             }
         }
     }
+}
+
+private fun PacketLogExportPhase.label(): String = when (this) {
+    PacketLogExportPhase.FILTERING -> "筛选"
+    PacketLogExportPhase.RENDERING -> "生成"
+    PacketLogExportPhase.ASSEMBLING -> "拼装"
 }
 
 @Composable

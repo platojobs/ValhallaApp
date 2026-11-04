@@ -1,6 +1,7 @@
 package com.valhalla.core.logging
 
 import com.valhalla.core.protocol.CommandType
+import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -32,7 +33,7 @@ class PacketLogExportTest {
     )
 
     @Test
-    fun `导出内容包含本地时间相对时间与完整字段`() {
+    fun `导出内容包含本地时间相对时间与完整字段`() = runTest {
         val now = 1_793_809_800_000L
         val result = PacketLogExporter.build(
             entries = listOf(
@@ -62,12 +63,14 @@ class PacketLogExportTest {
         assertTrue(result.text.contains("1m05s前"))
         assertEquals(2, result.entryCount)
         assertEquals(2, result.sourceCount)
+        assertEquals(2, result.matchedCount)
         assertFalse(result.truncated)
+        assertEquals(PacketLogExportFormat.TEXT, result.format)
         assertEquals(result.text.encodeToByteArray().size, result.byteSize)
     }
 
     @Test
-    fun `条目上限截断并保留最新条目`() {
+    fun `条目上限截断并保留最新条目`() = runTest {
         val entries = (1L..5L).map { id -> entry(id = id, timestampMillis = id * 1_000, sequence = id.toInt()) }
         val result = PacketLogExporter.build(
             entries = entries,
@@ -77,16 +80,19 @@ class PacketLogExportTest {
         )
 
         assertTrue(result.truncated)
+        assertEquals(PacketLogTruncationTarget.OLDEST, result.truncationTarget)
         assertEquals(2, result.entryCount)
         assertEquals(5, result.sourceCount)
+        assertEquals(5, result.matchedCount)
         assertTrue(result.text.contains("seq=5"))
         assertTrue(result.text.contains("seq=4"))
         assertFalse(result.text.contains("seq=3"), "更旧的条目应被截断")
         assertTrue(result.text.contains("已按上限截断"))
+        assertTrue(result.text.contains("截断端=最旧"))
     }
 
     @Test
-    fun `字节上限保护最终文本大小`() {
+    fun `字节上限保护最终文本大小`() = runTest {
         val entries = (1L..6L).map { id ->
             entry(
                 id = id,
@@ -108,7 +114,7 @@ class PacketLogExportTest {
     }
 
     @Test
-    fun `超长 HEX 在条目内截断并标注省略量`() {
+    fun `超长 HEX 在条目内截断并标注省略量`() = runTest {
         val result = PacketLogExporter.build(
             entries = listOf(entry(id = 1, timestampMillis = 1_000, hex = "A".repeat(100))),
             nowMillis = 2_000,
@@ -120,10 +126,12 @@ class PacketLogExportTest {
     }
 
     @Test
-    fun `空日志仍输出头部与文件名`() {
+    fun `空日志不输出内容与文件字节`() = runTest {
         val result = PacketLogExporter.build(emptyList(), nowMillis = 1_793_809_800_000L, zoneOffsetMinutes = 480)
 
-        assertTrue(result.text.contains("条目：0 / 0"))
+        assertTrue(result.empty)
+        assertEquals("", result.text)
+        assertEquals(0, result.byteSize)
         assertEquals(0, result.entryCount)
         assertFalse(result.truncated)
         assertEquals("valhalla-packet-log-20261105-003000.txt", result.fileName)
