@@ -331,7 +331,7 @@ private fun OtaScreen(
                     )
                 }
             },
-            enabled = !running && !selectionState.picking,
+            enabled = !running && !selectionState.picking && !selectionState.prechecking,
             modifier = Modifier.fillMaxWidth(),
         ) {
             Text(if (selectionState.selected) "重新选择固件" else "选择固件")
@@ -339,6 +339,19 @@ private fun OtaScreen(
 
         if (selectionState.picking) {
             Text("正在打开文件选择器…", style = MaterialTheme.typography.bodySmall)
+        }
+        if (selectionState.prechecking) {
+            LinearProgressIndicator(
+                progress = { selectionState.precheckProgress },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text(
+                "正在预检固件… ${(selectionState.precheckProgress * 100).toInt()}%",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            TextButton(onClick = { selection.cancelPrecheck() }) {
+                Text("取消预检")
+            }
         }
 
         FirmwareCard(
@@ -408,7 +421,11 @@ private fun OtaScreen(
         Button(
             onClick = {
                 val firmware = selection.firmware
-                if (firmware != null) scope.launch { controller.startPackage(firmware) }
+                if (firmware != null) {
+                    scope.launch {
+                        controller.startPackage(firmware, knownCrc16 = selectionState.computedCrc16)
+                    }
+                }
             },
             enabled = !running && selectionState.readyForOta,
             modifier = Modifier.fillMaxWidth(),
@@ -421,7 +438,13 @@ private fun OtaScreen(
                 val firmware = selection.firmware
                 val point = selectionState.resumePoint
                 if (firmware != null && point != null) {
-                    scope.launch { controller.startPackage(firmware, resumeFrom = point) }
+                    scope.launch {
+                        controller.startPackage(
+                            firmware,
+                            resumeFrom = point,
+                            knownCrc16 = selectionState.computedCrc16,
+                        )
+                    }
                 }
             },
             enabled = !running && selectionState.canResume,
@@ -517,7 +540,7 @@ private fun FirmwareCard(
 
             selectionState.error?.let { message ->
                 Text(
-                    "固件读取失败：$message" + (selectionState.errorCode?.let { "（$it）" } ?: ""),
+                    "固件加载失败：$message" + (selectionState.errorCode?.let { "（$it）" } ?: ""),
                     color = MaterialTheme.colorScheme.error,
                 )
             }

@@ -2,6 +2,49 @@
 
 本文件记录 ValhallaApp 的版本演进，按「阶段完成即提交 + 打 annotated tag」的节奏维护。
 
+## v1.2.0 - 功能完善：预检单一入口与断点续传状态机收敛
+
+### 修复
+
+- **预检重复计算**：`FirmwarePackage.scanPayload()` 单次流式读取同时产出 CRC-32、
+  协议 CRC-16 与签名摘要；已签名固件不再扫描 payload 两遍；CRC32/CRC16/签名摘要
+  三套口径统一由该入口产出。
+- **OTA 启动重复扫描**：`startPackage(..., knownCrc16)` 复用预检 CRC-16，
+  START_OTA 前不再把 payload 完整再读一遍（大文件下曾表现为长时间无反馈）。
+- **断点落盘时机**：`START_OTA` 成功后立即按设备 `acceptedOffset` 落盘；
+  确认偏移为 0 时立即清除旧断点；设备下调偏移后不会再残留旧的高偏移。
+- **断点清除/落盘矛盾**：成功、用户中止清除；外部取消、失败落盘；START 未建立保留旧断点；
+  `checkpointStore` 读写在失败路径中通过 `runCatching` 隔离，不再把成功升级打成失败。
+- **`resume()` stale 状态**：进程重启后内存断点为空时回退读取持久化存储，不再静默从 0 开始。
+- **本地续传门控静默回退**：断点失效/固件不一致/CRC16 不一致时记录
+  `resumeFallbackReason`，UI 可展示具体原因。
+- **版本口径不一致**：预检与断点身份统一为「`major.minor.patch.build` 比较、忽略渠道、
+  同版本允许重刷」，避免渠道切换被误判为固件不匹配。
+- **选择失败/取消后的 stale 状态**：新文件解析与预检成功前不再关闭上一次固件；
+  失败或取消时回滚到上一次可用选择，数据源正确关闭。
+- **可操作错误提示**：OTA 失败按链路断开、固件读取失败（附 offset/length）、
+  设备超时、传输失败分别给出建议；预检错误保留原有分类与错误码。
+
+### 新增
+
+- `FirmwareSelectionController` 预检进度（`prechecking` / `precheckProgress`）
+  与 `cancelPrecheck()`；解析/扫描调度到 `Dispatchers.Default`，大文件不阻塞 UI；
+  选择与重检通过 `Mutex` 串行化。
+- `FirmwarePrecheckProgress` / `FirmwarePrecheckCancelledException` /
+  `FirmwareScan` / `FirmwareChecksums` 公共类型。
+- 协议层 CRC-16 由同一次扫描产出并透传到 OTA 启动，避免跨链路重复读取。
+- 新增测试：`FirmwarePrecheckProgressTest`、`FirmwarePrecheckResumeMatrixTest`，
+  `FirmwareSelectionControllerTest` 取消回滚用例，`OtaControllerPackageTest`
+  下调立即落盘 / START 未建立保留断点 / 本地门控原因 / CRC16 复用 / resume 回退持久化断点。
+- 文档：`docs/firmware.md` 增加预检规则、进度取消、断点生命周期与状态转移表；
+  `docs/architecture.md` 更新 OTA 状态机与续传说明。
+
+### 测试
+
+- 全量 `:core:jvmTest :data:jvmTest :feature:jvmTest`：276 项通过（v1.1.0 为 263 项，
+  既有断言未削弱）。
+- `:composeApp:assembleDebug` 与 `:composeApp:linkDebugFrameworkIosSimulatorArm64` 构建通过。
+
 ## v1.1.0 - 安全加固：签名鉴权、固件验签与令牌安全存储
 
 ### 新增

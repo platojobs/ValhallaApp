@@ -41,6 +41,18 @@ data class FirmwarePrecheckResult(
     }
 }
 
+/** 本地预检进度：用于 UI 展示大文件校验进度。 */
+data class FirmwarePrecheckProgress(
+    val readBytes: Long,
+    val totalBytes: Long,
+) {
+    val fraction: Float
+        get() = if (totalBytes <= 0L) 1f else (readBytes.toFloat() / totalBytes).coerceIn(0f, 1f)
+}
+
+/** 用户主动取消预检（不是文件错误，也不是协程取消）。 */
+class FirmwarePrecheckCancelledException : Exception("固件预检已取消")
+
 /**
  * 本地预检器，按顺序收集所有可判定的问题（不提前短路）：
  *
@@ -48,9 +60,10 @@ data class FirmwarePrecheckResult(
  * 2. 设备型号是否命中固件头白名单（`*` 表示通配）；
  * 3. 设备当前版本是否未知 / 固件是否为版本回退（相同版本允许重刷）；
  * 4. payload CRC-32 是否与文件头声明一致（流式读取，不整包进内存）；
- *    同一次读取顺带计算协议层 CRC-16，供断点续传比对；
  * 5. 固件签名（可选）：按 [signaturePolicy] 对签名段做验签，缺失时按策略拒绝或告警。
  *
+ * 第 4、5 步以及续传所需的协议层 CRC-16 由**同一次**流式扫描产出，payload 只读一遍。
+ * 扫描期间通过 [check] 的 `onProgress` 回调推送进度，并响应协程取消与 `shouldCancel`。
  * 大小超限时跳过校验计算，避免对超大文件做无意义的完整读取。
  */
 class FirmwarePrechecker(
@@ -69,6 +82,8 @@ class FirmwarePrechecker(
         firmware: FirmwarePackage,
         currentVersion: FirmwareVersion?,
         currentModel: String?,
+        onProgress: ((FirmwarePrecheckProgress) -> Unit)? = null,
+        shouldCancel: (() -> Boolean)? = null,
     ): FirmwarePrecheckResult {
         val errors = mutableListOf<FirmwareException>()
         val warnings = mutableListOf<String>()
@@ -93,23 +108,34 @@ class FirmwarePrechecker(
             }
         }
 
-        var computedCrc32: Long? = null
-        var computedCrc16: Int? = null
+        var scan: FirmwareScan? = null
         if (!oversize) {
             try {
-                val checksums = firmware.computePayloadChecksums()
-                computedCrc32 = checksums.crc32
-                computedCrc16 = checksums.crc16
-                if (computedCrc32 != firmware.payloadCrc32) {
-                    errors += FirmwareException.PayloadChecksumMismatch(firmware.payloadCrc32, computedCrc32)
-                }
+                scan = firmware.scanPayload(
+                    includeSignatureDigest = shouldComputeSignatureDigest(firmware),
+                    onProgress = { readBytes, totalBytes ->
+                        if (shouldCancel?.invoke() == true) {
+                            throw FirmwarePrecheckCancelledException()
+                        }
+                        onProgress?.invoke(FirmwarePrecheckProgress(readBytes, totalBytes))
+                    },
+                )
+            } catch (cancelled: FirmwarePrecheckCancelledException) {
+                throw cancelled
             } catch (error: FirmwareException) {
                 errors += error
             }
         }
 
+        val computedCrc32 = scan?.crc32
+        val computedCrc16 = scan?.crc16
+        val scanned = scan
+        if (scanned != null && scanned.crc32 != firmware.payloadCrc32) {
+            errors += FirmwareException.PayloadChecksumMismatch(firmware.payloadCrc32, scanned.crc32)
+        }
+
         if (!oversize) {
-            checkSignature(firmware, errors, warnings)
+            checkSignature(firmware, scan?.signatureDigest, errors, warnings)
         }
 
         return FirmwarePrecheckResult(
@@ -120,13 +146,21 @@ class FirmwarePrechecker(
         )
     }
 
+    private fun shouldComputeSignatureDigest(firmware: FirmwarePackage): Boolean =
+        firmware.signature != null &&
+            signaturePolicy != FirmwareSignaturePolicy.IGNORE &&
+            signatureVerifier != null
+
     /**
      * 签名分支：
      * - 带签名段：配置了验签器则按摘要验签，失败恒为错误；未配置验签器时按策略报错或告警；
      * - 无签名段：REQUIRE 报错，WARN 告警，IGNORE 静默。
+     *
+     * [digest] 由同一次扫描产出；读取失败时为 null（此时已有读取错误，不再重复报告）。
      */
-    private suspend fun checkSignature(
+    private fun checkSignature(
         firmware: FirmwarePackage,
+        digest: ByteArray?,
         errors: MutableList<FirmwareException>,
         warnings: MutableList<String>,
     ) {
@@ -150,12 +184,10 @@ class FirmwarePrechecker(
             return
         }
 
-        val digest = try {
-            firmware.computeSignatureDigest()
-        } catch (error: FirmwareException) {
-            errors += error
-            return
-        }
+        if (signaturePolicy == FirmwareSignaturePolicy.IGNORE) return
+        // 摘要随扫描一起产出；扫描失败（文件读取错误）已经记录，签名分支无法继续。
+        if (digest == null) return
+
         if (!verifier.verify(digest, signature)) {
             errors += FirmwareException.SignatureInvalid(
                 algorithm = signature.algorithm.title,
@@ -173,6 +205,7 @@ class FirmwarePrechecker(
          * 渠道切换（例如 release → beta）不属于版本回退，由部署流程自行约束。
          */
         fun compare(target: FirmwareVersion, current: FirmwareVersion): Int {
+            if (target.sameReleaseAs(current)) return 0
             val fields = listOf(
                 target.major to current.major,
                 target.minor to current.minor,

@@ -35,9 +35,9 @@ data class OtaResumePoint(
             crc16 in 0..0xFFFF &&
             crc32 in 0..0xFFFFFFFFL
 
-    /** 固件身份是否一致（版本 + 总长 + payload CRC-32）。 */
+    /** 固件身份是否一致（版本号 + 总长 + payload CRC-32）。版本号忽略渠道名。 */
     fun matchesFirmware(firmware: FirmwarePackage): Boolean =
-        firmwareVersion == firmware.version &&
+        firmwareVersion.sameReleaseAs(firmware.version) &&
             totalBytes.toLong() == firmware.payloadLength &&
             crc32 == firmware.payloadCrc32
 
@@ -45,14 +45,14 @@ data class OtaResumePoint(
     fun matchesFirmwarePayload(firmware: FirmwarePackage, crc16: Int): Boolean =
         matchesFirmware(firmware) && this.crc16 == crc16
 
-    /** 与内存中的 payload（无文件头）比对：版本 + 总长 + CRC-32 + CRC-16。 */
+    /** 与内存中的 payload（无文件头）比对：版本 + 总长 + CRC-32 + CRC-16。版本号忽略渠道名。 */
     fun matchesPayload(
         version: FirmwareVersion,
         totalBytes: Long,
         crc32: Long,
         crc16: Int,
     ): Boolean =
-        firmwareVersion == version &&
+        firmwareVersion.sameReleaseAs(version) &&
             this.totalBytes.toLong() == totalBytes &&
             this.crc32 == crc32 &&
             this.crc16 == crc16

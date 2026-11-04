@@ -174,19 +174,26 @@ class OtaController(
     /**
      * 从已解析的固件包执行升级：先流式计算协议层 CRC-16，再按 payload 偏移分片读取。
      *
-     * 调用方必须先通过 [com.valhalla.core.firmware.FirmwarePrechecker] 预检；
+     * 调用方必须先通过 [com.valhalla.core.firmware.FirmwarePrechecker] 预检；若预检已经
+     * 算出 CRC-16，通过 [knownCrc16] 传入即可复用，避免启动前把 payload 再完整读一遍
+     * （大文件下这会带来明显的启动延迟且无进度反馈）。不传时回退为本地流式重算。
+     *
      * 本方法不重新校验 CRC-32，只保证分片读取边界与协议 CRC-16 一致。
      */
     suspend fun startPackage(
         firmware: FirmwarePackage,
         resumeFrom: OtaResumePoint? = null,
+        knownCrc16: Int? = null,
     ): OtaState = startMutex.withLock {
+        if (knownCrc16 != null) {
+            require(knownCrc16 in 0..0xFFFF) { "knownCrc16 超出 u16 范围: $knownCrc16" }
+        }
         prepareRun()
         if (firmware.payloadLength <= 0 || firmware.payloadLength > Int.MAX_VALUE.toLong()) {
             return failed("固件 payload 长度非法: ${firmware.payloadLength}", 0, 0)
         }
 
-        val crc = try {
+        val crc = knownCrc16 ?: try {
             computeCrc16(firmware)
         } catch (cancellation: CancellationException) {
             throw cancellation
@@ -242,10 +249,12 @@ class OtaController(
     /**
      * 断点续传入口（内存 payload）。
      *
-     * 控制器先本地校验断点固件身份，再将其作为 `START_OTA` 续传扩展发送；
+     * 优先使用内存中最近一次失败记录的断点；进程重启后内存断点为空，回退读取持久化存储。
+     * 控制器随后会本地校验断点固件身份，再将其作为 `START_OTA` 续传扩展发送；
      * 最终起始偏移以设备应答中的 `acceptedOffset` 为准。
      */
-    suspend fun resume(firmware: ByteArray): OtaState = start(firmware, resumeFrom = lastResumePoint)
+    suspend fun resume(firmware: ByteArray): OtaState =
+        start(firmware, resumeFrom = lastResumePoint ?: checkpointStore?.load())
 
     fun reset() {
         abortMutex.tryLock().let { locked ->
@@ -257,7 +266,7 @@ class OtaController(
         lastResumePoint = null
         retransmissions = 0
         activeSessionId = null
-        checkpointStore?.clear()
+        clearCheckpointStore()
         mutableState.value = OtaState.Idle
     }
 
@@ -294,7 +303,8 @@ class OtaController(
 
         startProgressCollector()
         yield()
-        val requestedOffset = resumableOffset(resumeFrom, totalBytes, crc16, crc32, version)
+        val resumeGate = checkResumeGate(resumeFrom, totalBytes, crc16, crc32, version)
+        val requestedOffset = resumeGate.offset
         mutableState.value = OtaState.Preparing(total, crc16, requestedOffset = requestedOffset)
 
         try {
@@ -313,11 +323,14 @@ class OtaController(
             val effectiveChunkSize = session.response.chunkSize.takeIf { it in 1..1024 } ?: chunkSize
             sent = resolveStartOffset(requestedOffset, session.response.acceptedOffset, total)
             lastCheckpointBytes = sent
+            // 新会话一旦建立，旧会话的断点立即失效：按设备确认值立即落盘（或清除），
+            // 避免在下一个 4 KiB 检查点之前崩溃时续到旧的高偏移。
+            syncCheckpointAfterStart(sessionId, sent, total, crc16, crc32, version)
             val fallbackReason = fallbackNote(
                 requestedOffset = requestedOffset,
                 acceptedOffset = sent,
                 deviceFallbackReason = session.fallbackReason,
-            )
+            ) ?: resumeGate.reason
             if (sent > 0 || fallbackReason != null) {
                 mutableState.value = OtaState.Transferring(
                     sentBytes = sent,
@@ -378,7 +391,7 @@ class OtaController(
                 error("结束 OTA 应答类型异常: ${finishResponse::class.simpleName}")
             }
 
-            checkpointStore?.clear()
+            clearCheckpointStore()
             val done = OtaState.Succeeded(
                 totalBytes = total,
                 crc16 = crc16,
@@ -393,7 +406,7 @@ class OtaController(
             mutableState.value = OtaState.Aborted(OtaAbortReason.USER_CANCELLED.name, sent, total)
             throw cancellation
         } catch (aborted: OtaAbortedException) {
-            checkpointStore?.clear()
+            clearCheckpointStore()
             val state = OtaState.Aborted(aborted.reason.name, sent, total)
             mutableState.value = state
             return state
@@ -410,7 +423,7 @@ class OtaController(
             )
             lastResumePoint = resumePoint
             val state = OtaState.Failed(
-                reason = info.message,
+                reason = error.toOtaFailureMessage(info.message),
                 sentBytes = sent,
                 totalBytes = total,
                 status = info.status,
@@ -631,7 +644,7 @@ class OtaController(
             }
             // 新会话已建立但尚未传输：旧会话上下文失效，清除旧断点。
             sessionId != null -> {
-                checkpointStore?.clear()
+                clearCheckpointStore()
                 null
             }
             // 会话尚未建立：保留调用方传入的旧断点，便于下次重试。
@@ -639,17 +652,57 @@ class OtaController(
         }
     }
 
-    private fun resumableOffset(
+    /**
+     * 续传前置检查：返回可请求的偏移与不可续传时的原因。
+     * 调用方传入的断点若已失效或与当前固件不一致，仍从头开始，但会在 UI 上记录原因。
+     */
+    private fun checkResumeGate(
         resumeFrom: OtaResumePoint?,
         totalBytes: Long,
         crc16: Int,
         crc32: Long,
         version: FirmwareVersion,
-    ): Int {
-        val point = resumeFrom ?: return 0
-        if (!point.isValid()) return 0
-        if (!point.matchesPayload(version, totalBytes, crc32, crc16)) return 0
-        return point.sentBytes
+    ): ResumeGate {
+        val point = resumeFrom ?: return ResumeGate(0, null)
+        if (!point.isValid()) {
+            return ResumeGate(0, "本地断点数据已失效，已从 0 开始")
+        }
+        if (!point.matchesPayload(version, totalBytes, crc32, crc16)) {
+            return ResumeGate(0, "本地断点与当前固件不一致（版本/总长/CRC32/CRC16），已从 0 开始")
+        }
+        return ResumeGate(point.sentBytes, null)
+    }
+
+    /** 新会话建立后立即把断点同步为设备确认的起点；起点为 0 时清除旧断点。 */
+    private fun syncCheckpointAfterStart(
+        sessionId: Long,
+        sentBytes: Int,
+        totalBytes: Int,
+        crc16: Int,
+        crc32: Long,
+        version: FirmwareVersion,
+    ) {
+        if (sentBytes > 0) {
+            saveCheckpoint(sessionId, sentBytes, totalBytes, crc16, crc32, version)
+        } else {
+            clearCheckpointStore()
+        }
+    }
+
+    private fun clearCheckpointStore() {
+        runCatching { checkpointStore?.clear() }
+    }
+
+    /** 把传输失败翻译成可操作的提示；无法识别的异常保留原始文案。 */
+    private fun Throwable.toOtaFailureMessage(fallback: String): String = when (this) {
+        is BleException -> "链路已断开：请重新连接设备后使用「继续上次升级」"
+        is FirmwareException.ReadFailure ->
+            "读取固件失败（offset=$offset, length=$length）：请重新选择固件文件"
+        is CommandFailure.Timeout ->
+            "设备无响应（尝试 $attempts 次后超时）：请确认设备在附近且电量充足后重试"
+        is CommandFailure.TransportFailure ->
+            "链路传输失败（尝试 $attempts 次）：请重新连接设备后重试"
+        else -> fallback
     }
 
     private fun saveCheckpoint(
@@ -695,6 +748,12 @@ class OtaController(
     private data class StartSession(
         val response: StartOtaResponse,
         val fallbackReason: String? = null,
+    )
+
+    /** 续传前置检查结果：[offset] 为 0 且 [reason] 非空表示请求了续传但被本地门控拒绝。 */
+    private data class ResumeGate(
+        val offset: Int,
+        val reason: String?,
     )
 
     private fun OtaState.sentBytes(): Int = when (this) {

@@ -25,6 +25,15 @@ data class FirmwareVersion(
         writer.string1(channel)
     }
 
+    /**
+     * 仅比较 `major.minor.patch.build`，忽略渠道名。
+     *
+     * 预检的版本回退判定、断点固件身份判定都使用这一口径：渠道切换
+     * （release → beta）不属于版本回退，内容一致性由 CRC16/CRC32 兜底。
+     */
+    fun sameReleaseAs(other: FirmwareVersion): Boolean =
+        major == other.major && minor == other.minor && patch == other.patch && build == other.build
+
     override fun toString(): String = "$major.$minor.$patch (build $build, $channel)"
 
     companion object {

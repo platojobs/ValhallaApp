@@ -208,6 +208,46 @@ class FirmwareSelectionControllerTest {
         assertFalse(controller.state.value.readyForOta)
     }
 
+    @Test
+    fun `取消预检后保留上一次固件且状态可恢复`() = runTest {
+        val firstSource = TrackingSource(packageBytes(payload, targetVersion, Crc32.compute(payload)))
+        val picker = FakePicker(PickedFirmware("first.bin", firstSource))
+        val controller = FirmwareSelectionController(picker, InMemoryOtaCheckpointStore())
+        assertTrue(controller.pickAndPrecheck(currentVersion, "VH-100"))
+
+        var cancelledSourceClosed = false
+        val cancelledSource = object : FirmwareSource {
+            override val size: Long get() = packageBytes(payload, targetVersion, Crc32.compute(payload)).size.toLong()
+
+            override suspend fun read(offset: Long, length: Int): ByteArray {
+                // 模拟用户在预检过程中点击「取消预检」。
+                controller.cancelPrecheck()
+                val bytes = packageBytes(payload, targetVersion, Crc32.compute(payload))
+                val start = offset.toInt()
+                val end = (start + length).coerceAtMost(bytes.size)
+                return bytes.copyOfRange(start, end)
+            }
+
+            override fun close() {
+                cancelledSourceClosed = true
+            }
+        }
+        picker.result = PickedFirmware("second.bin", cancelledSource)
+
+        val passed = controller.pickAndPrecheck(currentVersion, "VH-100")
+        val state = controller.state.value
+
+        assertFalse(passed)
+        assertFalse(state.prechecking)
+        assertEquals(0f, state.precheckProgress)
+        assertEquals("first.bin", state.packageName)
+        assertTrue(state.readyForOta, "取消后应回滚到上一次可用预检结果")
+        assertNotNull(controller.firmware)
+        assertFalse(firstSource.closed, "取消预检不应关闭上一次固件的数据源")
+        assertTrue(cancelledSourceClosed, "被取消的新固件数据源必须关闭")
+        controller.close()
+    }
+
     private fun packageBytes(
         body: ByteArray,
         version: FirmwareVersion,

@@ -2,6 +2,7 @@ package com.valhalla.feature.ota
 
 import com.valhalla.core.command.ConcurrentCommandDispatcher
 import com.valhalla.core.firmware.Crc32
+import com.valhalla.core.firmware.FirmwareException
 import com.valhalla.core.firmware.FirmwareHeader
 import com.valhalla.core.firmware.FirmwarePackage
 import com.valhalla.core.firmware.FirmwareParser
@@ -418,6 +419,180 @@ class OtaControllerPackageTest {
         val start = link.requests.filterIsInstance<StartOtaRequest>().single()
         assertFalse(start.hasResumeExtension)
         assertEquals(0L, link.requests.filterIsInstance<OtaDataRequest>().first().offset)
+    }
+
+    @Test
+    fun `设备下调偏移后立即落盘调整后的断点`() = runTest {
+        val store = InMemoryOtaCheckpointStore()
+        val firmware = buildPackage(payload)
+        val point = OtaResumePoint(
+            42, 128, 300, Crc16.ccittFalse(payload), version, Crc32.compute(payload),
+        )
+        store.save(point)
+
+        var checkpointAtFirstChunk: Int? = null
+        val link = FakeFrameLink { request ->
+            when (request) {
+                is StartOtaRequest -> StartOtaResponse(DeviceStatus.OK, 42, 64, acceptedOffset = 96)
+                is OtaDataRequest -> {
+                    if (checkpointAtFirstChunk == null) {
+                        checkpointAtFirstChunk = store.load()?.sentBytes
+                    }
+                    OtaDataResponse(DeviceStatus.OK, request.offset + request.data.size)
+                }
+
+                is FinishOtaRequest -> FinishOtaResponse(DeviceStatus.OK, rebootRequired = false)
+                else -> null
+            }
+        }
+        val controller = OtaController(
+            dispatcher = ConcurrentCommandDispatcher(link, scope = backgroundScope),
+            chunkSize = 64,
+            checkpointStore = store,
+        )
+
+        val result = controller.startPackage(firmware, resumeFrom = point)
+
+        assertTrue(result is OtaState.Succeeded)
+        assertEquals(96, checkpointAtFirstChunk, "START 成功后应立即落盘设备确认的偏移")
+        assertNull(store.load(), "成功后断点应清除")
+    }
+
+    @Test
+    fun `START 未建立时保留旧断点`() = runTest {
+        val store = InMemoryOtaCheckpointStore()
+        val firmware = buildPackage(payload)
+        val point = OtaResumePoint(
+            42, 128, 300, Crc16.ccittFalse(payload), version, Crc32.compute(payload),
+        )
+        store.save(point)
+
+        // 设备不应答 START_OTA，会话未建立。
+        val link = FakeFrameLink { null }
+        val controller = OtaController(
+            dispatcher = ConcurrentCommandDispatcher(link, scope = backgroundScope),
+            chunkSize = 64,
+            checkpointStore = store,
+        )
+
+        val result = controller.startPackage(firmware, resumeFrom = point)
+
+        assertTrue(result is OtaState.Failed)
+        assertEquals(point, store.load())
+    }
+
+    @Test
+    fun `本地断点与固件不一致时记录回退原因`() = runTest {
+        val store = InMemoryOtaCheckpointStore()
+        val firmware = buildPackage(payload)
+        val stalePoint = OtaResumePoint(
+            42, 128, 300, Crc16.ccittFalse(payload) xor 0xFFFF, version, Crc32.compute(payload),
+        )
+        store.save(stalePoint)
+
+        lateinit var controller: OtaController
+        var reasonAtFirstChunk: String? = null
+        val link = FakeFrameLink { request ->
+            when (request) {
+                is StartOtaRequest -> StartOtaResponse(DeviceStatus.OK, 42, 64)
+                is OtaDataRequest -> {
+                    if (reasonAtFirstChunk == null) {
+                        reasonAtFirstChunk =
+                            (controller.state.value as? OtaState.Transferring)?.resumeFallbackReason
+                    }
+                    OtaDataResponse(DeviceStatus.OK, request.offset + request.data.size)
+                }
+
+                is FinishOtaRequest -> FinishOtaResponse(DeviceStatus.OK, rebootRequired = false)
+                else -> null
+            }
+        }
+        controller = OtaController(
+            dispatcher = ConcurrentCommandDispatcher(link, scope = backgroundScope),
+            chunkSize = 64,
+            checkpointStore = store,
+        )
+
+        val result = controller.startPackage(firmware, resumeFrom = stalePoint)
+
+        assertTrue(result is OtaState.Succeeded)
+        assertEquals(0L, link.requests.filterIsInstance<OtaDataRequest>().first().offset)
+        assertTrue(
+            reasonAtFirstChunk?.contains("本地断点") == true,
+            "本地门控拒绝续传时应给出可操作原因，实际 $reasonAtFirstChunk",
+        )
+    }
+
+    @Test
+    fun `传入预检 CRC16 时启动前不再扫描固件`() = runTest {
+        val header = FirmwareHeader(
+            firmwareVersion = version,
+            targetModels = listOf("VH-100"),
+            payloadLength = payload.size.toLong(),
+            payloadCrc32 = Crc32.compute(payload),
+        ).encode()
+        val source = FailableSource(header + payload)
+        val firmware = FirmwareParser.parse("firmware.bin", source)
+        val crc16 = firmware.computePayloadChecksums().crc16
+        source.failReads = true
+
+        val link = FakeFrameLink(responder(sessionId = 42))
+        val controller = OtaController(
+            dispatcher = ConcurrentCommandDispatcher(link, scope = backgroundScope),
+            chunkSize = 64,
+        )
+
+        val result = controller.startPackage(firmware, knownCrc16 = crc16)
+
+        assertTrue(
+            link.requests.any { it is StartOtaRequest },
+            "复用预检 CRC16 时不应在 START_OTA 前重扫 payload",
+        )
+        assertTrue(result is OtaState.Failed)
+        assertTrue(result.reason.contains("读取固件失败"), "读取失败应给出可操作提示: ${result.reason}")
+
+        // 反证：不传 CRC16 时会先重扫 payload，因此 START_OTA 根本发不出去。
+        val withoutReuse = FakeFrameLink(responder(sessionId = 42))
+        OtaController(
+            dispatcher = ConcurrentCommandDispatcher(withoutReuse, scope = backgroundScope),
+            chunkSize = 64,
+        ).startPackage(firmware)
+        assertTrue(withoutReuse.requests.none { it is StartOtaRequest })
+    }
+
+    @Test
+    fun `resume 在内存断点为空时回退持久化断点`() = runTest {
+        val store = InMemoryOtaCheckpointStore()
+        val point = OtaResumePoint(
+            42, 128, 300, Crc16.ccittFalse(payload), version, Crc32.compute(payload),
+        )
+        store.save(point)
+        val link = FakeFrameLink(responder(sessionId = 42, acceptedOffset = 128))
+        val controller = OtaController(
+            dispatcher = ConcurrentCommandDispatcher(link, scope = backgroundScope),
+            chunkSize = 64,
+            firmwareVersion = version,
+            checkpointStore = store,
+        )
+
+        val result = controller.resume(payload)
+
+        assertTrue(result is OtaState.Succeeded)
+        assertEquals(128L, link.requests.filterIsInstance<StartOtaRequest>().single().resumeOffset)
+    }
+
+    private class FailableSource(private val bytes: ByteArray) : FirmwareSource {
+        var failReads: Boolean = false
+        override val size: Long get() = bytes.size.toLong()
+
+        override suspend fun read(offset: Long, length: Int): ByteArray {
+            if (failReads) throw FirmwareException.ReadFailure(offset, length)
+            val start = offset.toInt()
+            val end = (start + length).coerceAtMost(bytes.size)
+            return bytes.copyOfRange(start, end)
+        }
+
+        override fun close() = Unit
     }
 
     private fun responder(

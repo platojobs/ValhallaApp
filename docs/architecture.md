@@ -116,6 +116,9 @@ UI                OtaController            Dispatcher            Device
 | `Aborted` | 用户 `abort()` 或协程取消 | 中止原因、已发送字节 |
 | `Failed` | 超时、传输异常、设备拒绝、CRC 不匹配、断连 | 错误码、已发送字节、断点 |
 
+> 预检阶段（`FirmwareSelectionController`）不在 OTA 状态机内：`prechecking` /
+> `precheckProgress` 属于选择状态，预检未通过或预检中时不会进入 `Preparing`。
+
 ### 4.2 分片重传与进度
 
 - 设备以 `BUSY` / `CRC_MISMATCH` / `INTERNAL_ERROR` 拒绝分片，或应答的
@@ -132,12 +135,14 @@ UI                OtaController            Dispatcher            Device
 - 断连：`OtaController` 可接收 `connectionState`（`BleConnection.connected`），
   在分片边界与 `FINISH_OTA` 前快速失败；在途请求由调度器超时/传输异常兜底。
   `reset()` 清除断点并回到 `Idle`，便于用户重新发起。
-- 断点续传（v0.9.0 起）：`startPackage(firmware, resumeFrom)` 在本地通过
-  「版本 / 总长 / CRC-32 / CRC-16」四项标识校验后，携带 14 字节续传扩展发出 `START_OTA`；
+- 断点续传（v0.9.0 起，v1.2.0 收敛生命周期）：`startPackage(firmware, resumeFrom, knownCrc16)`
+  在本地通过「版本（忽略渠道）/ 总长 / CRC-32 / CRC-16」四项标识校验后，携带 14 字节
+  续传扩展发出 `START_OTA`；`knownCrc16` 直接复用预检结果，START 前不再重扫 payload。
   以设备应答的 `acceptedOffset` 为唯一权威起点（0 表示从头开始、向下调整按设备值、
-  拒绝则回退为不带扩展的旧格式）。失败时写入 `lastResumePoint` 并持久化到
-  `OtaCheckpointStore`，成功/中止/`reset()` 清除。字段与状态码见
-  [protocol.md 4.3.1](protocol.md#431-续传扩展v090)，恢复策略见 [firmware.md](firmware.md)。
+  拒绝则回退为不带扩展的旧格式）。新会话建立后立即按设备确认值落盘；成功/用户中止/
+  `reset()` 清除；外部协程取消与失败则落盘精确偏移，START 未建立时保留旧断点。
+  字段与状态码见 [protocol.md 4.3.1](protocol.md#431-续传扩展v090)，
+  完整状态转移表与断点生命周期见 [firmware.md](firmware.md)。
 
 ## 5. 测试策略
 
