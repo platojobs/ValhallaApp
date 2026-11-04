@@ -6,6 +6,7 @@ import com.valhalla.feature.FakeBleClient
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -68,6 +69,48 @@ class ScanControllerTest {
         controller.stopScan()
         assertFalse(controller.state.value.scanning)
         assertEquals(1, controller.state.value.devices.size)
+    }
+
+    @Test
+    fun `扫描超时后标记 timedOut`() = runTest {
+        val feed = MutableSharedFlow<BleDevice>()
+        val controller = ScanController(bleClient = FakeBleClient(scanFlow = feed), scope = backgroundScope)
+
+        controller.startScan()
+        runCurrent()
+        assertTrue(controller.state.value.scanning)
+        assertFalse(controller.state.value.timedOut)
+
+        advanceTimeBy(ScanController.DEFAULT_SCAN_TIMEOUT_MILLIS)
+        runCurrent()
+
+        assertTrue(controller.state.value.scanning)
+        assertTrue(controller.state.value.timedOut)
+        assertTrue(controller.state.value.devices.isEmpty())
+
+        controller.stopScan()
+    }
+
+    @Test
+    fun `发现设备时清除超时标记`() = runTest {
+        val feed = MutableSharedFlow<BleDevice>()
+        val controller = ScanController(
+            bleClient = FakeBleClient(scanFlow = feed),
+            scope = backgroundScope,
+            scanTimeoutMillis = 1_000,
+        )
+
+        controller.startScan()
+        runCurrent()
+        advanceTimeBy(1_000)
+        runCurrent()
+        assertTrue(controller.state.value.timedOut)
+
+        feed.emit(BleDevice("dev-1", "Valhalla-01", -50))
+        runCurrent()
+
+        assertEquals(1, controller.state.value.devices.size)
+        assertFalse(controller.state.value.timedOut)
     }
 
     @Test

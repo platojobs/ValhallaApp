@@ -2,6 +2,75 @@
 
 本文件记录 ValhallaApp 的版本演进，按「阶段完成即提交 + 打 annotated tag」的节奏维护。
 
+## v1.7.0 - 权限与连接体验
+
+### 新增
+
+- **统一权限状态机**
+  - `feature/ble/BlePermissionStateMachine`：`NOT_REQUESTED / GRANTED / DENIED /
+    PERMANENTLY_DENIED` 四态；永久拒绝后 `beginRequest()` 恒为 false，不再反复弹窗；
+    `requestInFlight` 防止并发弹窗；`syncFromSystem` 支持启动/回前台/从设置返回时校正。
+  - `resolveBleAvailability` 合并权限与适配器状态，输出 `READY / 权限类 / BLUETOOTH_OFF /
+    BLUETOOTH_RESETTING / UNSUPPORTED / UNKNOWN`；每种不可用状态都有标题、说明与动作。
+  - 扫描页新增引导卡片；无权限/蓝牙关闭时「开始扫描」与设备连接入口禁用并说明原因。
+- **Android 运行时权限流程**
+  - Android 12+ 请求 `BLUETOOTH_SCAN` / `BLUETOOTH_CONNECT`，11 及以下回落
+    `ACCESS_FINE_LOCATION`；manifest 用 `maxSdkVersion="30"` 声明旧权限，避免与 12+ 冲突。
+  - `BlePermissionController`（expect/actual）：读取 `checkSelfPermission`、
+    `shouldShowRequestPermissionRationale`，用 `SharedPreferences` 记录是否请求过；
+    「永久拒绝」只提供「去系统设置」入口；`ON_RESUME` 时重读权限与适配器状态。
+  - 移除 `MainActivity.onCreate` 的自动权限请求，改为扫描页按状态机触发。
+- **iOS 蓝牙授权与后台**
+  - `Info.plist` 补全 `NSBluetoothAlwaysUsageDescription` 文案（说明用途、非定位/广告），
+    新增 `UIBackgroundModes = bluetooth-central`。
+  - `BleAdapterState` 新增 `RESETTING`，映射 `CBManagerStateResetting`；
+    `CBManagerState` 的 `poweredOff / unauthorized / unsupported / resetting / unknown`
+    映射为可读引导。
+  - 监听 `UIApplicationDidBecomeActiveNotification`，回到前台调用
+    `BleClient.refreshAdapterState()` 并重算权限状态。
+- **连接生命周期与断连原因**
+  - `classifyDisconnect` 统一映射主动断开 / 设备侧断开 / 超时 / 权限丢失 / 蓝牙关闭（含重置）/
+    连接失败 / 未知原因，输出标题、说明、动作与是否允许自动重连。
+  - 详情页新增断连横幅：按原因显示对应文案与「重新连接 / 去系统设置 / 开启蓝牙 / 返回扫描」；
+    `DeviceSession.userDisconnected` 区分主动断开与意外断开。
+- **自动重连**
+  - `ReconnectPolicy`：1s 起、2 倍递增、30s 封顶、最多 5 次（1/2/4/8/16 秒）。
+  - `ReconnectScheduler` 纯逻辑状态机：`WAITING / CONNECTING` 禁止重复发起；
+    蓝牙关闭进入 `PAUSED` 且不消耗次数，开启后从已完成次数继续；支持取消与上限 `EXHAUSTED`。
+  - `AutoReconnectController` 执行器：注入 `delayMillis` 与 `attemptConnect`，成功后回调新连接；
+    蓝牙关闭时取消等待/在途任务；重连成功后复用同一份报文日志并关闭旧调度器。
+- **扫描超时与空态**
+  - `ScanController` 新增 12 秒扫描计时器与 `timedOut` 标记，发现设备即清除。
+  - `classifyScanEmpty` 区分「扫描中 / 扫描超时 / 无设备 / 无权限 / 权限永久拒绝 /
+    蓝牙关闭 / 蓝牙重置 / 不支持 / 未知 / 错误」，权限与蓝牙不可用优先于「无设备」。
+
+### 修改
+
+- `BleClient` 新增 `refreshAdapterState()`，Android/iOS/JVM 与测试 Fake 同步实现。
+- `ScanUiState` 新增 `timedOut`；扫描页文案与按钮状态由可用状态驱动。
+- 版本号升为 `1.7.0` / `17`，并重新生成 `iosApp/iosApp/Version.xcconfig`。
+
+### 文档
+
+- `docs/architecture.md` 新增第 7 节：权限状态机、连接生命周期、自动重连与扫描空态。
+- 新增 `docs/permissions.md`：Android/iOS 声明、状态映射、引导、重连策略、测试边界与真机验收清单。
+- `README.md` 更新权限说明与版本号示例。
+
+### 测试
+
+- 新增 40 项（feature 从 94 增至 134）：
+  - 权限状态转移与引导 9 项；
+  - 断连原因映射 8 项；
+  - 重连退避序列、上限、暂停/恢复、取消 10 项；
+  - 扫描空态判定 6 项；
+  - 自动重连执行器（成功回调、取消、蓝牙关闭暂停、重复 start）5 项；
+  - 扫描超时标记与设备到达清除 2 项。
+- 全量 `:core:jvmTest :data:jvmTest :feature:jvmTest`：408 项通过
+  （core 263 + data 11 + feature 134）。
+- `:composeApp:assembleDebug`、`:composeApp:assembleRelease`、
+  `:composeApp:linkDebugFrameworkIosSimulatorArm64` 构建通过。
+- 真机权限弹窗、系统蓝牙开关、真实断连/重连无法在 CI 验证，见 `docs/permissions.md` 第 9 节。
+
 ## v1.6.0 - 工程质量与构建基础
 
 ### 新增

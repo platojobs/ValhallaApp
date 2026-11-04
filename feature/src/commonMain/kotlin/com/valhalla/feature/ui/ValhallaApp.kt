@@ -59,6 +59,7 @@ import com.valhalla.core.profile.DeviceProfile
 import com.valhalla.core.profile.DeviceProfileRepository
 import com.valhalla.core.profile.OtaOutcome
 import com.valhalla.core.protocol.CommandType
+import com.valhalla.data.ble.BleAdapterState
 import com.valhalla.data.ble.BleConnection
 import com.valhalla.data.ble.BleDevice
 import com.valhalla.data.ble.BleFrameLink
@@ -70,6 +71,25 @@ import com.valhalla.data.share.ShareStatus
 import com.valhalla.data.share.ShareableText
 import com.valhalla.data.share.createTextSharer
 import com.valhalla.data.share.currentTimeZoneOffsetMinutes
+import com.valhalla.feature.ble.AutoReconnectController
+import com.valhalla.feature.ble.BleAvailability
+import com.valhalla.feature.ble.BleGuidance
+import com.valhalla.feature.ble.BleGuidanceAction
+import com.valhalla.feature.ble.BlePermissionController
+import com.valhalla.feature.ble.BlePermissionState
+import com.valhalla.feature.ble.DisconnectAction
+import com.valhalla.feature.ble.DisconnectInfo
+import com.valhalla.feature.ble.DisconnectSignals
+import com.valhalla.feature.ble.ReconnectPhase
+import com.valhalla.feature.ble.ReconnectPolicy
+import com.valhalla.feature.ble.ReconnectState
+import com.valhalla.feature.ble.ScanEmptyReason
+import com.valhalla.feature.ble.allowsConnection
+import com.valhalla.feature.ble.classifyDisconnect
+import com.valhalla.feature.ble.classifyScanEmpty
+import com.valhalla.feature.ble.guidance
+import com.valhalla.feature.ble.rememberBlePermissionController
+import com.valhalla.feature.ble.resolveBleAvailability
 import com.valhalla.feature.config.ConfigEditorController
 import com.valhalla.feature.config.ConfigEditorState
 import com.valhalla.feature.config.ConfigFieldState
@@ -97,6 +117,7 @@ import kotlin.time.Instant
 
 /** 一次已建立连接对应的协议栈与控制器，详情页与 OTA 页共享同一调度器与断点存储。 */
 private class DeviceSession(
+    val device: BleDevice,
     val connection: BleConnection,
     val dispatcher: ConcurrentCommandDispatcher,
     val detail: DeviceDetailController,
@@ -105,6 +126,16 @@ private class DeviceSession(
     val config: ConfigEditorController,
     val packetLog: InMemoryPacketLog,
     val profileRepository: DeviceProfileRepository,
+) {
+    /** 用户主动返回断开时为 true，用于区分「设备侧断开」与「主动断开」。 */
+    var userDisconnected: Boolean = false
+}
+
+/** 正在进行的自动重连：保留设备与报文日志，成功后沿用同一份日志。 */
+private class ReconnectSession(
+    val device: BleDevice,
+    val packetLog: InMemoryPacketLog,
+    val controller: AutoReconnectController,
 )
 
 private sealed interface Route {
@@ -121,17 +152,114 @@ private sealed interface Route {
 @Composable
 fun ValhallaApp() {
     val bleClient = remember { createBleClient() }
+    val permissionController = rememberBlePermissionController(bleClient)
     val scope = rememberCoroutineScope()
     val scanController = remember { ScanController(bleClient, scope) }
     // 档案仓储跨连接共享，保证扫描/详情页看到同一份设备历史。
     val profileRepository = remember { DeviceProfileRepository(createDeviceProfileStore()) }
 
+    val permissionState by permissionController.state.collectAsState()
+    val adapterState by bleClient.adapterState.collectAsState()
+    val availability = remember(adapterState, permissionState) {
+        resolveBleAvailability(adapterState, permissionState)
+    }
+
     var route by remember { mutableStateOf<Route>(Route.Scan) }
     var connectingDeviceId by remember { mutableStateOf<String?>(null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    var reconnect by remember { mutableStateOf<ReconnectSession?>(null) }
+
+    fun createSession(
+        connection: BleConnection,
+        device: BleDevice,
+        packetLog: InMemoryPacketLog,
+    ): DeviceSession {
+        val dispatcher = ConcurrentCommandDispatcher(
+            PacketRecordingFrameLink(BleFrameLink(connection), packetLog),
+        )
+        val checkpointStore = createOtaCheckpointStore()
+        return DeviceSession(
+            device = device,
+            connection = connection,
+            dispatcher = dispatcher,
+            detail = DeviceDetailController(
+                dispatcher = dispatcher,
+                deviceId = connection.deviceId,
+                disconnectLink = { connection.disconnect() },
+                tokenStore = createTokenStore(),
+                profileRepository = profileRepository,
+                deviceDisplayName = device.name,
+            ),
+            ota = OtaController(
+                dispatcher = dispatcher,
+                scope = scope,
+                connectionState = connection.connected,
+                checkpointStore = checkpointStore,
+                deviceId = connection.deviceId,
+                profileRepository = profileRepository,
+            ),
+            checkpointStore = checkpointStore,
+            config = ConfigEditorController(dispatcher),
+            packetLog = packetLog,
+            profileRepository = profileRepository,
+        )
+    }
+
+    fun handleBleAction(action: BleGuidanceAction) {
+        when (action) {
+            BleGuidanceAction.REQUEST_PERMISSION -> permissionController.requestPermission()
+            BleGuidanceAction.OPEN_SETTINGS -> permissionController.openAppSettings()
+            BleGuidanceAction.ENABLE_BLUETOOTH -> permissionController.requestEnableBluetooth()
+            BleGuidanceAction.RETRY -> {
+                bleClient.refreshAdapterState()
+                permissionController.refresh()
+            }
+
+            BleGuidanceAction.NONE -> Unit
+        }
+    }
+
+    fun startReconnect(session: DeviceSession) {
+        val existing = reconnect
+        if (existing != null) {
+            val phase = existing.controller.state.value.phase
+            // 进行中或等待中的重连不允许重复发起；已耗尽/已取消才允许手动重开。
+            if (phase == ReconnectPhase.WAITING ||
+                phase == ReconnectPhase.CONNECTING ||
+                phase == ReconnectPhase.PAUSED
+            ) {
+                return
+            }
+            existing.controller.cancel()
+            reconnect = null
+        }
+        val device = session.device
+        val packetLog = session.packetLog
+        val controller = AutoReconnectController(
+            policy = ReconnectPolicy(),
+            scope = scope,
+            isBluetoothOn = { bleClient.adapterState.value == BleAdapterState.POWERED_ON },
+            attemptConnect = { runCatching { bleClient.connect(device.deviceId) }.getOrNull() },
+            onConnected = { connection ->
+                scope.launch { runCatching { session.dispatcher.close() } }
+                reconnect = null
+                route = Route.Detail(createSession(connection, device, packetLog))
+            },
+        )
+        reconnect = ReconnectSession(device, packetLog, controller)
+        controller.start()
+    }
+
+    // 蓝牙开关变化时暂停/恢复自动重连。
+    LaunchedEffect(adapterState) {
+        reconnect?.controller?.onBluetoothStateChanged(
+            available = adapterState == BleAdapterState.POWERED_ON,
+        )
+    }
 
     DisposableEffect(Unit) {
         onDispose {
+            reconnect?.controller?.cancel()
             scanController.stopScan()
             bleClient.close()
         }
@@ -140,73 +268,97 @@ fun ValhallaApp() {
     when (val current = route) {
         Route.Scan -> ScanScreen(
             state = scanController.state.collectAsState().value,
+            availability = availability,
             connectingDeviceId = connectingDeviceId,
             errorMessage = errorMessage,
             onStart = {
+                if (!availability.allowsConnection()) {
+                    errorMessage = availability.guidance()?.message ?: "蓝牙不可用"
+                    return@ScanScreen
+                }
                 errorMessage = null
                 scanController.startScan()
             },
             onStop = { scanController.stopScan() },
-            onSelect = { device ->
+            onSelect = select@{ device ->
+                if (!availability.allowsConnection()) {
+                    errorMessage = availability.guidance()?.message ?: "蓝牙不可用"
+                    return@select
+                }
                 scope.launch {
                     connectingDeviceId = device.deviceId
                     errorMessage = null
                     try {
                         val connection = bleClient.connect(device.deviceId)
                         scanController.stopScan()
-                        val packetLog = InMemoryPacketLog()
-                        val dispatcher = ConcurrentCommandDispatcher(
-                            PacketRecordingFrameLink(BleFrameLink(connection), packetLog),
-                        )
-                        val checkpointStore = createOtaCheckpointStore()
-                        val session = DeviceSession(
-                            connection = connection,
-                            dispatcher = dispatcher,
-                            detail = DeviceDetailController(
-                                dispatcher = dispatcher,
-                                deviceId = connection.deviceId,
-                                disconnectLink = { connection.disconnect() },
-                                tokenStore = createTokenStore(),
-                                profileRepository = profileRepository,
-                                deviceDisplayName = device.name,
-                            ),
-                            ota = OtaController(
-                                dispatcher = dispatcher,
-                                scope = scope,
-                                connectionState = connection.connected,
-                                checkpointStore = checkpointStore,
-                                deviceId = connection.deviceId,
-                                profileRepository = profileRepository,
-                            ),
-                            checkpointStore = checkpointStore,
-                            config = ConfigEditorController(dispatcher),
-                            packetLog = packetLog,
-                            profileRepository = profileRepository,
-                        )
-                        route = Route.Detail(session)
+                        route = Route.Detail(createSession(connection, device, InMemoryPacketLog()))
                     } catch (cancellation: CancellationException) {
                         throw cancellation
                     } catch (error: Throwable) {
-                        errorMessage = error.message ?: "连接失败"
+                        val message = error.message ?: "连接失败"
+                        val info = classifyDisconnect(
+                            DisconnectSignals(
+                                timeout = message.contains("超时"),
+                                transportError = true,
+                                adapterState = adapterState,
+                                permissionState = permissionState,
+                            ),
+                        )
+                        errorMessage = "${info.title}：${info.message}"
                     } finally {
                         connectingDeviceId = null
                     }
                 }
             },
+            onBleAction = { handleBleAction(it) },
         )
 
-        is Route.Detail -> DetailScreen(
-            session = current.session,
-            onBack = {
-                scope.launch {
-                    current.session.detail.disconnect()
-                    current.session.dispatcher.close()
-                    route = Route.Scan
-                }
-            },
-            onOpenOta = { route = Route.Ota(current.session) },
-            onOpenLogs = { route = Route.Logs(current.session) },
-        )
+        is Route.Detail -> {
+            val connected by current.session.connection.connected.collectAsState()
+            val disconnectInfo = if (!connected) {
+                classifyDisconnect(
+                    DisconnectSignals(
+                        userRequested = current.session.userDisconnected,
+                        peerTerminated = !current.session.userDisconnected,
+                        adapterState = adapterState,
+                        permissionState = permissionState,
+                    ),
+                )
+            } else {
+                null
+            }
+            DetailScreen(
+                session = current.session,
+                disconnectInfo = disconnectInfo,
+                reconnectState = reconnect
+                    ?.takeIf { it.device.deviceId == current.session.device.deviceId }
+                    ?.controller
+                    ?.state
+                    ?.collectAsState()
+                    ?.value,
+                onConnectionLost = {
+                    if (!current.session.userDisconnected) startReconnect(current.session)
+                },
+                onRetryReconnect = { startReconnect(current.session) },
+                onCancelReconnect = {
+                    reconnect?.controller?.cancel()
+                    reconnect = null
+                },
+                onBleAction = { handleBleAction(it) },
+                onBack = {
+                    current.session.userDisconnected = true
+                    reconnect?.controller?.cancel()
+                    reconnect = null
+                    scope.launch {
+                        current.session.detail.disconnect()
+                        current.session.dispatcher.close()
+                        route = Route.Scan
+                    }
+                },
+                onOpenOta = { route = Route.Ota(current.session) },
+                onOpenLogs = { route = Route.Logs(current.session) },
+            )
+        }
 
         is Route.Ota -> OtaScreen(
             session = current.session,
@@ -223,12 +375,24 @@ fun ValhallaApp() {
 @Composable
 private fun ScanScreen(
     state: ScanUiState,
+    availability: BleAvailability,
     connectingDeviceId: String?,
     errorMessage: String?,
     onStart: () -> Unit,
     onStop: () -> Unit,
     onSelect: (BleDevice) -> Unit,
+    onBleAction: (BleGuidanceAction) -> Unit,
 ) {
+    val canScan = availability.allowsConnection()
+    val guidance = availability.guidance()
+    val emptyReason = classifyScanEmpty(
+        scanning = state.scanning,
+        deviceCount = state.devices.size,
+        availability = availability,
+        error = state.error,
+        timedOut = state.timedOut,
+    )
+
     Column(
         modifier = Modifier.fillMaxSize().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -239,8 +403,23 @@ private fun ScanScreen(
             style = MaterialTheme.typography.bodySmall,
         )
 
+        guidance?.let { guide ->
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(guide.title, style = MaterialTheme.typography.titleSmall)
+                    Text(guide.message, style = MaterialTheme.typography.bodySmall)
+                    guide.actionLabel?.let { label ->
+                        Button(onClick = { onBleAction(guide.action) }) { Text(label) }
+                    }
+                }
+            }
+        }
+
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = onStart, enabled = !state.scanning) { Text("开始扫描") }
+            Button(onClick = onStart, enabled = canScan && !state.scanning) { Text("开始扫描") }
             OutlinedButton(onClick = onStop, enabled = state.scanning) { Text("停止") }
         }
 
@@ -252,8 +431,16 @@ private fun ScanScreen(
             Text(message, color = MaterialTheme.colorScheme.error)
         }
 
-        if (state.devices.isEmpty()) {
-            Text("暂无设备", style = MaterialTheme.typography.bodyMedium)
+        if (state.devices.isEmpty() && errorMessage == null) {
+            Text(
+                emptyReasonText(emptyReason),
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (emptyReason == ScanEmptyReason.SCAN_TIMEOUT) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
         }
 
         LazyColumn(
@@ -264,7 +451,7 @@ private fun ScanScreen(
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { onSelect(device) },
+                        .clickable(enabled = canScan) { onSelect(device) },
                 ) {
                     Column(modifier = Modifier.padding(12.dp)) {
                         Text(
@@ -286,9 +473,98 @@ private fun ScanScreen(
     }
 }
 
+private fun emptyReasonText(reason: ScanEmptyReason): String = when (reason) {
+    ScanEmptyReason.NONE -> ""
+    ScanEmptyReason.SCANNING -> "正在扫描附近的设备…"
+    ScanEmptyReason.SCAN_TIMEOUT -> "扫描超过 12 秒仍无设备。请确认设备已上电、处于广播模式并靠近手机。"
+    ScanEmptyReason.NO_DEVICES -> "暂无设备。请确认设备已上电并处于广播模式。"
+    ScanEmptyReason.NO_PERMISSION -> "没有蓝牙权限，无法发现设备。"
+    ScanEmptyReason.PERMISSION_PERMANENTLY_DENIED -> "蓝牙权限已被永久拒绝，请前往系统设置开启。"
+    ScanEmptyReason.BLUETOOTH_OFF -> "蓝牙已关闭，开启后才能扫描设备。"
+    ScanEmptyReason.BLUETOOTH_RESETTING -> "蓝牙正在重置，请稍候。"
+    ScanEmptyReason.UNSUPPORTED -> "当前设备不支持蓝牙低功耗。"
+    ScanEmptyReason.UNKNOWN_AVAILABILITY -> "蓝牙状态未知，请稍后重试。"
+    ScanEmptyReason.ERROR -> "扫描失败。"
+}
+
+@Composable
+private fun DisconnectBanner(
+    info: DisconnectInfo,
+    reconnectState: ReconnectState?,
+    onRetryReconnect: () -> Unit,
+    onCancelReconnect: () -> Unit,
+    onBleAction: (BleGuidanceAction) -> Unit,
+    onBack: () -> Unit,
+) {
+    val reconnectRunning = reconnectState?.phase == ReconnectPhase.WAITING ||
+        reconnectState?.phase == ReconnectPhase.CONNECTING
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(
+                info.title,
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+            Text(info.message, style = MaterialTheme.typography.bodySmall)
+
+            reconnectState?.let { rs ->
+                val hint = when (rs.phase) {
+                    ReconnectPhase.WAITING ->
+                        "将在 ${(rs.nextDelayMillis ?: 0L) / 1000} 秒后进行第 ${rs.attempt + 1} 次自动重连"
+
+                    ReconnectPhase.CONNECTING -> "正在执行第 ${rs.attempt + 1} 次自动重连…"
+                    ReconnectPhase.PAUSED ->
+                        if (rs.pausedByBluetoothOff) "蓝牙已关闭，自动重连已暂停，开启蓝牙后继续" else "自动重连已暂停"
+
+                    ReconnectPhase.EXHAUSTED -> "自动重连已达上限（${rs.attempt} 次），请手动重试"
+                    ReconnectPhase.CANCELLED -> "已取消自动重连"
+                    ReconnectPhase.SUCCEEDED -> "重连成功"
+                    ReconnectPhase.IDLE -> null
+                }
+                hint?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (reconnectRunning) {
+                    OutlinedButton(onClick = onCancelReconnect) { Text("取消重连") }
+                } else if (info.autoReconnectAllowed && info.action == DisconnectAction.RECONNECT) {
+                    Button(onClick = onRetryReconnect) { Text("重新连接") }
+                }
+                when (info.action) {
+                    DisconnectAction.OPEN_SETTINGS -> {
+                        Button(
+                            onClick = { onBleAction(BleGuidanceAction.OPEN_SETTINGS) },
+                        ) { Text("去系统设置") }
+                        OutlinedButton(onClick = onBack) { Text("返回扫描") }
+                    }
+
+                    DisconnectAction.ENABLE_BLUETOOTH -> Button(
+                        onClick = { onBleAction(BleGuidanceAction.ENABLE_BLUETOOTH) },
+                    ) { Text("开启蓝牙") }
+
+                    DisconnectAction.RESCAN -> OutlinedButton(onClick = onBack) { Text("返回扫描") }
+                    DisconnectAction.RECONNECT,
+                    DisconnectAction.NONE,
+                    -> Unit
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun DetailScreen(
     session: DeviceSession,
+    disconnectInfo: DisconnectInfo?,
+    reconnectState: ReconnectState?,
+    onConnectionLost: () -> Unit,
+    onRetryReconnect: () -> Unit,
+    onCancelReconnect: () -> Unit,
+    onBleAction: (BleGuidanceAction) -> Unit,
     onBack: () -> Unit,
     onOpenOta: () -> Unit,
     onOpenLogs: () -> Unit,
@@ -296,8 +572,15 @@ private fun DetailScreen(
     val controller = session.detail
     val state by controller.state.collectAsState()
     val configState by session.config.state.collectAsState()
+    val connected by session.connection.connected.collectAsState()
     val scope = rememberCoroutineScope()
     val profile = session.profileRepository.get(state.deviceId)
+
+    LaunchedEffect(session, connected) {
+        if (!connected && !session.userDisconnected) {
+            onConnectionLost()
+        }
+    }
 
     LaunchedEffect(session.config, state.firmware, state.deviceInfo?.model) {
         session.config.updateTarget(
@@ -320,6 +603,17 @@ private fun DetailScreen(
         Row(modifier = Modifier.fillMaxWidth()) {
             Text("设备详情", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
             TextButton(onClick = onBack) { Text("返回") }
+        }
+
+        disconnectInfo?.let { info ->
+            DisconnectBanner(
+                info = info,
+                reconnectState = reconnectState,
+                onRetryReconnect = onRetryReconnect,
+                onCancelReconnect = onCancelReconnect,
+                onBleAction = onBleAction,
+                onBack = onBack,
+            )
         }
 
         LazyColumn(

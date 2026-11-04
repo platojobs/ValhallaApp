@@ -7,6 +7,9 @@ enum class BleAdapterState {
     POWERED_OFF,
     POWERED_ON,
     UNAUTHORIZED,
+
+    /** 系统正在重启蓝牙服务（iOS `CBManagerStateResetting`）。 */
+    RESETTING,
 }
 
 /** 扫描到的设备。 */

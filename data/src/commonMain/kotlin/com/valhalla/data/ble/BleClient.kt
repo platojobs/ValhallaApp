@@ -15,6 +15,9 @@ interface BleClient {
     /** 适配器状态，UI 据此提示「请开启蓝牙」等。 */
     val adapterState: StateFlow<BleAdapterState>
 
+    /** 主动重读平台适配器/授权状态（回到前台或从设置返回时调用）。 */
+    fun refreshAdapterState()
+
     /**
      * 持续扫描，直到收集方取消。
      * 同一设备可能多次上报（RSSI 变化），由上层按 deviceId 去重。

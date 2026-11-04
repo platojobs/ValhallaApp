@@ -101,6 +101,10 @@ class AndroidBleClient internal constructor(
         return AndroidBleConnection.open(context, target, timeoutMillis)
     }
 
+    override fun refreshAdapterState() {
+        mutableAdapterState.value = currentAdapterState()
+    }
+
     override fun close() {
         runCatching { context.unregisterReceiver(stateReceiver) }
     }

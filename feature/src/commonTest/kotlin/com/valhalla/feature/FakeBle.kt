@@ -19,6 +19,8 @@ class FakeBleClient(
 
     override val adapterState = MutableStateFlow(BleAdapterState.POWERED_ON)
 
+    override fun refreshAdapterState() = Unit
+
     override fun scan(filter: ScanFilter): Flow<BleDevice> =
         scanFlowProvider?.invoke(filter) ?: scanFlow
 

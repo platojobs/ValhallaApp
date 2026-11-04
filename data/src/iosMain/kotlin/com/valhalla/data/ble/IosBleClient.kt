@@ -29,6 +29,7 @@ import platform.CoreBluetooth.CBCharacteristicWriteWithResponse
 import platform.CoreBluetooth.CBManagerState
 import platform.CoreBluetooth.CBManagerStatePoweredOff
 import platform.CoreBluetooth.CBManagerStatePoweredOn
+import platform.CoreBluetooth.CBManagerStateResetting
 import platform.CoreBluetooth.CBManagerStateUnauthorized
 import platform.CoreBluetooth.CBManagerStateUnsupported
 import platform.CoreBluetooth.CBPeripheral
@@ -126,6 +127,10 @@ class IosBleClient : BleClient {
             throw BleException("连接超时（${timeoutMillis}ms）")
         }
         return connection
+    }
+
+    override fun refreshAdapterState() {
+        mutableAdapterState.value = central.state.toBleAdapterState()
     }
 
     override fun close() {
@@ -458,6 +463,7 @@ private fun CBManagerState.toBleAdapterState(): BleAdapterState = when (this) {
     CBManagerStatePoweredOff -> BleAdapterState.POWERED_OFF
     CBManagerStateUnauthorized -> BleAdapterState.UNAUTHORIZED
     CBManagerStateUnsupported -> BleAdapterState.UNSUPPORTED
+    CBManagerStateResetting -> BleAdapterState.RESETTING
     else -> BleAdapterState.UNKNOWN
 }
 

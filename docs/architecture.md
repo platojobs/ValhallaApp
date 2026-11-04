@@ -33,6 +33,8 @@ BleConnection (data/ble)
 - `core` 不依赖平台，只处理帧、强类型消息、序号与错误语义。
 - `data` 负责把 BLE 通道包装成传输层；`feature` 只面向调度器与消息模型，不再直接读写特征值。
 - UI 只观察 `StateFlow` 与调用控制器的 suspend 方法，不接触 `Frame`。
+- 权限状态机、断连映射、自动重连与扫描空态统一收敛到 `feature/ble`（纯逻辑，可 JVM 测试），
+  平台权限入口为 expect/actual，详见 [permissions.md](permissions.md)。
 - `protocol-testkit`（仅测试依赖）提供设备侧 `FrameLink` 实现 `DeviceSimulator`，
   在 JVM 上替代 `BleFrameLink` 驱动同一套 `ConcurrentCommandDispatcher` 与 `feature` 控制器；
   它不进入 Android/iOS 产物。
@@ -303,4 +305,87 @@ UI 筛选状态（命令集合 / 仅错误 / 时间 / 关键字）
   JSON 导出（`core/src/jvmTest/.../PacketLogExportBenchmark.kt`），输出耗时、吞吐、
   峰值单块缓冲与堆占用概览；任务不挂到 `check`/`jvmTest`，不阻塞 CI。实测结果见
   [export.md](export.md#基准v160)。
+
+## 7. 权限、连接生命周期与重连（v1.7.0）
+
+权限声明、状态机与平台差异的完整说明见 [permissions.md](permissions.md)。本节只描述
+与数据流和 UI 的衔接方式。
+
+### 7.1 权限状态机
+
+```
+平台事实（系统授权 / 是否可再次弹窗 / 适配器状态）
+        │ syncFromSystem / onRequestResult
+        ▼
+BlePermissionStateMachine (feature/ble)
+        │ NOT_REQUESTED / GRANTED / DENIED / PERMANENTLY_DENIED
+        ▼
+resolveBleAvailability(adapterState, permission)
+        │ READY / 权限类 / BLUETOOTH_OFF / RESETTING / UNSUPPORTED / UNKNOWN
+        ▼
+BleGuidance（标题 + 说明 + 动作）→ 扫描页引导卡片 + 禁用扫描/连接按钮
+```
+
+- 状态机是纯逻辑类，不依赖 Android/iOS API，`jvmTest` 直接覆盖全部状态转移；
+- `PERMANENTLY_DENIED` 之后 `beginRequest()` 恒为 false，平台层不会再次调起弹窗；
+  `requestInFlight` 防止连点造成并发弹窗；
+- 平台控制器 `BlePermissionController` 是 expect/actual：
+  Android 从 `checkSelfPermission` / `shouldShowRequestPermissionRationale` 读取事实，
+  用 `SharedPreferences` 记录「是否请求过」；iOS 由 `CBManagerState` 映射；
+- 「回到前台」：Android 在 `ON_RESUME` 重新读取权限并 `refreshAdapterState()`；
+  iOS 监听 `UIApplicationDidBecomeActiveNotification`，同样重读 central 状态，
+  避免 UI 停留在过期的 `poweredOff` / `unauthorized`。
+
+### 7.2 连接生命周期与断连原因
+
+```
+BleConnection.connected == false
+        │ DisconnectSignals(userRequested / timeout / peerTerminated / transportError
+        │                   + adapterState + permissionState)
+        ▼
+classifyDisconnect() → DisconnectInfo(reason, title, message, action, autoReconnectAllowed)
+        ▼
+详情页断连横幅：文案 + 可操作项（重新连接 / 去系统设置 / 开启蓝牙 / 返回扫描）
+```
+
+- 优先级：主动断开 > 权限丢失 > 蓝牙关闭（含重置）> 超时 > 设备侧断开 > 连接失败 > 未知；
+- 主动断开与权限丢失不允许自动重连；蓝牙关闭、设备侧断开、超时允许；
+- 所有文案集中在 `DisconnectInfo`，UI 不再拼接平台错误字符串。
+
+### 7.3 自动重连
+
+```
+ReconnectScheduler (纯逻辑)
+  IDLE → WAITING(delay=1s) → CONNECTING → 失败 → WAITING(2s) → … → EXHAUSTED(5 次)
+                    ↑ 蓝牙关闭 → PAUSED ──开启──┘        cancel() → CANCELLED
+
+AutoReconnectController (执行器)
+  delayMillis 注入 + attemptConnect 注入 + onConnected 回调
+```
+
+- 退避策略 `ReconnectPolicy` 默认 1s 起、2 倍递增、30s 封顶、最多 5 次，序列为
+  1/2/4/8/16 秒；达到上限进入 `EXHAUSTED`，不再自动尝试；
+- `WAITING` / `CONNECTING` 阶段 `beginAttempt()` / `start()` 均被拒绝，天然禁止重复发起；
+- 蓝牙关闭：取消等待或进行中的任务并进入 `PAUSED`，不消耗次数；重新开启后从当前
+  已完成次数继续退避（不会回到第 1 次之前）；
+- 用户可在详情页断连横幅中「取消重连」，之后可手动「重新连接」；
+- 重连成功后关闭旧调度器，复用同一份 `InMemoryPacketLog` 建立新的 `DeviceSession`。
+
+### 7.4 扫描空态
+
+`ScanController` 在启动扫描时启动 12 秒计时器（`DEFAULT_SCAN_TIMEOUT_MILLIS`），
+空列表超过阈值置 `timedOut = true`；发现设备立即清除。扫描页用
+`classifyScanEmpty(scanning, deviceCount, availability, error, timedOut)` 判定：
+
+| 判定顺序 | 结果 | UI |
+| --- | --- | --- |
+| 已有设备 | `NONE` | 正常列表 |
+| 扫描报错 | `ERROR` | 错误文案 |
+| 权限未请求 / 被拒绝 | `NO_PERMISSION` | 权限引导卡片 |
+| 权限永久拒绝 | `PERMISSION_PERMANENTLY_DENIED` | 去系统设置 |
+| 蓝牙关闭 / 重置 | `BLUETOOTH_OFF` / `BLUETOOTH_RESETTING` | 开启蓝牙 / 稍候 |
+| 不支持 / 未知 | `UNSUPPORTED` / `UNKNOWN_AVAILABILITY` | 说明原因 |
+| 扫描中 / 超时 / 结束无设备 | `SCANNING` / `SCAN_TIMEOUT` / `NO_DEVICES` | 分别展示 |
+
+权限与蓝牙不可用优先于「无设备」，不会把「没有权限」误报成「暂未发现设备」。
 

@@ -113,16 +113,20 @@ xcodebuild -project iosApp/iosApp.xcodeproj -scheme iosApp \
 ```
 
 Android 端在 `AndroidBleSupport.init(context)` 之后才可使用真实 BLE，示例入口已在
-`composeApp` 中完成初始化并申请运行时权限。iOS 端需要 `NSBluetoothAlwaysUsageDescription`，
-已在 `iosApp` 的 Info.plist 中声明；Xcode 构建阶段会自动调用 Gradle 链接对应架构的 Framework。
+`composeApp` 中完成初始化。运行时权限由扫描页的 `BlePermissionController` 按状态机发起
+（Android 12+ 使用 `BLUETOOTH_SCAN` / `BLUETOOTH_CONNECT`，11 及以下回落 `ACCESS_FINE_LOCATION`），
+永久拒绝后不再弹窗，引导用户前往系统设置。iOS 端需要 `NSBluetoothAlwaysUsageDescription`
+并声明 `bluetooth-central` 后台模式，均已写入 `iosApp` 的 Info.plist；
+Xcode 构建阶段会自动调用 Gradle 链接对应架构的 Framework。权限细节见
+[docs/permissions.md](docs/permissions.md)。
 
 ## 版本号
 
 唯一来源是 [gradle.properties](gradle.properties)
 
 ```properties
-valhalla.versionName=1.6.0
-valhalla.versionCode=16
+valhalla.versionName=1.7.0
+valhalla.versionCode=17
 ```
 
 - Android：`composeApp/build.gradle.kts` 通过 `providers.gradleProperty` 读取，写入

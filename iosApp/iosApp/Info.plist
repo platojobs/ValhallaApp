@@ -21,9 +21,13 @@
     <key>LSRequiresIPhoneOS</key>
     <true/>
     <key>NSBluetoothAlwaysUsageDescription</key>
-    <string>Valhalla 需要蓝牙权限以扫描并连接智能硬件设备。</string>
+    <string>Valhalla 使用蓝牙扫描并连接附近的智能硬件，用于查看设备状态、读取报文、修改配置和升级固件。不会用于定位或广告用途。</string>
     <key>NSBluetoothPeripheralUsageDescription</key>
-    <string>Valhalla 需要蓝牙权限以连接智能硬件设备。</string>
+    <string>Valhalla 需要蓝牙权限以连接智能硬件设备（iOS 13 以下兼容声明）。</string>
+    <key>UIBackgroundModes</key>
+    <array>
+        <string>bluetooth-central</string>
+    </array>
     <key>UILaunchScreen</key>
     <dict/>
     <key>UISupportedInterfaceOrientations</key>
