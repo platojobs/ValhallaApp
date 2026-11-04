@@ -2,7 +2,8 @@
 
 本文说明 `core` 协议栈如何经 `data` 的 BLE 适配层进入 `feature` 控制器与 Compose UI，
 重点覆盖 `FrameLink`、`ConcurrentCommandDispatcher` 与 OTA 时序。协议字段定义见
-[protocol.md](protocol.md)；固件包格式、本地预检与断点持久化见 [firmware.md](firmware.md)。
+[protocol.md](protocol.md)；固件包格式、本地预检与断点持久化见 [firmware.md](firmware.md)；
+设备侧测试桩、故障注入矩阵与 CI 见 [testing.md](testing.md)。
 
 ## 1. 分层与数据流
 
@@ -28,6 +29,9 @@ BleConnection (data/ble)
 - `core` 不依赖平台，只处理帧、强类型消息、序号与错误语义。
 - `data` 负责把 BLE 通道包装成传输层；`feature` 只面向调度器与消息模型，不再直接读写特征值。
 - UI 只观察 `StateFlow` 与调用控制器的 suspend 方法，不接触 `Frame`。
+- `protocol-testkit`（仅测试依赖）提供设备侧 `FrameLink` 实现 `DeviceSimulator`，
+  在 JVM 上替代 `BleFrameLink` 驱动同一套 `ConcurrentCommandDispatcher` 与 `feature` 控制器；
+  它不进入 Android/iOS 产物。
 
 ## 2. BleFrameLink：BLE 侧的 FrameLink 适配
 
@@ -127,12 +131,18 @@ UI                OtaController            Dispatcher            Device
 - 断连：`OtaController` 可接收 `connectionState`（`BleConnection.connected`），
   在分片边界与 `FINISH_OTA` 前快速失败；在途请求由调度器超时/传输异常兜底。
   `reset()` 清除断点并回到 `Idle`，便于用户重新发起。
-- 断点续传：`start(firmware, resumeFrom)` 已预留锚点参数 `OtaResumePoint`
-  （`sessionId + sentBytes + totalBytes + crc16`），失败时写入 `lastResumePoint`。
-  当前协议没有独立恢复指令，`START_OTA` 也不携带起始偏移，因此只有设备在新会话中
-  复用相同 `sessionId` 时才会从断点继续，否则从头开始——**恢复语义待真机协议确认**。
+- 断点续传（v0.9.0 起）：`startPackage(firmware, resumeFrom)` 在本地通过
+  「版本 / 总长 / CRC-32 / CRC-16」四项标识校验后，携带 14 字节续传扩展发出 `START_OTA`；
+  以设备应答的 `acceptedOffset` 为唯一权威起点（0 表示从头开始、向下调整按设备值、
+  拒绝则回退为不带扩展的旧格式）。失败时写入 `lastResumePoint` 并持久化到
+  `OtaCheckpointStore`，成功/中止/`reset()` 清除。字段与状态码见
+  [protocol.md 4.3.1](protocol.md#431-续传扩展v090)，恢复策略见 [firmware.md](firmware.md)。
 
 ## 5. 测试策略
+
+分两层：
+
+**单元层（`core` / `data` / `feature` 的 `jvmTest`）**
 
 - 调度器与控制器测试使用 `FakeFrameLink`：下行帧记录后按协议 `MessageCodec.decodeRequest`
   解析为强类型请求，`responder` 生成强类型应答回灌上行。
@@ -140,3 +150,17 @@ UI                OtaController            Dispatcher            Device
   `StandardTestDispatcher` 下确定可复现。
 - 覆盖点：完整会话（鉴权 → 读信息/版本/电量）、并行请求交错与乱序应答、
   设备错误码向 UI 状态传播、配置读写、OTA 正常路径/分片大小协商/重传/CRC 失败/中止/断连复位/空包/重置。
+
+**端到端层（`feature` 的 `jvmTest` + `protocol-testkit`）**
+
+- `DeviceSimulator` 实现真实 `FrameLink` 语义，按命令表生成应答与通知，
+  并支持场景（鉴权、续传策略、旧设备）与故障注入（超时、忙、CRC、短确认、重复/乱序/粘包/拆包、
+  通知丢失、中途断连）。
+- 把 `DeviceSimulator` → `ConcurrentCommandDispatcher` → `FirmwareSelectionController`
+  → `OtaController` 串成完整链路：鉴权 → 读信息 → 读版本 → 预检 → OTA → 续传 → 完成/中止。
+- 断言状态迁移、进度、断点落盘与清除、`resumeFallbackReason`；覆盖续传「接受/下调/拒绝」
+  三分支与旧设备回退。
+- 用例清单、矩阵与新增场景步骤见 [testing.md](testing.md)；CI 工作流为
+  `.github/workflows/ci.yml`（macOS + JDK 21，按 core/data/feature 测试、Android 打包、
+  iOS Framework 分档）。
+- 边界：端到端测试只证明协议一致性，不代表真机 BLE/固件行为。

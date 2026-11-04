@@ -5,6 +5,10 @@
 > 说明：当前没有厂商提供的真实固件协议文档，本字典是一套自洽的「假设协议」，
 > 所有取值集中定义在 `core/protocol` 与 `core/protocol/message` 中。
 > 后续拿到真机协议后，只需调整命令码、字段布局与错误码表，上层调度与 UI 不受影响。
+>
+> 协议一致性由设备侧测试桩 `protocol-testkit` 验证：它实现与真机相同的 `FrameLink`，
+> 按本字典生成应答与通知，并支持场景/故障注入。用法与矩阵见 [testing.md](testing.md)。
+> 测试桩只证明协议一致性，不代表真机 BLE/固件行为。
 
 ## 1. 传输层约定
 
@@ -298,6 +302,10 @@ end
 续传成功后仍按 `FINISH_OTA(totalBytes, crc16)` 校验整包；设备侧应以扩展中的
 `payloadCrc32` 与本地 `totalBytes` 判断是否复用原断点上下文。
 
+上述「接受 / 下调 / 拒绝 / 旧设备」四条分支均由测试桩的 `ResumePolicy`
+（`ACCEPT` / `ADJUST` / `REJECT` / `LEGACY_DEVICE`）模拟，端到端用例见
+[testing.md](testing.md#6-端到端覆盖的命令链)。
+
 ### 5.5 心跳
 
 ```
@@ -337,3 +345,6 @@ Device -- HEARTBEAT_REPLY(battery=70, uptime=2000) --> App（主动通知）
    避免依赖系统的长包拆分。
 6. `FrameParser` 只做帧级 CRC 校验，不校验业务层 CRC（OTA 的 `crc16` 由设备在
    `START_OTA` / `FINISH_OTA` 中独立校验）。
+7. 协议行为只在设备侧测试桩上验证过一致性，尚未在真机 BLE 链路上联调；
+   模拟器不能覆盖射频丢包、MTU 分包时序与真实固件回滚（见 [testing.md](testing.md#0-边界声明重要)）。
+

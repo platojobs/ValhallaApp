@@ -40,6 +40,9 @@ kotlin {
         androidMain.dependencies {
             implementation(libs.androidx.activity.compose)
         }
+        jvmTest.dependencies {
+            implementation(project(":protocol-testkit"))
+        }
     }
 }
 

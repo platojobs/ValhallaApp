@@ -2,6 +2,51 @@
 
 本文件记录 ValhallaApp 的版本演进，按「阶段完成即提交 + 打 annotated tag」的节奏维护。
 
+## v1.0.0 - 协议一致性测试桩与 CI 流水线
+
+### 新增
+
+- 独立测试桩模块 `:protocol-testkit`（仅 JVM target，作为 `feature` 的 `jvmTest` 依赖，
+  不进入 Android/iOS 主产物）：
+  - `DeviceSimulator` 实现设备侧 `FrameLink`，按协议字典解析 App 请求并生成
+    鉴权、设备信息、电量、版本、配置/参数、时间、心跳、OTA 应答与 `OTA_PROGRESS_NOTIFY`；
+  - `SimulatorScenario` 场景配置：鉴权成功/失败、设备标识与电量、配置读写、
+    OTA 正常升级、`chunkSize` 协商、旧设备不识别扩展；
+  - `ResumePolicy` 续传策略：`ACCEPT`（`acceptedOffset == 请求值`）、`ADJUST`
+    （下调到更小偏移）、`REJECT`（返回 `0x11/0x12/0x13`）、`LEGACY_DEVICE`
+    （返回 `INVALID_PAYLOAD`）、`IGNORE`；
+  - `FaultInjection` 故障注入：应答超时、`BUSY`、`CRC_MISMATCH`、确认长度不足、
+    重复应答、乱序（延迟）应答、通知丢失、中途断连、粘包（两帧拼接）与拆包（一帧分三段）；
+  - `SimulatorFirmware` 生成带 104 字节头的固件包，便于端到端用例构造 payload。
+- 端到端测试 `DeviceSimulatorE2ETest`（13 个用例）：测试桩 +
+  `ConcurrentCommandDispatcher` + `FirmwareSelectionController` + `OtaController`
+  串起「鉴权 → 读信息 → 读版本 → 预检 → OTA → 续传 → 完成/中止」，
+  断言状态迁移、进度、断点落盘/清除与 `resumeFallbackReason`；
+  覆盖续传「接受/下调/拒绝」三分支、旧设备回退、标识不一致、断连恢复、
+  超时/BUSY/短确认重传、重复/粘包/拆包/通知丢失、整包 CRC 失败、鉴权失败与乱序应答。
+- CI：`.github/workflows/ci.yml`
+  - 触发：`push`（`main` 与 `v*` 标签）、`pull_request`（`main`）、`workflow_dispatch`；
+  - `macos-14` runner + `actions/setup-java@v4`（Temurin JDK 21）+ `gradle/actions/setup-gradle@v4` 缓存；
+  - 分档 job：`jvm-tests`（core/data/feature 矩阵）、`android-build`（`assembleDebug`）、
+    `ios-framework`（`linkDebugFrameworkIosSimulatorArm64`）；
+  - 测试失败上传报告，Android 构建上传 APK artifact。
+- 文档：新增 [docs/testing.md](docs/testing.md)（架构、场景/续传/故障注入矩阵、
+  命令链与用例清单、新增场景步骤、CI 说明、边界声明）；
+  `docs/protocol.md` 与 `docs/architecture.md` 增加测试桩与 CI 的交叉引用。
+
+### 变更
+
+- `settings.gradle.kts` 注册 `:protocol-testkit`；`feature/build.gradle.kts` 为 `jvmTest`
+  增加测试桩依赖（`implementation`，不参与主产物）。
+
+### 验证
+
+- `JAVA_HOME=$(/usr/libexec/java_home -v 21) ./gradlew :core:jvmTest :data:jvmTest :feature:jvmTest`：
+  core 139 + data 11 + feature 57 = **207 项全部通过**（新增 13 项 E2E）。
+- `:composeApp:assembleDebug` 与 `:composeApp:linkDebugFrameworkIosSimulatorArm64` 均通过。
+- CI 工作流已通过本地 YAML 语法校验，命令与本地等价；首次推送后需在远程 Actions 实跑确认。
+- **测试桩只证明协议一致性，不代表真机 BLE/固件行为**；真机联调仍待完成。
+
 ## v0.9.0 - 协议续传字段与完整续传链路
 
 ### 新增
