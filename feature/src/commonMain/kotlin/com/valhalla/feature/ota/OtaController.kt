@@ -45,6 +45,8 @@ sealed interface OtaState {
         val totalBytes: Int,
         val crc16: Int,
         val sessionId: Long? = null,
+        /** 本次请求携带的续传偏移（0 表示从头开始）。 */
+        val requestedOffset: Int = 0,
     ) : OtaState
 
     data class Transferring(
@@ -55,6 +57,10 @@ sealed interface OtaState {
         /** 设备进度通知上报的阶段，默认按本地传输阶段展示。 */
         val stage: OtaStage = OtaStage.TRANSFERRING,
         val retransmissions: Int = 0,
+        /** 设备实际确认的起始偏移（续传时为断点偏移，从头开始为 0）。 */
+        val initialOffset: Int = 0,
+        /** 设备拒绝或下调续传偏移时的说明；正常从头开始为 null。 */
+        val resumeFallbackReason: String? = null,
     ) : OtaState {
         val progress: Float
             get() = if (totalBytes == 0) 0f else sentBytes.toFloat() / totalBytes
@@ -103,9 +109,16 @@ sealed interface OtaState {
  *   失败时记录精确偏移；成功、中止、reset 时清除；
  * - 通过 [connectionState] 感知链路断开，在分片间隙快速失败并允许 UI 复位。
  *
- * 续传协议限制：当前协议没有独立的恢复指令，`START_OTA` 也不携带起始偏移。
- * 只有设备在新会话中复用原 `sessionId`，控制器才会从断点偏移继续，否则从头传输。
- * 该行为依赖设备固件实现，真机未验证。
+ * 续传协议（v0.9.0）：
+ * - 存在可用断点时，`START_OTA` 在基础字段之后追加 14 字节续传扩展
+ *   （`extVersion | flags | resumeSessionId | resumeOffset | payloadCrc32`）；
+ * - 以设备应答中的 `acceptedOffset` 为唯一权威起点：0 表示从 0 开始，
+ *   `0 < accepted <= requested` 表示按设备确认（允许向下调整）续传，
+ *   `accepted > requested` 或 `accepted >= total` 视为设备应答非法并直接失败；
+ * - 设备显式拒绝续传请求（任意非 0 状态码）时，自动回退为不带扩展的旧格式
+ *   `START_OTA` 并从 0 开始，回退原因记录在 [OtaState.Transferring.resumeFallbackReason]；
+ * - 断点是否可续传仍先由本地 `matchesPayload(版本/总长/CRC32/CRC16)` 判定，
+ *   身份不一致时不会发送续传扩展。
  */
 class OtaController(
     private val dispatcher: ConcurrentCommandDispatcher,
@@ -229,7 +242,8 @@ class OtaController(
     /**
      * 断点续传入口（内存 payload）。
      *
-     * 仅当设备在新会话中返回相同 `sessionId` 且固件身份一致时才从断点继续，否则从头开始。
+     * 控制器先本地校验断点固件身份，再将其作为 `START_OTA` 续传扩展发送；
+     * 最终起始偏移以设备应答中的 `acceptedOffset` 为准。
      */
     suspend fun resume(firmware: ByteArray): OtaState = start(firmware, resumeFrom = lastResumePoint)
 
@@ -280,33 +294,38 @@ class OtaController(
 
         startProgressCollector()
         yield()
-        mutableState.value = OtaState.Preparing(total, crc16)
+        val requestedOffset = resumableOffset(resumeFrom, totalBytes, crc16, crc32, version)
+        mutableState.value = OtaState.Preparing(total, crc16, requestedOffset = requestedOffset)
 
         try {
             ensureLinkAlive()
-            val startResponse = dispatcher.execute(
-                StartOtaRequest(
-                    totalBytes = totalBytes,
-                    crc16 = crc16,
-                    chunkSize = chunkSize,
-                    firmwareVersion = version,
-                ),
+            val session = startSession(
+                totalBytes = totalBytes,
+                crc16 = crc16,
+                crc32 = crc32,
+                version = version,
+                requestedOffset = requestedOffset,
+                resumeSessionId = resumeFrom?.sessionId ?: 0,
             )
-            if (startResponse !is StartOtaResponse) {
-                error("开始 OTA 应答类型异常: ${startResponse::class.simpleName}")
-            }
-            sessionId = startResponse.sessionId
+            sessionId = session.response.sessionId
             activeSessionId = sessionId
 
-            val effectiveChunkSize = startResponse.chunkSize.takeIf { it in 1..1024 } ?: chunkSize
-            sent = resumableOffset(resumeFrom, sessionId, total, crc16, crc32, version)
+            val effectiveChunkSize = session.response.chunkSize.takeIf { it in 1..1024 } ?: chunkSize
+            sent = resolveStartOffset(requestedOffset, session.response.acceptedOffset, total)
             lastCheckpointBytes = sent
-            if (sent > 0) {
+            val fallbackReason = fallbackNote(
+                requestedOffset = requestedOffset,
+                acceptedOffset = sent,
+                deviceFallbackReason = session.fallbackReason,
+            )
+            if (sent > 0 || fallbackReason != null) {
                 mutableState.value = OtaState.Transferring(
                     sentBytes = sent,
                     totalBytes = total,
                     crc16 = crc16,
                     sessionId = sessionId,
+                    initialOffset = sent,
+                    resumeFallbackReason = fallbackReason,
                 )
             }
 
@@ -370,7 +389,7 @@ class OtaController(
             mutableState.value = done
             return done
         } catch (cancellation: CancellationException) {
-            sessionId?.let { saveCheckpoint(it, sent, total, crc16, crc32, version) }
+            persistInterruptedCheckpoint(sessionId, sent, total, crc16, crc32, version, resumeFrom)
             mutableState.value = OtaState.Aborted(OtaAbortReason.USER_CANCELLED.name, sent, total)
             throw cancellation
         } catch (aborted: OtaAbortedException) {
@@ -380,12 +399,15 @@ class OtaController(
             return state
         } catch (error: Throwable) {
             val info = error.toFailureInfo()
-            val resumePoint = sessionId?.let { pointOf(it, sent, total, crc16, crc32, version) }
-            if (resumePoint != null) {
-                saveCheckpoint(resumePoint)
-            } else {
-                checkpointStore?.clear()
-            }
+            val resumePoint = persistInterruptedCheckpoint(
+                sessionId = sessionId,
+                sentBytes = sent,
+                totalBytes = total,
+                crc16 = crc16,
+                crc32 = crc32,
+                version = version,
+                previous = resumeFrom,
+            )
             lastResumePoint = resumePoint
             val state = OtaState.Failed(
                 reason = info.message,
@@ -480,19 +502,154 @@ class OtaController(
         }
     }
 
+    private suspend fun startSession(
+        totalBytes: Long,
+        crc16: Int,
+        crc32: Long,
+        version: FirmwareVersion,
+        requestedOffset: Int,
+        resumeSessionId: Long,
+    ): StartSession {
+        if (requestedOffset > 0) {
+            try {
+                val response = executeStart(
+                    totalBytes = totalBytes,
+                    crc16 = crc16,
+                    version = version,
+                    resumeSessionId = resumeSessionId,
+                    resumeOffset = requestedOffset.toLong(),
+                    crc32 = crc32,
+                )
+                return StartSession(response)
+            } catch (error: CommandFailure.DeviceRejected) {
+                // 旧设备不识别尾部扩展，或设备侧续传上下文失效：回退为旧格式并从 0 开始。
+                val reason = "设备拒绝续传（${error.status.describe()}），已回退为从头开始"
+                val legacy = executeStart(
+                    totalBytes = totalBytes,
+                    crc16 = crc16,
+                    version = version,
+                    resumeSessionId = 0,
+                    resumeOffset = 0,
+                    crc32 = 0,
+                )
+                return StartSession(legacy, reason)
+            }
+        }
+        return StartSession(
+            executeStart(
+                totalBytes = totalBytes,
+                crc16 = crc16,
+                version = version,
+                resumeSessionId = 0,
+                resumeOffset = 0,
+                crc32 = 0,
+            ),
+        )
+    }
+
+    private suspend fun executeStart(
+        totalBytes: Long,
+        crc16: Int,
+        version: FirmwareVersion,
+        resumeSessionId: Long,
+        resumeOffset: Long,
+        crc32: Long,
+    ): StartOtaResponse {
+        val response = dispatcher.execute(
+            StartOtaRequest(
+                totalBytes = totalBytes,
+                crc16 = crc16,
+                chunkSize = chunkSize,
+                firmwareVersion = version,
+                resumeSessionId = resumeSessionId,
+                resumeOffset = resumeOffset,
+                payloadCrc32 = crc32,
+            ),
+        )
+        return response as? StartOtaResponse
+            ?: throw CommandFailure.InvalidResponse(
+                "开始 OTA 应答类型异常: ${response::class.simpleName}",
+            )
+    }
+
+    /**
+     * 设备确认偏移的合法性与语义：
+     *
+     * - `accepted >= total`：设备应答非法（没有任何可传输内容）；
+     * - 未请求续传却返回非 0 偏移：设备应答非法；
+     * - `accepted > requested`：设备声称的起点晚于本地请求，说明上下文错乱，直接失败；
+     * - `0 <= accepted <= requested`：以设备为准，0 表示设备要求从头开始。
+     */
+    private fun resolveStartOffset(requestedOffset: Int, acceptedOffset: Long, totalBytes: Int): Int {
+        if (acceptedOffset >= totalBytes) {
+            throw CommandFailure.InvalidResponse("设备确认偏移超出范围: $acceptedOffset >= $totalBytes")
+        }
+        if (requestedOffset <= 0) {
+            if (acceptedOffset > 0) {
+                throw CommandFailure.InvalidResponse("未请求续传但设备返回偏移 $acceptedOffset")
+            }
+            return 0
+        }
+        if (acceptedOffset > requestedOffset.toLong()) {
+            throw CommandFailure.InvalidResponse(
+                "设备确认偏移 $acceptedOffset 大于请求偏移 $requestedOffset",
+            )
+        }
+        return acceptedOffset.toInt()
+    }
+
+    private fun fallbackNote(
+        requestedOffset: Int,
+        acceptedOffset: Int,
+        deviceFallbackReason: String?,
+    ): String? {
+        if (deviceFallbackReason != null) return deviceFallbackReason
+        if (requestedOffset <= 0) return null
+        return when {
+            acceptedOffset == 0 -> "设备未接受续传偏移，已从 0 开始"
+            acceptedOffset < requestedOffset ->
+                "设备将续传偏移下调到 $acceptedOffset 字节（请求 $requestedOffset 字节）"
+            else -> null
+        }
+    }
+
+    private fun persistInterruptedCheckpoint(
+        sessionId: Long?,
+        sentBytes: Int,
+        totalBytes: Int,
+        crc16: Int,
+        crc32: Long,
+        version: FirmwareVersion,
+        previous: OtaResumePoint?,
+    ): OtaResumePoint? {
+        val point = sessionId?.let { pointOf(it, sentBytes, totalBytes, crc16, crc32, version) }
+        return when {
+            // 已建立新会话且传输过至少一个字节：落盘精确断点。
+            point != null -> {
+                saveCheckpoint(point)
+                point
+            }
+            // 新会话已建立但尚未传输：旧会话上下文失效，清除旧断点。
+            sessionId != null -> {
+                checkpointStore?.clear()
+                null
+            }
+            // 会话尚未建立：保留调用方传入的旧断点，便于下次重试。
+            else -> previous?.takeIf { it.isValid() }
+        }
+    }
+
     private fun resumableOffset(
         resumeFrom: OtaResumePoint?,
-        sessionId: Long,
-        totalBytes: Int,
+        totalBytes: Long,
         crc16: Int,
         crc32: Long,
         version: FirmwareVersion,
     ): Int {
         val point = resumeFrom ?: return 0
         if (!point.isValid()) return 0
-        if (point.sessionId != sessionId) return 0
-        if (!point.matchesPayload(version, totalBytes.toLong(), crc32, crc16)) return 0
-        return point.sentBytes.coerceIn(0, totalBytes)
+        if (!point.matchesPayload(version, totalBytes, crc32, crc16)) return 0
+        return point.sentBytes
     }
 
     private fun saveCheckpoint(
@@ -533,6 +690,12 @@ class OtaController(
     }
 
     private class OtaAbortedException(val reason: OtaAbortReason) : Exception("OTA 已中止：${reason.name}")
+
+    /** 一次 START_OTA 的结果；[fallbackReason] 非空表示续传被拒后回退为从头开始。 */
+    private data class StartSession(
+        val response: StartOtaResponse,
+        val fallbackReason: String? = null,
+    )
 
     private fun OtaState.sentBytes(): Int = when (this) {
         is OtaState.Preparing -> 0

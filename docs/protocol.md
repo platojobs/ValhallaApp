@@ -84,6 +84,9 @@ payload = status:u8 | body...
 | `0x0E` | `CRC_MISMATCH` | CRC 校验失败 |
 | `0x0F` | `UNSUPPORTED` | 设备不支持该能力 |
 | `0x10` | `INTERNAL_ERROR` | 设备内部错误 |
+| `0x11` | `OTA_RESUME_OFFSET_INVALID` | OTA 续传偏移非法 |
+| `0x12` | `OTA_RESUME_CONTEXT_INVALID` | OTA 续传上下文失效 |
+| `0x13` | `OTA_FIRMWARE_MISMATCH` | OTA 固件标识不匹配 |
 | `0x7F` | `UNKNOWN_ERROR` | 未定义错误（保留兜底） |
 
 App 侧映射规则：
@@ -128,7 +131,7 @@ App 侧映射规则：
 
 | 指令码 | 命令 | 方向 | 请求 payload | 成功应答 body |
 | --- | --- | --- | --- | --- |
-| `0x10` | `START_OTA` | App → 设备 | `totalBytes:u32, crc16:u16, chunkSize:u16, firmwareVersion` | `sessionId:u32, chunkSize:u16` |
+| `0x10` | `START_OTA` | App → 设备 | `totalBytes:u32, crc16:u16, chunkSize:u16, firmwareVersion`<br>（可选尾部续传扩展，见 4.3.1） | `sessionId:u32, chunkSize:u16`<br>（可选 `acceptedOffset:u32`） |
 | `0x11` | `OTA_DATA` | App → 设备 | `offset:u32, dataLen:u16, data` | `receivedBytes:u32` |
 | `0x12` | `FINISH_OTA` | App → 设备 | `totalBytes:u32, crc16:u16` | `rebootRequired:u8(0/1)` |
 | `0x13` | `ABORT_OTA` | App → 设备 | `reason:u8` | 空 |
@@ -136,6 +139,57 @@ App 侧映射规则：
 `OtaAbortReason`：`0x00` 用户取消、`0x01` 超时、`0x02` 校验失败、`0x03` 传输异常、`0x04` 设备拒绝。
 
 `OtaStage`（用于进度通知）：`0x00` 准备、`0x01` 传输、`0x02` 校验、`0x03` 应用、`0x04` 完成。
+
+#### 4.3.1 续传扩展（v0.9.0）
+
+**方案取舍**：没有新增独立的 `RESUME_OTA(0x14)`，而是在 `START_OTA` 基础字段之后追加
+**可选 14 字节尾部扩展**。理由：
+
+- 不续传时**不追加任何字节**，旧报文与新 App 发出的请求字节完全一致，旧设备无需改动；
+- 续传仍复用 `START_OTA` 的会话建立与分片参数协商流程，不引入新状态机分支；
+- 独立指令需要设备同时维护「START_OTA 状态」与「RESUME_OTA 状态」，兼容与测试成本更高；
+- 代价是旧设备收到带扩展的请求会因尾部多余字节返回 `INVALID_PAYLOAD`（或 `UNSUPPORTED`），
+  App 侧据此自动回退为不带扩展的旧格式并从 0 开始。
+
+扩展字段（仅当 `resumeOffset > 0` 时发送）：
+
+| 偏移 | 字段 | 类型 | 说明 |
+| --- | --- | --- | --- |
+| 0 | `extVersion` | u8 | 固定 `0x01` |
+| 1 | `flags` | u8 | bit0 = `RESUME`，其余位必须为 0 |
+| 2 | `resumeSessionId` | u32 | 上次设备分配的 `sessionId` |
+| 6 | `resumeOffset` | u32 | 断点绝对偏移（payload 内，不含固件头），必须 `< totalBytes` |
+| 10 | `payloadCrc32` | u32 | 固件头声明的 payload CRC-32，用于设备侧校验固件身份 |
+
+设备解析规则：
+
+1. 基础字段解析后 `remaining == 0`：旧格式，视为从头开始；
+2. `remaining == 14`：解析扩展并校验 `extVersion`、`flags`；
+3. 其它长度：返回 `INVALID_PAYLOAD`。
+
+设备应答：
+
+- 旧设备/未接受续传：只返回 `sessionId:u32, chunkSize:u16`，App 解码为 `acceptedOffset = 0`；
+- 设备接受非 0 偏移：在基础 body 之后追加 `acceptedOffset:u32`（实际生效的起始偏移）。
+
+设备可拒绝续传并返回以下错误码：
+
+| 错误码 | 语义 | App 行为 |
+| --- | --- | --- |
+| `0x11` `OTA_RESUME_OFFSET_INVALID` | 偏移越界/不对齐 | 回退旧格式从头开始 |
+| `0x12` `OTA_RESUME_CONTEXT_INVALID` | 会话/续传上下文已失效 | 回退旧格式从头开始 |
+| `0x13` `OTA_FIRMWARE_MISMATCH` | 固件标识（版本/总长/CRC32/CRC16）不匹配 | 回退旧格式从头开始 |
+
+**App 侧起点策略**（可测试、无歧义）：
+
+| 场景 | 处理 |
+| --- | --- |
+| `acceptedOffset == 0` 且请求了续传 | 设备要求从头开始，从 0 传输并记录回退原因 |
+| `0 < acceptedOffset <= resumeOffset` | 以设备确认值为起点（允许设备向下取整） |
+| `acceptedOffset > resumeOffset` | 判定设备应答非法，升级失败并提示 |
+| `acceptedOffset >= totalBytes` | 判定设备应答非法，升级失败并提示 |
+| 未请求续传却返回非 0 `acceptedOffset` | 判定设备应答非法，升级失败并提示 |
+| 续传请求被设备以任意非 0 状态码拒绝 | 自动重发不带扩展的 `START_OTA`，从 0 开始 |
 
 ### 4.4 系统与心跳
 
@@ -217,7 +271,34 @@ App <-- status=0x00, rebootRequired=1 --> Device
 
 设备可在任意时刻用 `OTA_PROGRESS_NOTIFY` 上报进度；该通知不会被误配给 OTA 请求。
 
-### 5.4 心跳
+### 5.4 OTA 断点续传
+
+App 在发起续传前先做本地门控：版本、payload 总长、CRC-32、CRC-16 必须与断点记录一致，
+且本地预检通过；任一不满足都不发送续传扩展。
+
+```
+App -- START_OTA(total, crc16, chunk, version,
+                 extVersion=1, flags=RESUME,
+                 resumeSessionId, resumeOffset=1024, payloadCrc32) --> Device
+
+alt 设备接受
+  App <-- status=0x00, sessionId=新会话, chunkSize, acceptedOffset=1024 -- Device
+  App -- OTA_DATA(offset=1024, ...) --> Device ... （从断点继续）
+else 设备下调偏移
+  App <-- status=0x00, acceptedOffset=768 -- Device
+  App -- OTA_DATA(offset=768, ...) --> Device ... （以设备确认值为起点）
+else 设备拒绝续传
+  App <-- status=0x11 / 0x12 / 0x13 -- Device
+  App -- START_OTA(旧格式，无扩展字段) --> Device
+  App <-- status=0x00, sessionId, chunkSize -- Device
+  App -- OTA_DATA(offset=0, ...) --> Device ... （回退为从头开始）
+end
+```
+
+续传成功后仍按 `FINISH_OTA(totalBytes, crc16)` 校验整包；设备侧应以扩展中的
+`payloadCrc32` 与本地 `totalBytes` 判断是否复用原断点上下文。
+
+### 5.5 心跳
 
 ```
 App -- HEARTBEAT(uptime=1000) --> Device

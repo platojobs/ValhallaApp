@@ -1,6 +1,15 @@
 package com.valhalla.core.firmware
 
+import com.valhalla.core.protocol.Crc16
 import com.valhalla.core.protocol.message.FirmwareVersion
+
+/** 一次流式读取同时得到的 payload 校验值。 */
+data class FirmwareChecksums(
+    /** CRC-32/IEEE，用于与文件头声明比对。 */
+    val crc32: Long,
+    /** 协议层 CRC-16/CCITT-FALSE，用于与断点锚点和 START_OTA 比对。 */
+    val crc16: Int,
+)
 
 /**
  * 已解析的固件包：固定头 + payload，数据仍留在 [source] 中按需分块读取。
@@ -32,19 +41,25 @@ class FirmwarePackage(
         return source.read(payloadOffset + offset, length)
     }
 
-    /** 流式计算 payload CRC-32；分块大小仅影响读取粒度，不改变结果。 */
-    suspend fun computePayloadCrc32(chunkSize: Int = DEFAULT_CRC_CHUNK_SIZE): Long {
+    /** 一次流式读取同时计算 CRC-32 与协议 CRC-16，避免重复扫描 payload。 */
+    suspend fun computePayloadChecksums(chunkSize: Int = DEFAULT_CRC_CHUNK_SIZE): FirmwareChecksums {
         require(chunkSize > 0) { "chunkSize 必须大于 0: $chunkSize" }
-        var crc = 0L
+        var crc32 = 0L
+        var crc16 = Crc16.INITIAL
         var offset = 0L
         while (offset < payloadLength) {
             val length = minOf(chunkSize.toLong(), payloadLength - offset).toInt()
             val chunk = readPayload(offset, length)
-            crc = Crc32.update(crc, chunk)
+            crc32 = Crc32.update(crc32, chunk)
+            crc16 = Crc16.update(crc16, chunk)
             offset += length
         }
-        return crc
+        return FirmwareChecksums(crc32 = crc32, crc16 = crc16)
     }
+
+    /** 流式计算 payload CRC-32；分块大小仅影响读取粒度，不改变结果。 */
+    suspend fun computePayloadCrc32(chunkSize: Int = DEFAULT_CRC_CHUNK_SIZE): Long =
+        computePayloadChecksums(chunkSize).crc32
 
     fun close() {
         source.close()

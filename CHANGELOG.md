@@ -2,6 +2,54 @@
 
 本文件记录 ValhallaApp 的版本演进，按「阶段完成即提交 + 打 annotated tag」的节奏维护。
 
+## v0.9.0 - 协议续传字段与完整续传链路
+
+### 新增
+
+- 协议续传（保持向后兼容）：
+  - `START_OTA` 请求在基础字段之后追加**可选 14 字节续传扩展**
+    （`extVersion=1 | flags=RESUME | resumeSessionId:u32 | resumeOffset:u32 | payloadCrc32:u32`）；
+    不续传时不追加任何字节，旧报文与新 App 请求字节完全一致；
+  - `START_OTA` 应答在基础 body 之后追加**可选 `acceptedOffset:u32`**，返回设备实际生效的起点；
+    旧设备 6 字节应答解码为 `acceptedOffset = 0`；
+  - 未采用独立 `RESUME_OTA(0x14)`，取舍与兼容策略记录在
+    [docs/protocol.md](docs/protocol.md#431-续传扩展v090)。
+- 新增 `DeviceStatus` 错误码：
+  - `0x11 OTA_RESUME_OFFSET_INVALID`：偏移非法；
+  - `0x12 OTA_RESUME_CONTEXT_INVALID`：续传上下文失效；
+  - `0x13 OTA_FIRMWARE_MISMATCH`：固件标识不匹配。
+- 预检联动：
+  - `FirmwarePrecheckResult` 新增 `payloadCrc16`，`computePayloadChecksums()` 一次流式读取
+    同时计算 CRC-32 与 CRC-16；
+  - `FirmwareSelectionState` 新增 `computedCrc16` 与 `resumeBlockedReason`；
+    断点必须通过「合法 + 版本/总长/CRC32 + 预检通过 + CRC16」四层校验才可续传，
+    不匹配时禁用续传并展示具体原因。
+- UI：固件卡展示 CRC16 与「可续传，从 X 继续」；传输状态展示设备确认起点、
+    设备下调/拒绝续传的回退说明。
+- 测试：新增 `OtaResumeProtocolTest` 与 `OtaControllerPackageTest` 续传用例
+  （接受偏移、向下调整、拒绝回退、非法偏移、CRC16 不一致、续传进度与总长）。
+
+### 变更
+
+- `OtaController` 以设备 `acceptedOffset` 为唯一权威起点：
+  - `0` → 从 0 开始并提示回退；
+  - `0 < accepted <= requested` → 从设备确认值继续；
+  - `accepted > requested` 或 `>= totalBytes` → `Failed`；
+  - 续传请求被设备拒绝（任意非 0 状态码）→ 自动重发不带扩展的旧格式并从 0 开始。
+- 移除旧的「新会话 `sessionId` 必须等于断点 `sessionId`」门控，改由设备通过
+  `resumeSessionId` 上下文与 `acceptedOffset` 决定。
+- 断点写入同步：新会话已建立且已传输时按实际偏移落盘；已建立但未传输时清除旧断点；
+  会话尚未建立时保留旧断点。
+- `docs/protocol.md` 增加续传扩展字段、错误码、起点策略与续传时序；
+  `docs/firmware.md` 更新两层门控、回退策略与未验证项。
+
+### 验证
+
+- `JAVA_HOME=$(/usr/libexec/java_home -v 21) ./gradlew :core:jvmTest :data:jvmTest :feature:jvmTest`：
+  core 139 + data 11 + feature 44 = 194 项全部通过（既有 172 项无回归）。
+- `:composeApp:assembleDebug` 与 `:composeApp:linkDebugFrameworkIosSimulatorArm64` 通过。
+- 未在真机验证设备侧续传行为（见 docs/firmware.md 末尾）。
+
 ## v0.8.0 - 固件文件选择、本地预检与断点持久化
 
 ### 新增

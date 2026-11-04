@@ -1,8 +1,8 @@
 # 固件包格式、预检与断点续传
 
-本文说明 v0.8.0 引入的固件文件格式、本地预检规则、文件选择与分块读取、OTA 断点持久化
-及失效条件。协议报文本身见 [protocol.md](protocol.md)，分层与 OTA 时序见
-[architecture.md](architecture.md)。
+本文说明 v0.8.0 引入的固件文件格式、本地预检规则、文件选择与分块读取、OTA 断点持久化，
+以及 v0.9.0 新增的协议级续传偏移确认与回退策略。协议报文本身见
+[protocol.md](protocol.md)，分层与 OTA 时序见 [architecture.md](architecture.md)。
 
 ## 1. 固件文件格式
 
@@ -106,13 +106,15 @@ data class PickedFirmware(val name: String, val source: FirmwareSource)
 | 型号匹配 | 设备型号为空 → `HardwareUnknown`；不命中白名单且无 `*` → `HardwareModelMismatch` |
 | 版本对比 | 设备版本为空 → `VersionUnknown`；目标版本 < 当前版本 → `VersionRollback` |
 | 完整性 | 流式重算 payload CRC32，与头部声明不符 → `PayloadChecksumMismatch` |
+| 续传一致性 | 同一次流式读取顺带计算协议层 CRC-16，供断点比对（不计入错误列表） |
 
 版本比较顺序为 `major → minor → patch → build` 的字典序，忽略渠道名；**相同版本允许
 重刷**，只有严格更低才判定回退。设备当前版本来自 `GET_FIRMWARE_VERSION` 应答，型号
 来自 `GET_DEVICE_INFO` 应答。
 
-预检结果 `FirmwarePrecheckResult.passed == false` 时，UI 禁用「开始升级」与「继续上次
-升级」按钮，并逐条展示错误原因；OTA 控制器本身也不接受未经选择流程的固件包。
+预检结果为 `FirmwarePrecheckResult`，同时携带 `payloadCrc32` 与 `payloadCrc16`。
+`passed == false` 时，UI 禁用「开始升级」与「继续上次升级」按钮，并逐条展示错误原因；
+OTA 控制器本身也不接受未经选择流程的固件包。
 
 ## 4. 断点持久化
 
@@ -156,21 +158,39 @@ v1|sessionId|major.minor.patch.build|channel|totalBytes|sentBytes|crc16|crc32
 
 ### 恢复与失效条件
 
-恢复入口为 `OtaController.startPackage(firmware, resumeFrom)`，按下述规则决定是否使用
-断点：
+恢复入口为 `OtaController.startPackage(firmware, resumeFrom)`。是否进入续传由两层门控决定：
+
+**第一层：本地门控（`FirmwareSelectionController.resolveResume`）**
 
 1. 断点 `isValid()`：`sentBytes` 在 `1 until totalBytes`，`totalBytes/crc16/crc32`
    在合法范围；
 2. `firmwareVersion`、`totalBytes`、`crc32` 与当前固件完全一致；
-3. 新 `START_OTA` 应答的 `sessionId` 与断点相同；
-4. 设备未处于中止/复位状态。
+3. 本地预检通过；
+4. 预检计算出的 `payloadCrc16` 与断点记录一致。
 
-任一条件不满足即**从偏移 0 重新开始**，不会产生错误的续传。UI 仅在预检通过且断点与
-所选固件匹配时显示「继续上次升级」。
+任一不满足都不展示「继续上次升级」，并在 UI 显示具体原因（断点失效 / 固件标识不匹配 /
+预检未通过 / CRC16 不一致）。断点数据本身保留，用户仍可手动「清除断点」。
 
-**协议限制（未验证）**：当前协议没有独立的恢复指令，`START_OTA` 也不携带起始偏移。
-只有设备在新会话中复用原 `sessionId` 才能续传；若设备每次 `START_OTA` 都分配新会话，
-则断点实际只能作为记录与 UI 提示，无法续传。该行为依赖设备固件实现，需真机联调确认。
+**第二层：设备确认（`OtaController`）**
+
+本地门控通过后，`START_OTA` 携带续传扩展（`resumeSessionId`、`resumeOffset`、
+`payloadCrc32`），最终起点以设备应答的 `acceptedOffset` 为准：
+
+| 设备应答 | 控制器行为 |
+| --- | --- |
+| `acceptedOffset == 0` | 设备要求从头开始，从 0 传输，并记录回退原因 |
+| `0 < acceptedOffset <= resumeOffset` | 以设备确认值为起点（允许向下取整） |
+| `acceptedOffset > resumeOffset` | 应答非法，进入 `Failed` |
+| `acceptedOffset >= totalBytes` | 应答非法，进入 `Failed` |
+| 未请求续传却返回非 0 偏移 | 应答非法，进入 `Failed` |
+| 续传请求被设备以非 0 状态码拒绝 | 自动重发不带扩展的旧格式 `START_OTA`，从 0 开始 |
+
+回退/下调信息记录在 `OtaState.Transferring.resumeFallbackReason`，UI 直接展示。
+续传时 `sentBytes` 初始值等于设备确认起点，进度始终以完整 `totalBytes` 为分母。
+
+**断点写入同步**：新会话建立后若已传输至少 1 字节，失败/取消时按实际 `sentBytes` 落盘；
+若已建立新会话但尚未传输，旧断点上下文失效，直接清除；若会话尚未建立（如 START 超时），
+保留调用方传入的旧断点，便于下次重试。
 
 ## 5. 测试覆盖
 
@@ -179,12 +199,19 @@ v1|sessionId|major.minor.patch.build|channel|totalBytes|sentBytes|crc16|crc32
 - `Crc32Test`：标准向量、增量计算与空数据；
 - `FirmwareHeaderTest`：编码解码往返、魔数/格式/标志/头部 CRC、型号字段、长度边界；
 - `FirmwareParserTest`：截断、长度不符、分块读取越界、不同分块大小的 CRC32 一致性；
-- `FirmwarePrecheckTest`：大小、型号、版本、CRC 分支与多错误收集；
+- `FirmwarePrecheckTest`：大小、型号、版本、CRC 分支与多错误收集，CRC16 同步计算；
 - `OtaResumePointTest`：编解码往返、非法字符串、有效性、固件身份匹配、内存存储；
-- `FirmwareSelectionControllerTest`：选择成功/取消/损坏文件、预检门控、断点加载与清除；
-- `OtaControllerPackageTest`：只传输 payload、失败落盘精确断点、同/异会话恢复、
-  固件身份不一致时回退到 0。
+- `FirmwareSelectionControllerTest`：选择成功/取消/损坏文件、预检门控、断点加载与清除、
+  断点失效/固件标识不匹配/CRC16 不一致/预检失败时的续传禁用与原因提示；
+- `OtaResumeProtocolTest`：旧格式请求/应答字节兼容、续传扩展往返、非法扩展长度/版本/标志、
+  非法 `resumeOffset`、新错误码映射；
+- `OtaControllerPackageTest`：只传输 payload、失败落盘精确断点、设备接受/下调/拒绝续传偏移、
+  回退旧格式、非法 `acceptedOffset`、续传进度与总长计算、固件身份/CRC16 不一致时不发扩展。
 
 平台选择器、SAF/UIDocumentPicker、SharedPreferences/NSUserDefaults 的实际行为无法在
 JVM 测试覆盖，已通过 Android `assembleDebug` 与 iOS
 `linkDebugFrameworkIosSimulatorArm64` 编译验证，但**未在真机验证**。
+
+续传扩展与 `acceptedOffset` 的设备行为同样是协议级假设：设备是否接受断点、是否复用
+原 `sessionId`、是否按旧格式拒绝扩展，都需要真机固件联调确认。App 侧已通过回退旧格式
+保证兼容，但回退后的实际传输表现仍需硬件验证。

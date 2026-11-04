@@ -360,9 +360,21 @@ private fun OtaScreen(
 
             is OtaState.Transferring -> {
                 LinearProgressIndicator(progress = { current.progress }, modifier = Modifier.fillMaxWidth())
-                Text("${current.stage.label()}：已发送 ${current.sentBytes}/${current.totalBytes} 字节（${(current.progress * 100).toInt()}%）")
+                val resumeNote = if (current.initialOffset > 0) {
+                    "（从 ${formatBytes(current.initialOffset.toLong())} 续传）"
+                } else {
+                    ""
+                }
+                Text("${current.stage.label()}：已发送 ${current.sentBytes}/${current.totalBytes} 字节（${(current.progress * 100).toInt()}%）$resumeNote")
                 if (current.retransmissions > 0) {
                     Text("分片重传 ${current.retransmissions} 次", style = MaterialTheme.typography.bodySmall)
+                }
+                current.resumeFallbackReason?.let { reason ->
+                    Text(
+                        reason,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
                 }
             }
 
@@ -423,7 +435,7 @@ private fun OtaScreen(
             )
         }
 
-        if (selectionState.resumePoint != null) {
+        if (selectionState.resumePoint != null || selectionState.resumeBlockedReason != null) {
             TextButton(onClick = { selection.clearResume() }, enabled = !running) {
                 Text("清除断点")
             }
@@ -465,6 +477,26 @@ private fun FirmwareCard(
                     "CRC32 声明 ${hex32(selectionState.declaredCrc32)} · 实际 ${hex32(selectionState.computedCrc32)}",
                     style = MaterialTheme.typography.bodySmall,
                 )
+                Text(
+                    "CRC16 ${hex16(selectionState.computedCrc16)}",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+
+            val resumePoint = selectionState.resumePoint
+            if (resumePoint != null && selectionState.canResume) {
+                Text(
+                    "可续传，从 ${formatBytes(resumePoint.sentBytes.toLong())} 继续" +
+                        "（已传输 ${resumePoint.sentBytes}/${resumePoint.totalBytes} 字节）",
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+            selectionState.resumeBlockedReason?.let { reason ->
+                Text(
+                    "无法续传：$reason",
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                )
             }
 
             val precheck = selectionState.precheck
@@ -501,6 +533,9 @@ private fun formatBytes(bytes: Long): String = when {
 
 private fun hex32(value: Long?): String =
     value?.let { "0x" + it.toString(16).padStart(8, '0') } ?: "—"
+
+private fun hex16(value: Int?): String =
+    value?.let { "0x" + it.toString(16).uppercase().padStart(4, '0') } ?: "—"
 
 private fun OtaStage.label(): String = when (this) {
     OtaStage.PREPARING -> "准备中"

@@ -8,10 +8,12 @@ import com.valhalla.core.firmware.FirmwareParser
 import com.valhalla.core.firmware.FirmwareSource
 import com.valhalla.core.firmware.InMemoryOtaCheckpointStore
 import com.valhalla.core.firmware.OtaResumePoint
+import com.valhalla.core.protocol.CommandType
 import com.valhalla.core.protocol.Crc16
 import com.valhalla.core.protocol.message.DeviceRequest
 import com.valhalla.core.protocol.message.DeviceResponse
 import com.valhalla.core.protocol.message.DeviceStatus
+import com.valhalla.core.protocol.message.ErrorResponse
 import com.valhalla.core.protocol.message.FinishOtaRequest
 import com.valhalla.core.protocol.message.FinishOtaResponse
 import com.valhalla.core.protocol.message.FirmwareVersion
@@ -24,6 +26,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -93,14 +96,14 @@ class OtaControllerPackageTest {
     }
 
     @Test
-    fun `同会话且固件一致时从断点继续`() = runTest {
+    fun `设备接受续传偏移时从断点继续`() = runTest {
         val store = InMemoryOtaCheckpointStore()
         val firmware = buildPackage(payload)
         val crc16 = Crc16.ccittFalse(payload)
         val point = OtaResumePoint(42, 128, 300, crc16, version, Crc32.compute(payload))
         store.save(point)
 
-        val link = FakeFrameLink(responder(sessionId = 42))
+        val link = FakeFrameLink(responder(sessionId = 42, acceptedOffset = 128))
         val controller = OtaController(
             dispatcher = ConcurrentCommandDispatcher(link, scope = backgroundScope),
             chunkSize = 64,
@@ -110,6 +113,12 @@ class OtaControllerPackageTest {
         val result = controller.startPackage(firmware, resumeFrom = store.load())
 
         assertTrue(result is OtaState.Succeeded)
+        val start = link.requests.filterIsInstance<StartOtaRequest>().single()
+        assertTrue(start.hasResumeExtension, "续传请求应携带扩展字段")
+        assertEquals(42L, start.resumeSessionId)
+        assertEquals(128L, start.resumeOffset)
+        assertEquals(Crc32.compute(payload), start.payloadCrc32)
+
         val dataRequests = link.requests.filterIsInstance<OtaDataRequest>()
         assertEquals(listOf(128L, 192L, 256L), dataRequests.map { it.offset })
         assertEquals(listOf(64, 64, 44), dataRequests.map { it.data.size })
@@ -117,7 +126,228 @@ class OtaControllerPackageTest {
     }
 
     @Test
-    fun `设备会话变化时不使用断点`() = runTest {
+    fun `设备下调续传偏移时从设备确认值继续`() = runTest {
+        val store = InMemoryOtaCheckpointStore()
+        val firmware = buildPackage(payload)
+        val point = OtaResumePoint(
+            42, 128, 300, Crc16.ccittFalse(payload), version, Crc32.compute(payload),
+        )
+        store.save(point)
+
+        val link = FakeFrameLink(responder(sessionId = 42, acceptedOffset = 96))
+        val controller = OtaController(
+            dispatcher = ConcurrentCommandDispatcher(link, scope = backgroundScope),
+            chunkSize = 64,
+            checkpointStore = store,
+        )
+
+        val result = controller.startPackage(firmware, resumeFrom = point)
+
+        assertTrue(result is OtaState.Succeeded)
+        val dataRequests = link.requests.filterIsInstance<OtaDataRequest>()
+        assertEquals(listOf(96L, 160L, 224L, 288L), dataRequests.map { it.offset })
+        assertEquals(listOf(64, 64, 64, 12), dataRequests.map { it.data.size })
+        assertTrue(dataRequests.first().data.contentEquals(payload.copyOfRange(96, 160)))
+    }
+
+    @Test
+    fun `设备拒绝续传时回退旧格式并从零开始`() = runTest {
+        val store = InMemoryOtaCheckpointStore()
+        val firmware = buildPackage(payload)
+        val point = OtaResumePoint(
+            42, 128, 300, Crc16.ccittFalse(payload), version, Crc32.compute(payload),
+        )
+        store.save(point)
+
+        var startCount = 0
+        val link = FakeFrameLink { request ->
+            when (request) {
+                is StartOtaRequest -> {
+                    startCount++
+                    if (request.hasResumeExtension) {
+                        ErrorResponse(
+                            CommandType.START_OTA,
+                            DeviceStatus.OTA_RESUME_CONTEXT_INVALID,
+                            "续传上下文已失效",
+                        )
+                    } else {
+                        StartOtaResponse(DeviceStatus.OK, 99, 64)
+                    }
+                }
+
+                is OtaDataRequest -> OtaDataResponse(DeviceStatus.OK, request.offset + request.data.size)
+                is FinishOtaRequest -> FinishOtaResponse(DeviceStatus.OK, rebootRequired = false)
+                else -> null
+            }
+        }
+        val controller = OtaController(
+            dispatcher = ConcurrentCommandDispatcher(link, scope = backgroundScope),
+            chunkSize = 64,
+            checkpointStore = store,
+        )
+
+        val result = controller.startPackage(firmware, resumeFrom = point)
+
+        assertTrue(result is OtaState.Succeeded)
+        assertEquals(2, startCount)
+        val starts = link.requests.filterIsInstance<StartOtaRequest>()
+        assertTrue(starts[0].hasResumeExtension)
+        assertEquals(0L, starts[1].resumeOffset, "回退请求必须使用旧格式（无扩展）")
+        assertFalse(starts[1].hasResumeExtension)
+
+        val dataRequests = link.requests.filterIsInstance<OtaDataRequest>()
+        assertEquals(0L, dataRequests.first().offset)
+        assertEquals(listOf(0L, 64L, 128L, 192L, 256L), dataRequests.map { it.offset })
+        assertNull(store.load())
+    }
+
+    @Test
+    fun `设备拒绝续传后回退原因记录在传输状态`() = runTest {
+        val store = InMemoryOtaCheckpointStore()
+        val firmware = buildPackage(payload)
+        val point = OtaResumePoint(
+            42, 128, 300, Crc16.ccittFalse(payload), version, Crc32.compute(payload),
+        )
+        store.save(point)
+
+        lateinit var controller: OtaController
+        var observed: OtaState? = null
+        val link = FakeFrameLink { request ->
+            when (request) {
+                is StartOtaRequest -> if (request.hasResumeExtension) {
+                    ErrorResponse(CommandType.START_OTA, DeviceStatus.OTA_RESUME_OFFSET_INVALID, "偏移非法")
+                } else {
+                    StartOtaResponse(DeviceStatus.OK, 99, 64)
+                }
+
+                is OtaDataRequest -> {
+                    if (request.offset == 0L) observed = controller.state.value
+                    OtaDataResponse(DeviceStatus.OK, request.offset + request.data.size)
+                }
+
+                is FinishOtaRequest -> FinishOtaResponse(DeviceStatus.OK, rebootRequired = false)
+                else -> null
+            }
+        }
+        controller = OtaController(
+            dispatcher = ConcurrentCommandDispatcher(link, scope = backgroundScope),
+            chunkSize = 64,
+            checkpointStore = store,
+        )
+
+        controller.startPackage(firmware, resumeFrom = point)
+
+        val transferring = observed as? OtaState.Transferring
+        assertNotNull(transferring)
+        assertNotNull(transferring.resumeFallbackReason)
+        assertTrue(transferring.resumeFallbackReason!!.contains("回退"))
+        assertEquals(0, transferring.initialOffset)
+    }
+
+    @Test
+    fun `设备确认偏移大于请求偏移时报错`() = runTest {
+        val store = InMemoryOtaCheckpointStore()
+        val firmware = buildPackage(payload)
+        val point = OtaResumePoint(
+            42, 128, 300, Crc16.ccittFalse(payload), version, Crc32.compute(payload),
+        )
+        store.save(point)
+
+        val link = FakeFrameLink(responder(sessionId = 42, acceptedOffset = 160))
+        val controller = OtaController(
+            dispatcher = ConcurrentCommandDispatcher(link, scope = backgroundScope),
+            chunkSize = 64,
+            checkpointStore = store,
+        )
+
+        val result = controller.startPackage(firmware, resumeFrom = point)
+
+        assertTrue(result is OtaState.Failed)
+        val failed = result
+        assertTrue(failed.reason.contains("大于请求偏移"))
+        assertTrue(link.requests.filterIsInstance<OtaDataRequest>().isEmpty())
+        // 新会话已建立但未传输：旧断点必须清除。
+        assertNull(store.load())
+    }
+
+    @Test
+    fun `设备确认偏移超出总量时报错`() = runTest {
+        val store = InMemoryOtaCheckpointStore()
+        val firmware = buildPackage(payload)
+        val point = OtaResumePoint(
+            42, 128, 300, Crc16.ccittFalse(payload), version, Crc32.compute(payload),
+        )
+        store.save(point)
+
+        val link = FakeFrameLink(responder(sessionId = 42, acceptedOffset = 300))
+        val controller = OtaController(
+            dispatcher = ConcurrentCommandDispatcher(link, scope = backgroundScope),
+            chunkSize = 64,
+            checkpointStore = store,
+        )
+
+        val result = controller.startPackage(firmware, resumeFrom = point)
+
+        assertTrue(result is OtaState.Failed)
+        assertTrue(result.reason.contains("超出范围"))
+    }
+
+    @Test
+    fun `未请求续传但设备返回非零偏移时报错`() = runTest {
+        val link = FakeFrameLink(responder(sessionId = 42, acceptedOffset = 64))
+        val controller = OtaController(
+            dispatcher = ConcurrentCommandDispatcher(link, scope = backgroundScope),
+            chunkSize = 64,
+        )
+
+        val result = controller.startPackage(buildPackage(payload))
+
+        assertTrue(result is OtaState.Failed)
+        assertTrue(result.reason.contains("未请求续传"))
+    }
+
+    @Test
+    fun `续传后进度以总长为分母计算`() = runTest {
+        val store = InMemoryOtaCheckpointStore()
+        val firmware = buildPackage(payload)
+        val point = OtaResumePoint(
+            42, 128, 300, Crc16.ccittFalse(payload), version, Crc32.compute(payload),
+        )
+        store.save(point)
+
+        lateinit var controller: OtaController
+        var observed: OtaState? = null
+        val link = FakeFrameLink { request ->
+            when (request) {
+                is StartOtaRequest -> StartOtaResponse(DeviceStatus.OK, 42, 64, acceptedOffset = 128)
+                is OtaDataRequest -> {
+                    if (request.offset == 128L) observed = controller.state.value
+                    OtaDataResponse(DeviceStatus.OK, request.offset + request.data.size)
+                }
+
+                is FinishOtaRequest -> FinishOtaResponse(DeviceStatus.OK, rebootRequired = false)
+                else -> null
+            }
+        }
+        controller = OtaController(
+            dispatcher = ConcurrentCommandDispatcher(link, scope = backgroundScope),
+            chunkSize = 64,
+            checkpointStore = store,
+        )
+
+        controller.startPackage(firmware, resumeFrom = point)
+
+        val transferring = observed as? OtaState.Transferring
+        assertNotNull(transferring)
+        assertEquals(128, transferring.sentBytes)
+        assertEquals(300, transferring.totalBytes)
+        assertEquals(128f / 300f, transferring.progress, 1e-6f)
+        assertEquals(128, transferring.initialOffset)
+        assertNull(transferring.resumeFallbackReason)
+    }
+
+    @Test
+    fun `设备未确认续传偏移时从零开始`() = runTest {
         val store = InMemoryOtaCheckpointStore()
         val firmware = buildPackage(payload)
         val point = OtaResumePoint(42, 128, 300, Crc16.ccittFalse(payload), version, Crc32.compute(payload))
@@ -132,12 +362,13 @@ class OtaControllerPackageTest {
 
         controller.startPackage(firmware, resumeFrom = point)
 
-        val dataRequests = link.requests.filterIsInstance<OtaDataRequest>()
-        assertEquals(0L, dataRequests.first().offset)
+        val start = link.requests.filterIsInstance<StartOtaRequest>().single()
+        assertTrue(start.hasResumeExtension)
+        assertEquals(0L, link.requests.filterIsInstance<OtaDataRequest>().first().offset)
     }
 
     @Test
-    fun `固件身份不一致时不使用断点`() = runTest {
+    fun `固件身份不一致时不携带续传扩展`() = runTest {
         val store = InMemoryOtaCheckpointStore()
         val firmware = buildPackage(payload)
         val mismatched = OtaResumePoint(
@@ -159,12 +390,48 @@ class OtaControllerPackageTest {
 
         controller.startPackage(firmware, resumeFrom = mismatched)
 
+        val start = link.requests.filterIsInstance<StartOtaRequest>().single()
+        assertFalse(start.hasResumeExtension, "固件标识不一致时不得发送续传扩展")
         assertEquals(0L, link.requests.filterIsInstance<OtaDataRequest>().first().offset)
     }
 
-    private fun responder(sessionId: Long): suspend (DeviceRequest) -> DeviceResponse? = { request ->
+    @Test
+    fun `CRC16 不一致时不携带续传扩展`() = runTest {
+        val firmware = buildPackage(payload)
+        val point = OtaResumePoint(
+            sessionId = 42,
+            sentBytes = 128,
+            totalBytes = 300,
+            crc16 = Crc16.ccittFalse(payload) xor 0xFFFF,
+            firmwareVersion = version,
+            crc32 = Crc32.compute(payload),
+        )
+
+        val link = FakeFrameLink(responder(sessionId = 42))
+        val controller = OtaController(
+            dispatcher = ConcurrentCommandDispatcher(link, scope = backgroundScope),
+            chunkSize = 64,
+        )
+
+        controller.startPackage(firmware, resumeFrom = point)
+
+        val start = link.requests.filterIsInstance<StartOtaRequest>().single()
+        assertFalse(start.hasResumeExtension)
+        assertEquals(0L, link.requests.filterIsInstance<OtaDataRequest>().first().offset)
+    }
+
+    private fun responder(
+        sessionId: Long,
+        acceptedOffset: Long = 0,
+    ): suspend (DeviceRequest) -> DeviceResponse? = { request ->
         when (request) {
-            is StartOtaRequest -> StartOtaResponse(DeviceStatus.OK, sessionId, 64)
+            is StartOtaRequest -> StartOtaResponse(
+                status = DeviceStatus.OK,
+                sessionId = sessionId,
+                chunkSize = 64,
+                acceptedOffset = acceptedOffset,
+            )
+
             is OtaDataRequest -> OtaDataResponse(DeviceStatus.OK, request.offset + request.data.size)
             is FinishOtaRequest -> FinishOtaResponse(DeviceStatus.OK, rebootRequired = false)
             else -> null

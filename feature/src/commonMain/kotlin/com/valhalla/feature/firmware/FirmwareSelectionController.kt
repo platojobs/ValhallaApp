@@ -24,8 +24,12 @@ data class FirmwareSelectionState(
     val declaredCrc32: Long? = null,
     /** 预检实际重算出的 CRC-32；读取失败时为 null。 */
     val computedCrc32: Long? = null,
+    /** 预检时顺带计算的协议层 CRC-16，用于断点续传比对；读取失败时为 null。 */
+    val computedCrc16: Int? = null,
     val precheck: FirmwarePrecheckResult? = null,
     val resumePoint: OtaResumePoint? = null,
+    /** 存在断点但无法续传时的原因；没有断点或可续传时为 null。 */
+    val resumeBlockedReason: String? = null,
     val error: String? = null,
     val errorCode: String? = null,
 ) {
@@ -91,12 +95,15 @@ class FirmwareSelectionController(
     suspend fun recheck(currentVersion: FirmwareVersion?, currentModel: String?): Boolean {
         val current = firmware ?: return false
         val result = prechecker.check(current, currentVersion, currentModel)
+        val resume = resolveResume(current, result)
         mutableState.update {
             it.copy(
                 picking = false,
                 precheck = result,
                 computedCrc32 = result.payloadCrc32,
-                resumePoint = resolveResumePoint(current),
+                computedCrc16 = result.payloadCrc16,
+                resumePoint = resume.point,
+                resumeBlockedReason = resume.blockedReason,
                 error = null,
                 errorCode = null,
             )
@@ -106,19 +113,27 @@ class FirmwareSelectionController(
 
     /** 从持久化存储重新加载断点，并按当前固件校验。 */
     fun refreshResume() {
-        mutableState.update { it.copy(resumePoint = firmware?.let(::resolveResumePoint)) }
+        val current = firmware
+        val resolution = if (current == null) {
+            ResumeResolution(null, null)
+        } else {
+            resolveResume(current, mutableState.value.precheck)
+        }
+        mutableState.update {
+            it.copy(resumePoint = resolution.point, resumeBlockedReason = resolution.blockedReason)
+        }
     }
 
     /** 清除断点（成功升级、用户放弃续传或存储损坏时使用）。 */
     fun clearResume() {
         checkpointStore.clear()
-        mutableState.update { it.copy(resumePoint = null) }
+        mutableState.update { it.copy(resumePoint = null, resumeBlockedReason = null) }
     }
 
     /** 当前固件对应的有效断点；没有选择或校验失败时返回 null。 */
     fun resumePointForCurrentFirmware(): OtaResumePoint? {
         val current = firmware ?: return null
-        return resolveResumePoint(current)
+        return resolveResume(current, mutableState.value.precheck).point
     }
 
     /** 放弃当前选择并关闭数据源，保留（已校验的）断点。 */
@@ -151,6 +166,7 @@ class FirmwareSelectionController(
             firmware = parsed
 
             val result = prechecker.check(parsed, currentVersion, currentModel)
+            val resume = resolveResume(parsed, result)
             mutableState.value = FirmwareSelectionState(
                 picking = false,
                 packageName = picked.name,
@@ -158,9 +174,10 @@ class FirmwareSelectionController(
                 payloadBytes = parsed.payloadLength,
                 declaredCrc32 = parsed.payloadCrc32,
                 computedCrc32 = result.payloadCrc32,
+                computedCrc16 = result.payloadCrc16,
                 precheck = result,
-                resumePoint = checkpointStore.load()
-                    ?.takeIf { it.isValid() && it.matchesFirmware(parsed) },
+                resumePoint = resume.point,
+                resumeBlockedReason = resume.blockedReason,
             )
             result.passed
         } catch (cancellation: CancellationException) {
@@ -195,6 +212,40 @@ class FirmwareSelectionController(
         }
     }
 
-    private fun resolveResumePoint(firmware: FirmwarePackage): OtaResumePoint? =
-        checkpointStore.load()?.takeIf { it.isValid() && it.matchesFirmware(firmware) }
+    private data class ResumeResolution(
+        val point: OtaResumePoint?,
+        val blockedReason: String?,
+    )
+
+    /**
+     * 续传门控：断点必须同时满足
+     *
+     * 1. 断点字段合法；
+     * 2. 固件标识一致（版本 / payload 总长 / CRC-32）；
+     * 3. 本地预检通过；
+     * 4. 协议层 CRC-16 与断点记录一致（固件内容未变）。
+     *
+     * 任一不满足都不进入续传分支，并通过 [ResumeResolution.blockedReason] 给出原因。
+     */
+    private fun resolveResume(
+        firmware: FirmwarePackage,
+        precheck: FirmwarePrecheckResult?,
+    ): ResumeResolution {
+        val stored = checkpointStore.load() ?: return ResumeResolution(null, null)
+        if (!stored.isValid()) {
+            return ResumeResolution(null, "断点数据已失效，将从 0 开始")
+        }
+        if (!stored.matchesFirmware(firmware)) {
+            return ResumeResolution(null, "断点固件标识不匹配（版本/总长/CRC32），已禁用续传")
+        }
+        if (precheck?.passed != true) {
+            return ResumeResolution(null, "预检未通过，暂不可续传")
+        }
+        val crc16 = precheck.payloadCrc16
+            ?: return ResumeResolution(null, "固件 CRC16 未能计算，已禁用续传")
+        if (stored.crc16 != crc16) {
+            return ResumeResolution(null, "固件内容 CRC16 与断点不一致，已禁用续传")
+        }
+        return ResumeResolution(stored, null)
+    }
 }

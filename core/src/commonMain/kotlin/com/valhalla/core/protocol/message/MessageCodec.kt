@@ -59,12 +59,7 @@ object MessageCodec {
 
             CommandType.FACTORY_RESET -> FactoryResetRequest(reader.string1())
 
-            CommandType.START_OTA -> StartOtaRequest(
-                totalBytes = reader.u32(),
-                crc16 = reader.u16(),
-                chunkSize = reader.u16(),
-                firmwareVersion = FirmwareVersion.decode(reader),
-            )
+            CommandType.START_OTA -> StartOtaRequest.decode(reader)
 
             CommandType.OTA_DATA -> OtaDataRequest(
                 offset = reader.u32(),
@@ -180,11 +175,7 @@ object MessageCodec {
                 value = reader.bytes(reader.u16()),
             )
 
-            CommandType.START_OTA -> StartOtaResponse(
-                status = status,
-                sessionId = reader.u32(),
-                chunkSize = reader.u16(),
-            )
+            CommandType.START_OTA -> StartOtaResponse.decode(status, reader)
 
             CommandType.OTA_DATA -> OtaDataResponse(
                 status = status,

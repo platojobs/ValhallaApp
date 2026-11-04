@@ -56,6 +56,7 @@ class FirmwareSelectionControllerTest {
         assertEquals(targetVersion, state.version)
         assertEquals(300L, state.payloadBytes)
         assertEquals(Crc32.compute(payload), state.computedCrc32)
+        assertEquals(Crc16.ccittFalse(payload), state.computedCrc16)
         assertNotNull(controller.firmware)
         controller.close()
         assertTrue(source.closed)
@@ -127,6 +128,7 @@ class FirmwareSelectionControllerTest {
         val state = controller.state.value
         assertTrue(state.canResume)
         assertEquals(point, state.resumePoint)
+        assertNull(state.resumeBlockedReason)
         assertEquals(point, controller.resumePointForCurrentFirmware())
 
         controller.clearResume()
@@ -147,7 +149,48 @@ class FirmwareSelectionControllerTest {
 
         assertFalse(controller.state.value.canResume)
         assertNull(controller.state.value.resumePoint)
+        assertNotNull(controller.state.value.resumeBlockedReason)
+        assertTrue(controller.state.value.resumeBlockedReason!!.contains("版本/总长/CRC32"))
         assertNotNull(store.load())
+    }
+
+    @Test
+    fun `CRC16 不一致时断点失效并提示原因`() = runTest {
+        val store = InMemoryOtaCheckpointStore()
+        store.save(resumePoint().copy(crc16 = Crc16.ccittFalse(payload) xor 0xFFFF))
+        val picker = FakePicker(
+            PickedFirmware("firmware.bin", TrackingSource(packageBytes(payload, targetVersion, Crc32.compute(payload)))),
+        )
+        val controller = FirmwareSelectionController(picker, store)
+
+        controller.pickAndPrecheck(currentVersion, "VH-100")
+
+        val state = controller.state.value
+        assertFalse(state.canResume)
+        assertNull(state.resumePoint)
+        assertNotNull(state.resumeBlockedReason)
+        assertTrue(state.resumeBlockedReason!!.contains("CRC16"))
+        assertNotNull(store.load())
+    }
+
+    @Test
+    fun `预检未通过时禁用续传并提示原因`() = runTest {
+        val store = InMemoryOtaCheckpointStore()
+        store.save(resumePoint())
+        val picker = FakePicker(
+            PickedFirmware("firmware.bin", TrackingSource(packageBytes(payload, targetVersion, Crc32.compute(payload)))),
+        )
+        val controller = FirmwareSelectionController(picker, store)
+
+        // 型号不匹配导致预检失败，但断点固件身份本身一致。
+        controller.pickAndPrecheck(currentVersion, "VH-200")
+
+        val state = controller.state.value
+        assertFalse(state.readyForOta)
+        assertFalse(state.canResume)
+        assertNull(state.resumePoint)
+        assertNotNull(state.resumeBlockedReason)
+        assertTrue(state.resumeBlockedReason!!.contains("预检未通过"))
     }
 
     @Test

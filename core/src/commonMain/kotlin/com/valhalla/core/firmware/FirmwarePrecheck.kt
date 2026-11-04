@@ -6,6 +6,8 @@ import com.valhalla.core.protocol.message.FirmwareVersion
 data class FirmwarePrecheckResult(
     val errors: List<FirmwareException> = emptyList(),
     val payloadCrc32: Long? = null,
+    /** 协议层 CRC-16/CCITT-FALSE，用于断点续传时确认「续的是同一份内容」。 */
+    val payloadCrc16: Int? = null,
 ) {
 
     val passed: Boolean get() = errors.isEmpty()
@@ -17,7 +19,8 @@ data class FirmwarePrecheckResult(
         if (passed) "预检通过" else errors.joinToString(separator = "\n") { it.message ?: it.code }
 
     companion object {
-        fun success(payloadCrc32: Long) = FirmwarePrecheckResult(payloadCrc32 = payloadCrc32)
+        fun success(payloadCrc32: Long, payloadCrc16: Int? = null) =
+            FirmwarePrecheckResult(payloadCrc32 = payloadCrc32, payloadCrc16 = payloadCrc16)
     }
 }
 
@@ -27,9 +30,10 @@ data class FirmwarePrecheckResult(
  * 1. payload 大小上限（默认 32 MiB）；
  * 2. 设备型号是否命中固件头白名单（`*` 表示通配）；
  * 3. 设备当前版本是否未知 / 固件是否为版本回退（相同版本允许重刷）；
- * 4. payload CRC-32 是否与文件头声明一致（流式读取，不整包进内存）。
+ * 4. payload CRC-32 是否与文件头声明一致（流式读取，不整包进内存）；
+ *    同一次读取顺带计算协议层 CRC-16，供断点续传比对。
  *
- * 大小超限时跳过 CRC 计算，避免对超大文件做无意义的完整读取。
+ * 大小超限时跳过校验计算，避免对超大文件做无意义的完整读取。
  */
 class FirmwarePrechecker(
     private val maxPayloadBytes: Long = DEFAULT_MAX_PAYLOAD_BYTES,
@@ -66,19 +70,26 @@ class FirmwarePrechecker(
             }
         }
 
-        var computedCrc: Long? = null
+        var computedCrc32: Long? = null
+        var computedCrc16: Int? = null
         if (!oversize) {
             try {
-                computedCrc = firmware.computePayloadCrc32()
-                if (computedCrc != firmware.payloadCrc32) {
-                    errors += FirmwareException.PayloadChecksumMismatch(firmware.payloadCrc32, computedCrc)
+                val checksums = firmware.computePayloadChecksums()
+                computedCrc32 = checksums.crc32
+                computedCrc16 = checksums.crc16
+                if (computedCrc32 != firmware.payloadCrc32) {
+                    errors += FirmwareException.PayloadChecksumMismatch(firmware.payloadCrc32, computedCrc32)
                 }
             } catch (error: FirmwareException) {
                 errors += error
             }
         }
 
-        return FirmwarePrecheckResult(errors = errors, payloadCrc32 = computedCrc)
+        return FirmwarePrecheckResult(
+            errors = errors,
+            payloadCrc32 = computedCrc32,
+            payloadCrc16 = computedCrc16,
+        )
     }
 
     companion object {

@@ -1,5 +1,6 @@
 package com.valhalla.core.firmware
 
+import com.valhalla.core.protocol.Crc16
 import com.valhalla.core.protocol.message.FirmwareVersion
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -24,6 +25,7 @@ class FirmwarePrecheckTest {
 
         assertTrue(result.passed)
         assertEquals(firmware.payloadCrc32, result.payloadCrc32)
+        assertEquals(Crc16.ccittFalse(firmware.readPayload(0, firmware.payloadLength.toInt())), result.payloadCrc16)
         assertEquals("预检通过", result.summary())
     }
 

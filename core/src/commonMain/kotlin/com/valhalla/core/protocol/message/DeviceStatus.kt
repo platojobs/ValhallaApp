@@ -24,6 +24,9 @@ enum class DeviceStatus(val code: Int, val title: String) {
     CRC_MISMATCH(0x0E, "CRC 校验失败"),
     UNSUPPORTED(0x0F, "设备不支持该能力"),
     INTERNAL_ERROR(0x10, "设备内部错误"),
+    OTA_RESUME_OFFSET_INVALID(0x11, "OTA 续传偏移非法"),
+    OTA_RESUME_CONTEXT_INVALID(0x12, "OTA 续传上下文失效"),
+    OTA_FIRMWARE_MISMATCH(0x13, "OTA 固件标识不匹配"),
     UNKNOWN_ERROR(0x7F, "未定义错误"),
     ;
 
