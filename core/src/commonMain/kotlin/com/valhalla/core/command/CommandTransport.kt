@@ -1,6 +1,8 @@
 package com.valhalla.core.command
 
+import com.valhalla.core.protocol.CommandType
 import com.valhalla.core.protocol.Frame
+import com.valhalla.core.protocol.message.DeviceStatus
 
 /**
  * 指令传输抽象：BLE 层实现「发送一帧并等待一帧回复」，调度层只负责超时、重试与序号。
@@ -39,4 +41,14 @@ sealed class CommandFailure(message: String, cause: Throwable? = null) : Excepti
 
     class InvalidResponse(val reason: String) :
         CommandFailure("设备响应非法: $reason")
+
+    /** 设备以非 0 状态码显式拒绝指令。 */
+    class DeviceRejected(
+        val command: CommandType,
+        val status: DeviceStatus,
+        val detail: String? = null,
+    ) : CommandFailure(
+        "设备拒绝指令 ${command.name}: ${status.describe()}" +
+            if (detail.isNullOrBlank()) "" else "（$detail）"
+    )
 }

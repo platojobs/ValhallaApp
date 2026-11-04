@@ -10,7 +10,7 @@ package com.valhalla.core.protocol
  * | 2B   | 1B      | 1B   | 1B    | 2BLE | 2BLE   | 0..N    | 2B    |
  * +------+---------+------+-------+------+--------+---------+-------+
  * ```
- * flags.bit0 表示响应帧；CRC 覆盖 version 到 payload 结束。
+ * flags.bit0 表示响应帧，flags.bit1 表示通知帧（互斥）；CRC 覆盖 version 到 payload 结束。
  */
 object FrameCodec {
 
@@ -25,6 +25,7 @@ object FrameCodec {
     const val MIN_FRAME_SIZE = HEADER_SIZE + CRC_SIZE
 
     private const val FLAG_RESPONSE = 0x01
+    private const val FLAG_NOTIFICATION = 0x02
 
     private fun writeUInt16(target: ByteArray, offset: Int, value: Int) {
         target[offset] = (value and 0xFF).toByte()
@@ -46,7 +47,10 @@ object FrameCodec {
         output[1] = SOF_SECOND
         output[2] = frame.version
         output[3] = frame.type.code
-        output[4] = if (frame.isResponse) FLAG_RESPONSE.toByte() else 0
+        var flags = 0
+        if (frame.isResponse) flags = flags or FLAG_RESPONSE
+        if (frame.isNotification) flags = flags or FLAG_NOTIFICATION
+        output[4] = flags.toByte()
         writeUInt16(output, 5, frame.sequence)
         writeUInt16(output, 7, payload.size)
         payload.copyInto(output, destinationOffset = HEADER_SIZE)
@@ -71,6 +75,9 @@ object FrameCodec {
 
         val type = CommandType.fromCode(bytes[3])
         val flags = bytes[4].toInt() and 0xFF
+        if (flags and FLAG_RESPONSE != 0 && flags and FLAG_NOTIFICATION != 0) {
+            throw FrameDecodeException("flags 同时标记应答与通知: 0x${flags.toString(16)}")
+        }
         val sequence = readUInt16(bytes, 5)
         val payloadLength = readUInt16(bytes, 7)
 
@@ -96,6 +103,7 @@ object FrameCodec {
             sequence = sequence,
             payload = bytes.copyOfRange(HEADER_SIZE, HEADER_SIZE + payloadLength),
             isResponse = flags and FLAG_RESPONSE != 0,
+            isNotification = flags and FLAG_NOTIFICATION != 0,
             version = version,
         )
     }

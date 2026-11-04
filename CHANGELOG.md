@@ -2,6 +2,43 @@
 
 本文件记录 ValhallaApp 的版本演进，按「阶段完成即提交 + 打 annotated tag」的节奏维护。
 
+## v0.5.0 - 协议层完整落地
+
+### 新增
+
+- 命令表扩展：在 `CommandType` 中补齐鉴权、设备信息、电量/固件版本、配置与参数读写、时间同步、
+  OTA（开始/分片/结束/中止）、重启、日志导出、心跳等 21 个指令，并标记 `HEARTBEAT_REPLY`、
+  `DEVICE_STATUS_NOTIFY`、`OTA_PROGRESS_NOTIFY` 为设备主动通知。
+- 帧种类完整化：`Frame` 新增 `isNotification`，`FrameCodec` 使用 flags bit1 表示通知帧，
+  与 bit0 应答位互斥；解码时显式拒绝同时置位的非法帧。
+- `protocol/message` 强类型模型：
+  - `DeviceRequest` / `DeviceResponse` / `DeviceNotification` 基类与各命令的请求、应答、通知模型；
+  - `PayloadWriter` / `PayloadReader` 提供小端序、带长度前缀字符串与严格越界校验；
+  - `DeviceStatus` 错误码表（18 个状态码，含未知兜底）与 `describe()` 可读描述；
+  - `MessageCodec` 负责请求、应答、通知的双向编解码，状态码非 0 时返回 `ErrorResponse`；
+  - `AUTH` 应答完整解析令牌、有效期与服务端挑战（`token` / `expiresIn` / `challenge`），无 TODO。
+- `FrameLink` + `ConcurrentCommandDispatcher`：把上行帧流与下行写拆开，支持并发请求；
+  按 sequence 精确配对，乱序应答各自路由，重复/迟到/无主应答丢弃并记录，
+  超时与退避重试沿用 `RetryPolicy`；通知帧单独进入 `notifications` 流，不误配业务请求。
+- 结构化失败：新增 `CommandFailure.DeviceRejected`（携带命令与 `DeviceStatus`）与
+  `CommandFailure.InvalidResponse`（畸形 payload），与既有 `Timeout` / `TransportFailure` 保持一致。
+- `docs/protocol.md`：中文协议字典，含帧格式、完整命令表、字段结构、错误码、
+  鉴权 / 读固件 / OTA / 心跳典型序列与容错语义。
+- 36 项协议层单元测试：全部命令编解码往返、AUTH 成功/失败、错误码映射、通知解析、
+  非法 payload 边界、并发隔离、乱序/重复应答、超时重试、设备拒绝与畸形应答。
+
+### 变更
+
+- `Frame` 的 `equals` / `hashCode` / `toString` 纳入 `isNotification`；
+  既有 4 参数构造调用保持兼容（新参数默认 `false`）。
+- `CommandType.fromCode` 仍保留 `UNKNOWN` 兜底，新增 `isNotificationOnly` 便于上层分流。
+
+### 验证
+
+- `JAVA_HOME=$(/usr/libexec/java_home -v 21) ./gradlew :core:jvmTest :data:jvmTest :feature:jvmTest`：
+  core 86 + data 11 + feature 13 = 110 项全部通过（既有 74 项无回归）。
+- 协议层尚未与真实固件联调；命令码与字段布局为自洽假设，详见 `docs/protocol.md` 第 7 节。
+
 ## v0.4.0 - 特性层 UI 与 App 壳工程
 
 ### 新增
