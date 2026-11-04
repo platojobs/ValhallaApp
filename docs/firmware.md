@@ -13,7 +13,7 @@
 | --- | --- | --- | --- |
 | 0 | 2 | magic | 固定 `0x56 0x46`（ASCII "VF"） |
 | 2 | 1 | formatVersion | 固定 `1`，其它值视为不支持的格式 |
-| 3 | 1 | flags | 保留，必须为 `0` |
+| 3 | 1 | flags | bit0=`HAS_SIGNATURE`；其余位保留必须为 `0`，未知位置位会被拒绝 |
 | 4 | 2 | major | u16 小端，实际限制 `0..255` |
 | 6 | 2 | minor | u16 小端，实际限制 `0..255` |
 | 8 | 2 | patch | u16 小端，实际限制 `0..255` |
@@ -41,8 +41,39 @@
   是因为整包完整性需要更强区分度；协议层 `START_OTA` / `FINISH_OTA` 仍使用
   `crc16`，两者针对同一段 payload 独立计算，互不替代。
 
-长度约束：文件总长度必须等于 `104 + payloadLength`，否则抛
-`FirmwareException.PayloadSizeMismatch`。文件不足 104 字节抛 `Truncated`。
+长度约束：
+
+- 无签名（flags bit0=0）：文件总长度必须等于 `104 + payloadLength`，否则抛
+  `FirmwareException.PayloadSizeMismatch`；
+- 含签名（flags bit0=1）：总长度必须等于 `104 + payloadLength + 3 + signatureLen`，
+  否则抛 `SignatureSectionInvalid`。
+
+文件不足 104 字节抛 `Truncated`。
+
+### 1.1 签名段（v1.1.0）
+
+签名段**追加在 payload 之后**，不参与 OTA 协议传输（`totalBytes` 仍为 payload 长度），
+只在本地解析与预检时读取：
+
+| 偏移（相对签名段起点） | 长度 | 字段 | 说明 |
+| --- | --- | --- | --- |
+| 0 | 1 | algorithm | `0x01` = HMAC-SHA256（测试密钥/当前实现）；`0x02` = ECDSA-P256（预留） |
+| 1 | 2 | signatureLen | u16 小端，必须大于 0 |
+| 3 | N | signature | 签名内容 |
+
+- 签名对象为 `SHA-256(文件头 104 字节 || payload)`；文件头包含 flags 与头部 CRC，
+  因此篡改任何头字段都会导致验签失败。
+- `FirmwareSignatureVerifier` 是验签接口；`HmacSha256TestVerifier` 使用测试密钥完成
+  完整验签，生产环境应替换为基于平台加密库的 ECDSA 实现（当前未接入）。
+- 未知算法编号 → `SignatureAlgorithmUnsupported`；签名段长度不符/被截断 →
+  `SignatureSectionInvalid`。
+- **兼容策略**：旧固件没有签名段，解析与 OTA 行为完全不变；`FirmwareSignaturePolicy`
+  控制缺失签名时的行为：
+  - `REQUIRE`：缺失即拒绝（生产构建推荐）；
+  - `WARN`：缺失仅告警、不阻断（预检器默认值，兼容旧固件）；
+  - `IGNORE`：完全忽略签名段。
+  已签名但验签失败**始终**是错误，不受策略影响；已签名但当前构建未配置验签器时，
+  `REQUIRE` 报错、`WARN` 告警。
 
 ### 错误类型
 
@@ -54,7 +85,7 @@
 | `Truncated` | `firmware.truncated` | 文件不足文件头长度 |
 | `InvalidMagic` | `firmware.magic` | 魔数不是 "VF" |
 | `UnsupportedFormat` | `firmware.format` | formatVersion 不是 1 |
-| `UnsupportedFlags` | `firmware.flags` | flags 非 0 |
+| `UnsupportedFlags` | `firmware.flags` | flags 含 bit0 之外的未知位 |
 | `InvalidHeaderField` | `firmware.header` | 字段越界、字符非法、重复型号等 |
 | `HeaderChecksumMismatch` | `firmware.header_crc` | 头部 CRC16 不符 |
 | `PayloadSizeMismatch` | `firmware.size` | 声明长度与实际文件长度不符 |
@@ -65,6 +96,11 @@
 | `VersionUnknown` | `firmware.version_unknown` | 设备当前版本未知 |
 | `VersionRollback` | `firmware.version_rollback` | 目标版本低于当前版本 |
 | `ReadFailure` | `firmware.read` | 分块读取越界或 IO 失败 |
+| `SignatureSectionInvalid` | `firmware.signature_section` | 签名段被截断、长度不符或为空 |
+| `SignatureAlgorithmUnsupported` | `firmware.signature_algorithm` | 未知签名算法编号 |
+| `SignatureMissing` | `firmware.signature_missing` | 未签名且策略为 `REQUIRE` |
+| `SignatureInvalid` | `firmware.signature_invalid` | 签名与摘要不匹配（篡改/密钥错误） |
+| `SignatureVerifierUnavailable` | `firmware.signature_unavailable` | 已签名但未配置验签器且策略为 `REQUIRE` |
 
 ## 2. 文件选择与分块读取
 
@@ -107,14 +143,29 @@ data class PickedFirmware(val name: String, val source: FirmwareSource)
 | 版本对比 | 设备版本为空 → `VersionUnknown`；目标版本 < 当前版本 → `VersionRollback` |
 | 完整性 | 流式重算 payload CRC32，与头部声明不符 → `PayloadChecksumMismatch` |
 | 续传一致性 | 同一次流式读取顺带计算协议层 CRC-16，供断点比对（不计入错误列表） |
+| 固件签名 | 带签名段时计算 `SHA-256(头 || payload)` 并调用验签器；缺失时按策略报错/告警（见 1.1） |
 
 版本比较顺序为 `major → minor → patch → build` 的字典序，忽略渠道名；**相同版本允许
 重刷**，只有严格更低才判定回退。设备当前版本来自 `GET_FIRMWARE_VERSION` 应答，型号
 来自 `GET_DEVICE_INFO` 应答。
 
-预检结果为 `FirmwarePrecheckResult`，同时携带 `payloadCrc32` 与 `payloadCrc16`。
+预检结果为 `FirmwarePrecheckResult`，同时携带 `payloadCrc32`、`payloadCrc16`，
+以及非阻断性的 `warnings`（例如「固件未签名」），通过 `warningSummary()` 单独展示。
 `passed == false` 时，UI 禁用「开始升级」与「继续上次升级」按钮，并逐条展示错误原因；
 OTA 控制器本身也不接受未经选择流程的固件包。
+
+`FirmwarePrechecker` 的构造参数：
+
+```kotlin
+FirmwarePrechecker(
+    maxPayloadBytes = 32 MiB,
+    signatureVerifier = HmacSha256TestVerifier(secret) /* 生产应替换为 ECDSA 验签器 */,
+    signaturePolicy = FirmwareSignaturePolicy.REQUIRE,
+)
+```
+
+默认 `signaturePolicy = WARN`（兼容旧固件）；**生产构建必须显式注入验签器与 `REQUIRE`**，
+否则已签名固件无法验证、未签名固件仅告警放行。
 
 ## 4. 断点持久化
 

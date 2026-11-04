@@ -2,6 +2,7 @@ package com.valhalla.core.firmware
 
 import com.valhalla.core.protocol.Crc16
 import com.valhalla.core.protocol.message.FirmwareVersion
+import com.valhalla.core.security.Sha256Digest
 
 /** 一次流式读取同时得到的 payload 校验值。 */
 data class FirmwareChecksums(
@@ -21,10 +22,15 @@ class FirmwarePackage(
     val name: String,
     val header: FirmwareHeader,
     val source: FirmwareSource,
+    /** 文件头标志位声明了签名段时为解析结果，否则为 null。 */
+    val signature: FirmwareSignature? = null,
 ) {
 
     /** payload 在文件中的起始偏移（= 文件头长度）。 */
     val payloadOffset: Long get() = FirmwareHeader.SIZE.toLong()
+
+    /** 签名段在文件中的起始偏移（紧跟 payload 之后）。 */
+    val signatureOffset: Long get() = payloadOffset + payloadLength
 
     val payloadLength: Long get() = header.payloadLength
 
@@ -61,6 +67,24 @@ class FirmwarePackage(
     suspend fun computePayloadCrc32(chunkSize: Int = DEFAULT_CRC_CHUNK_SIZE): Long =
         computePayloadChecksums(chunkSize).crc32
 
+    /**
+     * 计算签名摘要：`SHA-256(文件头 104 字节 || payload)`。
+     *
+     * 流式读取 payload，不整包进内存；文件头用 [FirmwareHeader.encode] 重建，
+     * 与磁盘上的有效固件头逐字节一致（含签名标志与头部 CRC）。
+     */
+    suspend fun computeSignatureDigest(chunkSize: Int = DEFAULT_CRC_CHUNK_SIZE): ByteArray {
+        require(chunkSize > 0) { "chunkSize 必须大于 0: $chunkSize" }
+        val digest = Sha256Digest().update(header.encode())
+        var offset = 0L
+        while (offset < payloadLength) {
+            val length = minOf(chunkSize.toLong(), payloadLength - offset).toInt()
+            digest.update(readPayload(offset, length))
+            offset += length
+        }
+        return digest.digest()
+    }
+
     fun close() {
         source.close()
     }
@@ -86,10 +110,37 @@ object FirmwareParser {
             throw FirmwareException.Truncated(FirmwareHeader.SIZE.toLong(), source.size)
         }
         val header = FirmwareHeader.decode(source.read(0, FirmwareHeader.SIZE))
-        val actualPayloadBytes = source.size - FirmwareHeader.SIZE.toLong()
-        if (actualPayloadBytes != header.payloadLength) {
-            throw FirmwareException.PayloadSizeMismatch(header.payloadLength, actualPayloadBytes)
+        val payloadEnd = FirmwareHeader.SIZE.toLong() + header.payloadLength
+
+        if (!header.hasSignature) {
+            val actualPayloadBytes = source.size - FirmwareHeader.SIZE.toLong()
+            if (actualPayloadBytes != header.payloadLength) {
+                throw FirmwareException.PayloadSizeMismatch(header.payloadLength, actualPayloadBytes)
+            }
+            return FirmwarePackage(name = name, header = header, source = source)
         }
-        return FirmwarePackage(name = name, header = header, source = source)
+
+        // 标志位声明了签名段：payload 之后必须是完整且没有多余尾部的签名段。
+        val remaining = source.size - payloadEnd
+        if (remaining < FirmwareSignature.HEADER_SIZE.toLong()) {
+            throw FirmwareException.SignatureSectionInvalid(
+                "签名段缺失：payload 之后仅有 $remaining 字节",
+            )
+        }
+        if (remaining > MAX_SIGNATURE_SECTION_BYTES) {
+            throw FirmwareException.SignatureSectionInvalid(
+                "签名段过大：$remaining 字节，上限 $MAX_SIGNATURE_SECTION_BYTES 字节",
+            )
+        }
+        val section = FirmwareSignature.decode(source.read(payloadEnd, remaining.toInt()), 0)
+        if (section.encodedSize.toLong() != remaining) {
+            throw FirmwareException.SignatureSectionInvalid(
+                "签名段长度不符：声明 ${section.encodedSize} 字节，实际 $remaining 字节",
+            )
+        }
+        return FirmwarePackage(name = name, header = header, source = source, signature = section)
     }
+
+    private const val MAX_SIGNATURE_SECTION_BYTES: Long =
+        FirmwareSignature.HEADER_SIZE.toLong() + 0xFFFFL
 }

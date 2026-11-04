@@ -2,6 +2,80 @@
 
 本文件记录 ValhallaApp 的版本演进，按「阶段完成即提交 + 打 annotated tag」的节奏维护。
 
+## v1.1.0 - 安全加固：签名鉴权、固件验签与令牌安全存储
+
+### 新增
+
+- **AUTH 签名挑战应答（`AuthMode.SIGNED=0x03`）**
+  - `core/security` 新增纯 Kotlin `Sha256Digest` / `HmacSha256`（无平台加密依赖，
+    可在 `jvmTest` 验证），常量时间比较；
+  - `AuthSignatureMessage` 规范化签名消息
+    `version || challenge || clientNonce || deviceDigest`（长度前缀，小端序）；
+  - `HmacAuthSigner` 签名器与 `SignedAuthCredential` 协议编解码；
+  - `DeviceDetailController.authenticateSigned(...)`：无挑战时自动先发 `CHALLENGE`，
+    再以 `SIGNED` 提交凭据；失败进入 `FAULT` 并保留 `AUTH_FAILED`；
+  - 测试桩 `DeviceSimulator` 支持 `CHALLENGE` 下发挑战、`SIGNED` 验签，新增
+    `SimulatorScenario.authChallenge` / `authSecret` / `deviceDigest`。
+- **固件签名校验**
+  - 文件头 flags bit0 = `HAS_SIGNATURE`，其余位仍拒绝；签名段追加在 payload 之后：
+    `algorithm:u8 | signatureLen:u16 | signature`；
+  - `FirmwarePackage` 暴露 `signature` 与 `computeSignatureDigest()`
+    （`SHA-256(头 104 字节 || payload)`，流式读取）；
+  - `FirmwareSignatureVerifier` 验签接口 + `HmacSha256TestVerifier` 测试密钥完整验签；
+    `FirmwareSignatureAlgorithm` 预留 ECDSA-P256（`0x02`）；
+  - 预检新增 `FirmwareSignaturePolicy`（`REQUIRE` / `WARN`（默认）/ `IGNORE`）与
+    签名分支；新增 `SignatureMissing` / `SignatureInvalid` /
+    `SignatureVerifierUnavailable` / `SignatureSectionInvalid` /
+    `SignatureAlgorithmUnsupported` 错误码；
+  - `FirmwarePrecheckResult` 新增非阻断 `warnings` 与 `warningSummary()`；
+  - `SimulatorFirmware.packageBytes(..., signingSecret = ...)` 可生成已签名固件。
+- **会话令牌安全存储**
+  - `TokenStore` 接口（`save` / `load` / `clear` / `loadValid(now)`）、`AuthToken`
+    与过期判断、`InMemoryTokenStore`；
+  - `data/security/TokenStoreFactory.kt` 统一 `expect fun createTokenStore()`：
+    Android 使用 Android Keystore AES-256/GCM 加密后写 SharedPreferences；
+    iOS 使用 Keychain 通用密码；JVM 使用内存实现；
+  - `DeviceDetailController` 鉴权成功后自动写入安全存储，提供
+    `loadPersistedToken()` / `clearPersistedToken()`；UI 装配已接入平台存储。
+
+### 变更
+
+- `FirmwareHeader` 构造新增 `hasSignature`（默认 `false`），旧调用与旧固件行为不变；
+- `FirmwareParser` 在 flags 置位时校验签名段总长度，旧格式仍按
+  `104 + payloadLength` 校验；
+- `AuthRequest` 的 `SIGNED` 模式复用 `credential` 字段承载 `SignedAuthCredential`，
+  `TOKEN` / `CHALLENGE` 语义不变。
+
+### 文档
+
+- `docs/protocol.md`：新增 4.1.1 签名挑战应答（字段、规范化编码、密钥约定）与
+  `SIGNED` 时序；更新已知限制。
+- `docs/firmware.md`：新增 1.1 签名段格式、验签规则、兼容策略；更新 flags、
+  长度约束、错误码与预检参数。
+- 新增 `docs/security.md`：威胁模型、三项防护的设计与边界、向后兼容与未验证项。
+- `docs/architecture.md` 增加安全文档交叉引用。
+
+### 测试
+
+- `JAVA_HOME=$(/usr/libexec/java_home -v 21) ./gradlew :core:jvmTest :data:jvmTest :feature:jvmTest`：
+  core 185 + data 11 + feature 67 = **263 项全部通过**（新增 56 项，v1.0.0 的 207 项无回归）。
+  - SHA-256（FIPS 180-4，含百万字节向量）与 HMAC-SHA256（RFC 4231 用例 1/2/3/4/6/7）；
+  - 错误密钥、长度前缀消歧、签名器空密钥；
+  - 签名固件有效/签名篡改/payload 篡改且重算头部 CRC/错误密钥/旧格式
+    `REQUIRE`/`WARN`/`IGNORE`/未配置验签器/签名段截断/未知算法；
+  - 令牌过期、损坏编码、过期读取自动清除；
+  - 控制器签名鉴权成功/错误密钥/设备摘要不匹配、令牌落盘/过期/清除；
+  - E2E：模拟器签名鉴权成功与被拒、已签名固件 `REQUIRE` 通过、旧固件
+    `REQUIRE` 拒绝、旧固件 `WARN` 告警。
+- `:composeApp:assembleDebug` 与 `:composeApp:linkDebugFrameworkIosSimulatorArm64` 均通过。
+
+### 未验证
+
+- Android 真机 Keystore 与 iOS 真机 Keychain 的读写/锁屏/卸载重装行为未验证；
+- ECDSA-P256 仅预留算法编号与接口，未接入平台实现；
+- 设备固件侧签名鉴权与验签实现未联调，测试桩只证明协议一致性；
+- 预共享密钥的生产注入/轮换流程未实现。
+
 ## v1.0.0 - 协议一致性测试桩与 CI 流水线
 
 ### 新增

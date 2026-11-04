@@ -35,6 +35,7 @@ import com.valhalla.data.ble.BleDevice
 import com.valhalla.data.ble.BleFrameLink
 import com.valhalla.data.ble.createBleClient
 import com.valhalla.data.firmware.createOtaCheckpointStore
+import com.valhalla.data.security.createTokenStore
 import com.valhalla.feature.detail.DeviceDetailController
 import com.valhalla.feature.firmware.FirmwareSelectionController
 import com.valhalla.feature.firmware.FirmwareSelectionState
@@ -109,6 +110,7 @@ fun ValhallaApp() {
                                 dispatcher = dispatcher,
                                 deviceId = connection.deviceId,
                                 disconnectLink = { connection.disconnect() },
+                                tokenStore = createTokenStore(),
                             ),
                             ota = OtaController(
                                 dispatcher = dispatcher,

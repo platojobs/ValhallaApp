@@ -7,6 +7,7 @@ import com.valhalla.core.logging.LogLevel
 import com.valhalla.core.protocol.message.AuthMode
 import com.valhalla.core.protocol.message.AuthRequest
 import com.valhalla.core.protocol.message.AuthResponse
+import com.valhalla.core.protocol.message.SignedAuthCredential
 import com.valhalla.core.protocol.message.BatteryResponse
 import com.valhalla.core.protocol.message.ConfigResponse
 import com.valhalla.core.protocol.message.DeviceInfoResponse
@@ -22,6 +23,10 @@ import com.valhalla.core.protocol.message.SetConfigResponse
 import com.valhalla.core.state.DeviceEvent
 import com.valhalla.core.state.DeviceState
 import com.valhalla.core.state.DeviceStateMachine
+import com.valhalla.core.security.AuthSignatureMessage
+import com.valhalla.core.security.AuthSigner
+import com.valhalla.core.security.AuthToken
+import com.valhalla.core.security.TokenStore
 import com.valhalla.feature.toFailureInfo
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
@@ -29,6 +34,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.supervisorScope
+import kotlin.time.Clock
+import kotlin.time.ExperimentalTime
 
 /** 设备详情页状态。 */
 data class DeviceDetailState(
@@ -53,11 +60,15 @@ data class DeviceDetailState(
  * 控制层不再直接拼装裸字节；设备错误码经 [DeviceStatus] 统一翻译为 UI 文案。
  * 状态迁移仍由 [DeviceStateMachine] 集中管理。
  */
+@OptIn(ExperimentalTime::class)
 class DeviceDetailController(
     private val dispatcher: ConcurrentCommandDispatcher,
     val deviceId: String,
     private val logger: DeviceLogger = InMemoryDeviceLogger(),
     private val disconnectLink: suspend () -> Unit = {},
+    /** 会话令牌安全存储；为 null 时仅保留在内存中（测试/旧调用）。 */
+    private val tokenStore: TokenStore? = null,
+    private val clockMillis: () -> Long = { Clock.System.now().toEpochMilliseconds() },
 ) {
 
     private val machine = DeviceStateMachine(initialState = DeviceState.CONNECTED)
@@ -93,9 +104,7 @@ class DeviceDetailController(
             if (response !is AuthResponse) {
                 error("鉴权应答类型异常: ${response::class.simpleName}")
             }
-            sessionToken = response.token
-            tokenExpiresInSeconds = response.expiresInSeconds
-            serverChallenge = response.challenge
+            registerSession(response)
             transition(DeviceEvent.AuthSucceeded)
             log(
                 LogLevel.INFO,
@@ -115,6 +124,126 @@ class DeviceDetailController(
             )
             false
         }
+    }
+
+    /**
+     * 发起挑战请求并返回设备下发的挑战。
+     *
+     * 用于签名鉴权的第一步；[clientNonce] 为客户端随机数，会同时参与后续签名。
+     * 失败时写入与 [authenticate] 一致的错误状态并返回 null。
+     */
+    suspend fun requestChallenge(clientNonce: ByteArray): ByteArray? {
+        mutableState.value = mutableState.value.copy(error = null, errorCode = null)
+        log(LogLevel.INFO, "请求鉴权挑战（nonce ${clientNonce.size} 字节）")
+        return try {
+            val response = dispatcher.execute(AuthRequest(AuthMode.CHALLENGE, clientNonce))
+            if (response !is AuthResponse) {
+                error("挑战应答类型异常: ${response::class.simpleName}")
+            }
+            if (!response.hasChallenge) {
+                error("设备未返回挑战")
+            }
+            serverChallenge = response.challenge
+            log(LogLevel.INFO, "已收到服务端挑战（${response.challenge.size} 字节）")
+            response.challenge
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (error: Throwable) {
+            val info = error.toFailureInfo()
+            log(LogLevel.ERROR, "请求挑战失败：${info.message}")
+            mutableState.value = mutableState.value.copy(
+                error = "请求挑战失败：${info.message}",
+                errorCode = info.status,
+            )
+            null
+        }
+    }
+
+    /**
+     * 签名挑战应答鉴权。
+     *
+     * 流程：无挑战时先执行 [requestChallenge] 获取；随后把
+     * `challenge + clientNonce + deviceDigest` 交给 [signer] 签名，以 `AuthMode.SIGNED`
+     * 发送凭据。设备验签通过后返回令牌，失败则进入 FAULT 并保留错误码。
+     */
+    suspend fun authenticateSigned(
+        signer: AuthSigner,
+        clientNonce: ByteArray,
+        deviceDigest: String,
+        challenge: ByteArray? = serverChallenge,
+    ): Boolean {
+        mutableState.value = mutableState.value.copy(error = null, errorCode = null)
+        transition(DeviceEvent.AuthenticationStarted)
+        log(LogLevel.INFO, "开始签名鉴权（${signer.algorithm}）")
+
+        return try {
+            val activeChallenge = challenge ?: run {
+                val response = dispatcher.execute(AuthRequest(AuthMode.CHALLENGE, clientNonce))
+                if (response !is AuthResponse) {
+                    error("挑战应答类型异常: ${response::class.simpleName}")
+                }
+                if (!response.hasChallenge) {
+                    error("设备未返回挑战")
+                }
+                response.challenge
+            }
+            serverChallenge = activeChallenge
+
+            val credential = SignedAuthCredential(
+                challenge = activeChallenge,
+                clientNonce = clientNonce,
+                deviceDigest = deviceDigest,
+                signature = signer.sign(
+                    AuthSignatureMessage.canonical(activeChallenge, clientNonce, deviceDigest),
+                ),
+            )
+            val response = dispatcher.execute(AuthRequest(AuthMode.SIGNED, credential.encode()))
+            if (response !is AuthResponse) {
+                error("鉴权应答类型异常: ${response::class.simpleName}")
+            }
+            registerSession(response)
+            // 保留本次签名使用的挑战，便于上层诊断/二次签名；令牌与过期时间已由 registerSession 处理。
+            serverChallenge = activeChallenge
+            transition(DeviceEvent.AuthSucceeded)
+            log(LogLevel.INFO, "签名鉴权成功，令牌有效期 ${response.expiresInSeconds}s")
+            true
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (error: Throwable) {
+            val info = error.toFailureInfo()
+            transition(DeviceEvent.AuthFailed(info.message))
+            log(LogLevel.ERROR, "签名鉴权失败：${info.message}")
+            mutableState.value = mutableState.value.copy(
+                error = "鉴权失败：${info.message}",
+                errorCode = info.status,
+            )
+            false
+        }
+    }
+
+    /** 读取安全存储中仍未过期的令牌；无存储或已过期时返回 null（过期会被清除）。 */
+    fun loadPersistedToken(): AuthToken? = tokenStore?.loadValid(clockMillis())
+
+    /** 清除安全存储中的令牌（例如用户手动退出登录）。 */
+    fun clearPersistedToken() {
+        tokenStore?.clear()
+    }
+
+    /**
+     * 记录鉴权结果：内存字段始终更新；配置了安全存储时按设备有效期写入并统一过期判断。
+     */
+    private fun registerSession(response: AuthResponse) {
+        sessionToken = response.token
+        tokenExpiresInSeconds = response.expiresInSeconds
+        serverChallenge = response.challenge
+        val store = tokenStore ?: return
+        if (response.token.isEmpty()) return
+        val expiresAt = if (response.expiresInSeconds > 0) {
+            clockMillis() + response.expiresInSeconds * 1_000
+        } else {
+            0L
+        }
+        store.save(AuthToken(value = response.token, expiresAtEpochMillis = expiresAt))
     }
 
     /**

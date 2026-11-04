@@ -5,6 +5,7 @@ import com.valhalla.core.protocol.CommandType
 import com.valhalla.core.protocol.message.AuthMode
 import com.valhalla.core.protocol.message.AuthRequest
 import com.valhalla.core.protocol.message.AuthResponse
+import com.valhalla.core.protocol.message.SignedAuthCredential
 import com.valhalla.core.protocol.message.BatteryResponse
 import com.valhalla.core.protocol.message.ConfigResponse
 import com.valhalla.core.protocol.message.DeviceInfoResponse
@@ -18,6 +19,11 @@ import com.valhalla.core.protocol.message.GetDeviceInfoRequest
 import com.valhalla.core.protocol.message.GetFirmwareVersionRequest
 import com.valhalla.core.protocol.message.SetConfigRequest
 import com.valhalla.core.protocol.message.SetConfigResponse
+import com.valhalla.core.security.AuthSignatureMessage
+import com.valhalla.core.security.AuthToken
+import com.valhalla.core.security.HmacAuthSigner
+import com.valhalla.core.security.HmacSha256
+import com.valhalla.core.security.InMemoryTokenStore
 import com.valhalla.core.state.DeviceState
 import com.valhalla.data.ble.BleException
 import com.valhalla.feature.FakeFrameLink
@@ -228,5 +234,142 @@ class DeviceDetailControllerTest {
 
         assertEquals(DeviceState.DISCONNECTED, controller.state.value.deviceState)
         assertTrue(disconnectCalled)
+    }
+
+    private val authChallenge = ByteArray(16) { index -> (index + 1).toByte() }
+    private val authSecret = "feature-auth-secret".encodeToByteArray()
+    private val deviceDigest = "device-digest-001"
+
+    private fun signedAuthResponder(
+        challenge: ByteArray = authChallenge,
+        secret: ByteArray = authSecret,
+        expectedDigest: String = deviceDigest,
+        status: DeviceStatus = DeviceStatus.OK,
+    ): suspend (com.valhalla.core.protocol.message.DeviceRequest) ->
+        com.valhalla.core.protocol.message.DeviceResponse? = { request ->
+        when (request) {
+            is AuthRequest -> when (request.mode) {
+                AuthMode.CHALLENGE -> AuthResponse(status, "challenge-token", 3_600, challenge)
+                AuthMode.SIGNED -> {
+                    val credential = SignedAuthCredential.decode(request.credential)
+                    val message = AuthSignatureMessage.canonical(
+                        credential.challenge,
+                        credential.clientNonce,
+                        credential.deviceDigest,
+                    )
+                    val valid = status == DeviceStatus.OK &&
+                        credential.deviceDigest == expectedDigest &&
+                        HmacSha256.verify(secret, message, credential.signature)
+                    if (valid) {
+                        AuthResponse(DeviceStatus.OK, "session-token", 3_600, ByteArray(0))
+                    } else {
+                        ErrorResponse(CommandType.AUTH, DeviceStatus.AUTH_FAILED, "签名校验失败")
+                    }
+                }
+                AuthMode.TOKEN -> AuthResponse(DeviceStatus.OK, "session-token", 3_600, ByteArray(0))
+            }
+            else -> null
+        }
+    }
+
+    @Test
+    fun `签名挑战应答成功进入 READY`() = runTest {
+        val link = FakeFrameLink(signedAuthResponder())
+        val controller = DeviceDetailController(ConcurrentCommandDispatcher(link, scope = backgroundScope), "dev-1")
+        val nonce = ByteArray(16) { 0x40 }
+
+        val success = controller.authenticateSigned(
+            signer = HmacAuthSigner(authSecret),
+            clientNonce = nonce,
+            deviceDigest = deviceDigest,
+        )
+
+        assertTrue(success)
+        assertEquals(DeviceState.READY, controller.state.value.deviceState)
+        assertEquals("session-token", controller.sessionToken)
+        assertContentEquals(authChallenge, controller.serverChallenge)
+        assertNull(controller.state.value.error)
+
+        assertEquals(2, link.frames.size)
+        val modes = link.requests.filterIsInstance<AuthRequest>().map { it.mode }
+        assertEquals(listOf(AuthMode.CHALLENGE, AuthMode.SIGNED), modes)
+    }
+
+    @Test
+    fun `签名密钥不匹配时鉴权失败并进入 FAULT`() = runTest {
+        val link = FakeFrameLink(signedAuthResponder())
+        val controller = DeviceDetailController(ConcurrentCommandDispatcher(link, scope = backgroundScope), "dev-1")
+
+        val success = controller.authenticateSigned(
+            signer = HmacAuthSigner("wrong-secret".encodeToByteArray()),
+            clientNonce = ByteArray(16),
+            deviceDigest = deviceDigest,
+        )
+
+        assertFalse(success)
+        assertEquals(DeviceState.FAULT, controller.state.value.deviceState)
+        assertEquals(DeviceStatus.AUTH_FAILED, controller.state.value.errorCode)
+        assertNotNull(controller.state.value.error)
+        assertNull(controller.sessionToken)
+    }
+
+    @Test
+    fun `设备摘要不匹配时签名鉴权失败`() = runTest {
+        val link = FakeFrameLink(signedAuthResponder())
+        val controller = DeviceDetailController(ConcurrentCommandDispatcher(link, scope = backgroundScope), "dev-1")
+
+        val success = controller.authenticateSigned(
+            signer = HmacAuthSigner(authSecret),
+            clientNonce = ByteArray(16),
+            deviceDigest = "another-device",
+        )
+
+        assertFalse(success)
+        assertEquals(DeviceState.FAULT, controller.state.value.deviceState)
+        assertTrue(controller.state.value.error!!.contains("鉴权失败"))
+    }
+
+    @Test
+    fun `签名鉴权成功后令牌写入安全存储并可按过期时间读取`() = runTest {
+        val store = InMemoryTokenStore()
+        val link = FakeFrameLink(signedAuthResponder())
+        val controller = DeviceDetailController(
+            dispatcher = ConcurrentCommandDispatcher(link, scope = backgroundScope),
+            deviceId = "dev-1",
+            tokenStore = store,
+            clockMillis = { 1_000L },
+        )
+
+        assertTrue(
+            controller.authenticateSigned(
+                signer = HmacAuthSigner(authSecret),
+                clientNonce = ByteArray(16),
+                deviceDigest = deviceDigest,
+            ),
+        )
+
+        assertEquals("session-token", store.load()?.value)
+        assertEquals(1_000L + 3_600_000L, store.load()?.expiresAtEpochMillis)
+        assertEquals("session-token", controller.loadPersistedToken()?.value)
+
+        controller.clearPersistedToken()
+        assertNull(store.load())
+        assertNull(controller.loadPersistedToken())
+    }
+
+    @Test
+    fun `过期令牌读取时返回空并清除存储`() = runTest {
+        val store = InMemoryTokenStore()
+        store.save(AuthToken("expired-token", expiresAtEpochMillis = 5_000))
+        val link = FakeFrameLink()
+        val controller = DeviceDetailController(
+            dispatcher = ConcurrentCommandDispatcher(link, scope = backgroundScope),
+            deviceId = "dev-1",
+            tokenStore = store,
+            clockMillis = { 6_000L },
+        )
+
+        assertNull(controller.loadPersistedToken())
+        assertNull(store.load())
     }
 }

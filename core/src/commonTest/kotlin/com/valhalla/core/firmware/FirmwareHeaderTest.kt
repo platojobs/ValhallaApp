@@ -73,8 +73,23 @@ class FirmwareHeaderTest {
 
     @Test
     fun `未知标志位被拒绝`() {
-        val bytes = badField(3, 1)
+        val bytes = badField(3, 0x02)
         assertFailsWith<FirmwareException.UnsupportedFlags> { FirmwareHeader.decode(bytes) }
+    }
+
+    @Test
+    fun `签名标志位可往返识别`() {
+        val header = FirmwareHeader(
+            version,
+            listOf("VH-100"),
+            payloadLength = 1024,
+            payloadCrc32 = 0x11223344,
+            hasSignature = true,
+        )
+        val decoded = FirmwareHeader.decode(header.encode())
+
+        assertTrue(decoded.hasSignature)
+        assertEquals(FirmwareHeader.SIGNATURE_FLAG.toByte(), header.encode()[3])
     }
 
     @Test

@@ -78,4 +78,31 @@ sealed class FirmwareException(message: String, cause: Throwable? = null) : Exce
     ) {
         override val code: String = "firmware.read"
     }
+
+    class SignatureSectionInvalid(val detail: String) : FirmwareException("固件签名段非法：$detail") {
+        override val code: String = "firmware.signature_section"
+    }
+
+    class SignatureAlgorithmUnsupported(val algorithmCode: Int) : FirmwareException(
+        "不支持的固件签名算法：0x${algorithmCode.toString(16).uppercase().padStart(2, '0')}",
+    ) {
+        override val code: String = "firmware.signature_algorithm"
+    }
+
+    /** 固件未签名，且验签策略要求必须签名。 */
+    class SignatureMissing : FirmwareException("固件未签名，按当前策略拒绝升级") {
+        override val code: String = "firmware.signature_missing"
+    }
+
+    /** 固件带有签名，但验签失败（内容被篡改或密钥不匹配）。 */
+    class SignatureInvalid(val algorithm: String, val detail: String) : FirmwareException(
+        "固件签名校验失败（$algorithm）：$detail",
+    ) {
+        override val code: String = "firmware.signature_invalid"
+    }
+
+    /** 固件带有签名，但当前构建没有配置验签器。 */
+    class SignatureVerifierUnavailable : FirmwareException("固件已签名，但当前构建未配置验签器") {
+        override val code: String = "firmware.signature_unavailable"
+    }
 }

@@ -1,8 +1,10 @@
 package com.valhalla.testkit
 
 import com.valhalla.core.protocol.CommandType
+import com.valhalla.core.protocol.Hex
 import com.valhalla.core.protocol.message.DeviceStatus
 import com.valhalla.core.protocol.message.FirmwareVersion
+import com.valhalla.core.security.Sha256
 
 /**
  * 设备侧模拟器的行为配置。
@@ -22,6 +24,10 @@ data class SimulatorScenario(
     val authStatus: DeviceStatus = DeviceStatus.OK,
     val authToken: String = "sim-token",
     val authExpiresInSeconds: Long = 3_600,
+    /** 挑战模式下设备下发的随机挑战。 */
+    val authChallenge: ByteArray = DEFAULT_CHALLENGE,
+    /** 签名挑战应答使用的预共享密钥。 */
+    val authSecret: ByteArray = DEFAULT_AUTH_SECRET,
     val configs: Map<String, ByteArray> = mapOf("led.brightness" to byteArrayOf(0x10)),
     val chunkSize: Int = 64,
     /** 设备上已存在的 payload；续传时用于还原断点之前的内容并校验整包 CRC。 */
@@ -32,7 +38,17 @@ data class SimulatorScenario(
     /** [ResumePolicy.REJECT] 时返回的错误码。 */
     val resumeRejectStatus: DeviceStatus = DeviceStatus.OTA_RESUME_CONTEXT_INVALID,
     val faults: FaultInjection = FaultInjection(),
-)
+) {
+
+    /** 设备标识摘要（vendor|model|serial 的 SHA-256），签名挑战应答时由 App 侧参与签名。 */
+    val deviceDigest: String
+        get() = Hex.encode(Sha256.compute("$vendor|$model|$serialNumber".encodeToByteArray()))
+
+    companion object {
+        val DEFAULT_CHALLENGE: ByteArray = ByteArray(16) { index -> (index + 1).toByte() }
+        val DEFAULT_AUTH_SECRET: ByteArray = "valhalla-sim-auth-secret".encodeToByteArray()
+    }
+}
 
 /** 设备对 `START_OTA` 续传扩展的处理策略。 */
 enum class ResumePolicy {

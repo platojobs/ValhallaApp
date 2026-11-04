@@ -10,7 +10,7 @@ import com.valhalla.core.protocol.message.FirmwareVersion
  * | ---- | ---- | ---- |
  * | 0 | 2 | 魔数 `0x56 0x46`（"VF"） |
  * | 2 | 1 | 格式版本，当前固定为 1 |
- * | 3 | 1 | 标志位，保留且必须为 0 |
+ * | 3 | 1 | 标志位：bit0 = 含签名段，其余位保留必须为 0 |
  * | 4 | 2 | 版本 major（u16，实际 0..255） |
  * | 6 | 2 | 版本 minor（u16，实际 0..255） |
  * | 8 | 2 | 版本 patch（u16，实际 0..255） |
@@ -34,6 +34,8 @@ class FirmwareHeader(
     val targetModels: List<String>,
     val payloadLength: Long,
     val payloadCrc32: Long,
+    /** 标志位 bit0 是否置位：payload 之后是否追加签名段。 */
+    val hasSignature: Boolean = false,
 ) {
 
     init {
@@ -68,7 +70,7 @@ class FirmwareHeader(
         bytes[0] = MAGIC_0
         bytes[1] = MAGIC_1
         bytes[2] = FORMAT_VERSION.toByte()
-        bytes[3] = 0
+        bytes[3] = if (hasSignature) SIGNATURE_FLAG.toByte() else 0
         writeU16(bytes, 4, firmwareVersion.major)
         writeU16(bytes, 6, firmwareVersion.minor)
         writeU16(bytes, 8, firmwareVersion.patch)
@@ -102,6 +104,9 @@ class FirmwareHeader(
         const val CHANNEL_FIELD_SIZE: Int = 16
         const val WILDCARD_MODEL: String = "*"
 
+        /** 标志位 bit0：payload 之后包含签名段。 */
+        const val SIGNATURE_FLAG: Int = 0x01
+
         private const val MAGIC_0: Byte = 0x56
         private const val MAGIC_1: Byte = 0x46
 
@@ -119,7 +124,8 @@ class FirmwareHeader(
             if (formatVersion != FORMAT_VERSION) throw FirmwareException.UnsupportedFormat(formatVersion)
 
             val flags = bytes[3].toInt() and 0xFF
-            if (flags != 0) throw FirmwareException.UnsupportedFlags(flags)
+            if ((flags and SIGNATURE_FLAG.inv() and 0xFF) != 0) throw FirmwareException.UnsupportedFlags(flags)
+            val hasSignature = (flags and SIGNATURE_FLAG) != 0
 
             val expectedHeaderCrc = readU16(bytes, 102)
             val actualHeaderCrc = Crc16.ccittFalse(bytes, 0, 102)
@@ -183,6 +189,7 @@ class FirmwareHeader(
                 targetModels = models,
                 payloadLength = payloadLength,
                 payloadCrc32 = payloadCrc32,
+                hasSignature = hasSignature,
             )
         }
 

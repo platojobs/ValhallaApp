@@ -3,7 +3,11 @@ package com.valhalla.feature.e2e
 import com.valhalla.core.command.CommandFailure
 import com.valhalla.core.command.ConcurrentCommandDispatcher
 import com.valhalla.core.firmware.Crc32
+import com.valhalla.core.firmware.FirmwareException
+import com.valhalla.core.firmware.FirmwarePrechecker
+import com.valhalla.core.firmware.FirmwareSignaturePolicy
 import com.valhalla.core.firmware.FirmwareSource
+import com.valhalla.core.firmware.HmacSha256TestVerifier
 import com.valhalla.core.firmware.InMemoryOtaCheckpointStore
 import com.valhalla.core.firmware.OtaResumePoint
 import com.valhalla.core.protocol.CommandType
@@ -21,6 +25,8 @@ import com.valhalla.core.protocol.message.GetDeviceInfoRequest
 import com.valhalla.core.protocol.message.GetFirmwareVersionRequest
 import com.valhalla.core.protocol.message.OtaDataRequest
 import com.valhalla.core.protocol.message.StartOtaRequest
+import com.valhalla.core.security.HmacAuthSigner
+import com.valhalla.feature.detail.DeviceDetailController
 import com.valhalla.feature.firmware.FirmwarePicker
 import com.valhalla.feature.firmware.FirmwareSelectionController
 import com.valhalla.feature.firmware.PickedFirmware
@@ -561,5 +567,95 @@ class DeviceSimulatorE2ETest {
         val delayedBattery = dispatcher.execute(GetBatteryRequest()) as BatteryResponse
         assertEquals(87, delayedBattery.percent)
         assertTrue(delayedBattery.charging)
+    }
+
+    @Test
+    fun `设备模拟器接受签名挑战应答并下发令牌`() = runTest {
+        val scenario = SimulatorScenario(deviceVersion = deviceVersion)
+        val simulator = DeviceSimulator(scenario, backgroundScope)
+        val dispatcher = ConcurrentCommandDispatcher(simulator, scope = backgroundScope)
+        val controller = DeviceDetailController(dispatcher, "sim-device")
+
+        val success = controller.authenticateSigned(
+            signer = HmacAuthSigner(SimulatorScenario.DEFAULT_AUTH_SECRET),
+            clientNonce = ByteArray(16) { 0x51 },
+            deviceDigest = scenario.deviceDigest,
+        )
+
+        assertTrue(success)
+        assertEquals("sim-token", controller.sessionToken)
+        assertEquals(com.valhalla.core.state.DeviceState.READY, controller.state.value.deviceState)
+        assertEquals(2, simulator.requests.filterIsInstance<AuthRequest>().size)
+    }
+
+    @Test
+    fun `设备模拟器拒绝错误密钥的签名挑战应答`() = runTest {
+        val scenario = SimulatorScenario(deviceVersion = deviceVersion)
+        val simulator = DeviceSimulator(scenario, backgroundScope)
+        val dispatcher = ConcurrentCommandDispatcher(simulator, scope = backgroundScope)
+        val controller = DeviceDetailController(dispatcher, "sim-device")
+
+        val success = controller.authenticateSigned(
+            signer = HmacAuthSigner("wrong-secret".encodeToByteArray()),
+            clientNonce = ByteArray(16),
+            deviceDigest = scenario.deviceDigest,
+        )
+
+        assertFalse(success)
+        assertEquals(DeviceStatus.AUTH_FAILED, controller.state.value.errorCode)
+        assertNull(controller.sessionToken)
+    }
+
+    @Test
+    fun `已签名固件在 REQUIRE 策略下通过预检`() = runTest {
+        val secret = "firmware-test-secret".encodeToByteArray()
+        val signedBytes = SimulatorFirmware.packageBytes(
+            payload = payload,
+            version = targetVersion,
+            models = listOf("VH-100"),
+            signingSecret = secret,
+        )
+        val selection = FirmwareSelectionController(
+            picker = SingleFirmwarePicker("signed.bin", signedBytes),
+            checkpointStore = InMemoryOtaCheckpointStore(),
+            prechecker = FirmwarePrechecker(
+                signatureVerifier = HmacSha256TestVerifier(secret),
+                signaturePolicy = FirmwareSignaturePolicy.REQUIRE,
+            ),
+        )
+
+        assertTrue(selection.pickAndPrecheck(deviceVersion, "VH-100"))
+        val state = selection.state.value
+        assertTrue(state.readyForOta)
+        assertNull(state.precheck?.warningSummary())
+    }
+
+    @Test
+    fun `旧格式未签名固件在 REQUIRE 策略下被预检拒绝`() = runTest {
+        val selection = FirmwareSelectionController(
+            picker = SingleFirmwarePicker("legacy.bin", packageBytes()),
+            checkpointStore = InMemoryOtaCheckpointStore(),
+            prechecker = FirmwarePrechecker(
+                signatureVerifier = HmacSha256TestVerifier("firmware-test-secret".encodeToByteArray()),
+                signaturePolicy = FirmwareSignaturePolicy.REQUIRE,
+            ),
+        )
+
+        assertFalse(selection.pickAndPrecheck(deviceVersion, "VH-100"))
+        assertFalse(selection.state.value.readyForOta)
+        assertTrue(selection.state.value.precheck!!.errors.any { it is FirmwareException.SignatureMissing })
+    }
+
+    @Test
+    fun `旧格式未签名固件在 WARN 策略下仅提示`() = runTest {
+        val selection = FirmwareSelectionController(
+            picker = SingleFirmwarePicker("legacy.bin", packageBytes()),
+            checkpointStore = InMemoryOtaCheckpointStore(),
+            prechecker = FirmwarePrechecker(signaturePolicy = FirmwareSignaturePolicy.WARN),
+        )
+
+        assertTrue(selection.pickAndPrecheck(deviceVersion, "VH-100"))
+        assertTrue(selection.state.value.readyForOta)
+        assertNotNull(selection.state.value.precheck?.warningSummary())
     }
 }

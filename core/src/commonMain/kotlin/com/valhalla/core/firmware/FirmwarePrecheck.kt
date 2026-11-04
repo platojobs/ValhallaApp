@@ -2,9 +2,23 @@ package com.valhalla.core.firmware
 
 import com.valhalla.core.protocol.message.FirmwareVersion
 
-/** 本地预检结果：只要 [errors] 非空，OTA 就不应启动。 */
+/** 固件验签策略。 */
+enum class FirmwareSignaturePolicy {
+
+    /** 必须签名且验签通过，否则拒绝升级（生产构建推荐）。 */
+    REQUIRE,
+
+    /** 未签名只告警、不阻断；验签失败仍然拒绝（默认，兼容旧固件）。 */
+    WARN,
+
+    /** 完全忽略签名段，仅做 CRC 与型号/版本预检。 */
+    IGNORE,
+}
+
+/** 本地预检结果：只要 [errors] 非空，OTA 就不应启动；[warnings] 不影响放行。 */
 data class FirmwarePrecheckResult(
     val errors: List<FirmwareException> = emptyList(),
+    val warnings: List<String> = emptyList(),
     val payloadCrc32: Long? = null,
     /** 协议层 CRC-16/CCITT-FALSE，用于断点续传时确认「续的是同一份内容」。 */
     val payloadCrc16: Int? = null,
@@ -14,9 +28,12 @@ data class FirmwarePrecheckResult(
 
     val primaryError: FirmwareException? get() = errors.firstOrNull()
 
-    /** UI 可直接展示的多行原因。 */
+    /** UI 可直接展示的多行原因；[warnings] 通过 [warningSummary] 单独展示。 */
     fun summary(): String =
         if (passed) "预检通过" else errors.joinToString(separator = "\n") { it.message ?: it.code }
+
+    /** 非阻断性风险提示，例如「固件未签名」。 */
+    fun warningSummary(): String? = warnings.takeIf { it.isNotEmpty() }?.joinToString("；")
 
     companion object {
         fun success(payloadCrc32: Long, payloadCrc16: Int? = null) =
@@ -31,12 +48,17 @@ data class FirmwarePrecheckResult(
  * 2. 设备型号是否命中固件头白名单（`*` 表示通配）；
  * 3. 设备当前版本是否未知 / 固件是否为版本回退（相同版本允许重刷）；
  * 4. payload CRC-32 是否与文件头声明一致（流式读取，不整包进内存）；
- *    同一次读取顺带计算协议层 CRC-16，供断点续传比对。
+ *    同一次读取顺带计算协议层 CRC-16，供断点续传比对；
+ * 5. 固件签名（可选）：按 [signaturePolicy] 对签名段做验签，缺失时按策略拒绝或告警。
  *
  * 大小超限时跳过校验计算，避免对超大文件做无意义的完整读取。
  */
 class FirmwarePrechecker(
     private val maxPayloadBytes: Long = DEFAULT_MAX_PAYLOAD_BYTES,
+    /** 验签器；为 null 时无法验证签名，REQUIRE 策略会把已签名固件视为不可用。 */
+    private val signatureVerifier: FirmwareSignatureVerifier? = null,
+    /** 签名策略：默认 WARN，兼容旧固件；生产构建应显式使用 REQUIRE。 */
+    private val signaturePolicy: FirmwareSignaturePolicy = FirmwareSignaturePolicy.WARN,
 ) {
 
     init {
@@ -49,6 +71,7 @@ class FirmwarePrechecker(
         currentModel: String?,
     ): FirmwarePrecheckResult {
         val errors = mutableListOf<FirmwareException>()
+        val warnings = mutableListOf<String>()
 
         val oversize = firmware.payloadLength > maxPayloadBytes
         if (oversize) {
@@ -85,11 +108,60 @@ class FirmwarePrechecker(
             }
         }
 
+        if (!oversize) {
+            checkSignature(firmware, errors, warnings)
+        }
+
         return FirmwarePrecheckResult(
             errors = errors,
+            warnings = warnings,
             payloadCrc32 = computedCrc32,
             payloadCrc16 = computedCrc16,
         )
+    }
+
+    /**
+     * 签名分支：
+     * - 带签名段：配置了验签器则按摘要验签，失败恒为错误；未配置验签器时按策略报错或告警；
+     * - 无签名段：REQUIRE 报错，WARN 告警，IGNORE 静默。
+     */
+    private suspend fun checkSignature(
+        firmware: FirmwarePackage,
+        errors: MutableList<FirmwareException>,
+        warnings: MutableList<String>,
+    ) {
+        val signature = firmware.signature
+        if (signature == null) {
+            when (signaturePolicy) {
+                FirmwareSignaturePolicy.REQUIRE -> errors += FirmwareException.SignatureMissing()
+                FirmwareSignaturePolicy.WARN -> warnings += "固件未签名，已按警告策略放行"
+                FirmwareSignaturePolicy.IGNORE -> Unit
+            }
+            return
+        }
+
+        val verifier = signatureVerifier
+        if (verifier == null) {
+            when (signaturePolicy) {
+                FirmwareSignaturePolicy.REQUIRE -> errors += FirmwareException.SignatureVerifierUnavailable()
+                FirmwareSignaturePolicy.WARN -> warnings += "固件已签名，但当前构建未配置验签器"
+                FirmwareSignaturePolicy.IGNORE -> Unit
+            }
+            return
+        }
+
+        val digest = try {
+            firmware.computeSignatureDigest()
+        } catch (error: FirmwareException) {
+            errors += error
+            return
+        }
+        if (!verifier.verify(digest, signature)) {
+            errors += FirmwareException.SignatureInvalid(
+                algorithm = signature.algorithm.title,
+                detail = "摘要与签名不匹配（内容被篡改或密钥不一致）",
+            )
+        }
     }
 
     companion object {

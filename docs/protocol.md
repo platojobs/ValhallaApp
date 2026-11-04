@@ -118,6 +118,39 @@ App 侧映射规则：
 | --- | --- | --- |
 | `0x01` | `TOKEN` | 长期令牌字节 |
 | `0x02` | `CHALLENGE` | 客户端随机数（建议 16 字节） |
+| `0x03` | `SIGNED` | `SignedAuthCredential` 编码（见 4.1.1） |
+
+#### 4.1.1 签名挑战应答（`AuthMode.SIGNED`，v1.1.0）
+
+设备先用 `CHALLENGE` 下发随机挑战，App 用预共享密钥对
+`challenge + clientNonce + deviceDigest` 做 **HMAC-SHA256** 签名，再把凭据放入
+`AUTH(mode=SIGNED)`：
+
+```
+credential 内容：
+challengeLen:u16 | challenge
+clientNonceLen:u16 | clientNonce
+deviceDigestLen:u16 | deviceDigest(UTF-8)
+signatureLen:u16 | signature(HMAC-SHA256)
+```
+
+签名消息（规范化编码，小端序、带长度前缀，避免拼接歧义）：
+
+```
+version:u8(=0x01)
+challengeLen:u16 | challenge
+clientNonceLen:u16 | clientNonce
+deviceDigestLen:u16 | deviceDigest(UTF-8)
+```
+
+- `challenge` 来自上一轮 `CHALLENGE` 应答，用于防重放；每次鉴权应重新获取。
+- `clientNonce` 为本次会话的客户端随机数，建议 16 字节。
+- `deviceDigest` 为设备标识摘要（厂商/型号/序列号派生），绑定签名与具体设备。
+- 密钥为 App 与设备之间的预共享密钥，**不得**写入日志或随固件下发；真机部署时
+  由产线/安全通道注入，测试桩使用固定测试密钥。
+- 验签失败返回 `status=0x05 AUTH_FAILED`；凭据格式错误返回 `0x02 INVALID_PAYLOAD`。
+- 实现位于 `core/security`（纯 Kotlin SHA-256/HMAC，无平台加密依赖），因此可在
+  JVM 测试中按标准向量验证。`TOKEN` 与 `CHALLENGE` 模式保持不变，旧设备不受影响。
 
 ### 4.2 配置、参数与时间
 
@@ -247,6 +280,20 @@ App                              Device
  |   （保存 challenge，用于下一轮挑战应答或会话恢复）
 ```
 
+签名挑战应答（v1.1.0，推荐用于新设备）：
+
+```
+App                              Device
+ |-- AUTH(mode=CHALLENGE, nonce) ->|
+ |<-- AUTH_OK(token, challenge) ---|
+ |   sig = HMAC-SHA256(key, canonical(challenge, nonce, deviceDigest))
+ |-- AUTH(mode=SIGNED, credential(sig)) -->|
+ |<-- AUTH_OK(token, expires) -------------|   status=0x00
+```
+
+App 侧入口为 `DeviceDetailController.authenticateSigned(...)`：未持有挑战时会自动
+先发一次 `CHALLENGE`；签名使用 `HmacAuthSigner`，密钥由调用方注入。
+
 鉴权失败时设备返回 `status=0x05`，可带 UTF-8 详情：
 App 侧 `ConcurrentCommandDispatcher.execute()` 抛出 `CommandFailure.DeviceRejected`。
 
@@ -336,8 +383,9 @@ Device -- HEARTBEAT_REPLY(battery=70, uptime=2000) --> App（主动通知）
 
 1. 命令码、字段布局、错误码均为本项目自定义，未与真实固件联调；
    拿到厂商字典后需要同步修改 `CommandType`、`message/*Messages.kt` 与本文件。
-2. `AUTH` 的挑战算法（如 HMAC-SHA256）尚未实现：协议层只负责解析并透传
-   `challenge`，具体签名算法需按固件约定补充。
+2. `AUTH` 的 HMAC-SHA256 签名挑战应答已在 App 与测试桩中实现并通过标准向量测试；
+   真机固件仍需按 4.1.1 的规范化编码实现同一算法，并与 App 注入相同的预共享密钥，
+   否则只能回退到 `TOKEN` / `CHALLENGE` 模式（该回退路径未在真机验证）。
 3. `SET_CONFIG` / `GET_CONFIG` / `SET_PARAM` / `GET_PARAM` 的 value 语义未定义，
    协议层按字节数组透传。
 4. `LOG_DUMP` 的分页游标（`sinceSequence`）语义为假设值，真机可能使用时间戳或日志 ID。

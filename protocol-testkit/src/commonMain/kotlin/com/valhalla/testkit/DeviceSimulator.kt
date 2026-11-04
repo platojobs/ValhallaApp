@@ -9,8 +9,10 @@ import com.valhalla.core.protocol.FrameCodec
 import com.valhalla.core.protocol.FrameParser
 import com.valhalla.core.protocol.message.AbortOtaRequest
 import com.valhalla.core.protocol.message.AbortOtaResponse
+import com.valhalla.core.protocol.message.AuthMode
 import com.valhalla.core.protocol.message.AuthRequest
 import com.valhalla.core.protocol.message.AuthResponse
+import com.valhalla.core.protocol.message.SignedAuthCredential
 import com.valhalla.core.protocol.message.BatteryResponse
 import com.valhalla.core.protocol.message.ConfigResponse
 import com.valhalla.core.protocol.message.DeviceInfoResponse
@@ -50,6 +52,8 @@ import com.valhalla.core.protocol.message.SetTimeResponse
 import com.valhalla.core.protocol.message.StartOtaRequest
 import com.valhalla.core.protocol.message.StartOtaResponse
 import com.valhalla.core.protocol.message.TimeResponse
+import com.valhalla.core.security.AuthSignatureMessage
+import com.valhalla.core.security.HmacSha256
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -172,19 +176,7 @@ class DeviceSimulator(
 
     private suspend fun handle(frame: Frame, request: DeviceRequest) {
         when (request) {
-            is AuthRequest -> respond(
-                frame,
-                if (scenario.authStatus.isSuccess) {
-                    AuthResponse(
-                        status = DeviceStatus.OK,
-                        token = scenario.authToken,
-                        expiresInSeconds = scenario.authExpiresInSeconds,
-                        challenge = ByteArray(0),
-                    )
-                } else {
-                    ErrorResponse(CommandType.AUTH, scenario.authStatus, "模拟鉴权失败")
-                },
-            )
+            is AuthRequest -> handleAuth(frame, request)
 
             is GetDeviceInfoRequest -> respond(
                 frame,
@@ -264,6 +256,57 @@ class DeviceSimulator(
             )
         }
     }
+
+    /**
+     * AUTH 应答：TOKEN 直接比对场景配置；CHALLENGE 下发随机挑战；
+     * SIGNED 用预共享密钥对 `challenge || clientNonce || deviceDigest` 验签。
+     */
+    private fun handleAuth(frame: Frame, request: AuthRequest) {
+        if (scenario.authStatus != DeviceStatus.OK) {
+            respond(frame, ErrorResponse(CommandType.AUTH, scenario.authStatus, "模拟鉴权失败"))
+            return
+        }
+
+        when (request.mode) {
+            AuthMode.TOKEN -> respond(frame, authSuccess(ByteArray(0)))
+
+            AuthMode.CHALLENGE -> respond(frame, authSuccess(scenario.authChallenge))
+
+            AuthMode.SIGNED -> {
+                val credential = try {
+                    SignedAuthCredential.decode(request.credential)
+                } catch (_: RuntimeException) {
+                    respond(
+                        frame,
+                        ErrorResponse(CommandType.AUTH, DeviceStatus.INVALID_PAYLOAD, "签名凭据格式非法"),
+                    )
+                    return
+                }
+                val message = AuthSignatureMessage.canonical(
+                    challenge = credential.challenge,
+                    credential = credential.clientNonce,
+                    deviceDigest = credential.deviceDigest,
+                )
+                val valid = credential.deviceDigest == scenario.deviceDigest &&
+                    HmacSha256.verify(scenario.authSecret, message, credential.signature)
+                respond(
+                    frame,
+                    if (valid) {
+                        authSuccess(ByteArray(0))
+                    } else {
+                        ErrorResponse(CommandType.AUTH, DeviceStatus.AUTH_FAILED, "签名挑战应答校验失败")
+                    },
+                )
+            }
+        }
+    }
+
+    private fun authSuccess(challenge: ByteArray): AuthResponse = AuthResponse(
+        status = DeviceStatus.OK,
+        token = scenario.authToken,
+        expiresInSeconds = scenario.authExpiresInSeconds,
+        challenge = challenge,
+    )
 
     // -----------------------------------------------------------------
     // OTA
