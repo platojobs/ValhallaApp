@@ -2,6 +2,27 @@
 
 本文件记录 ValhallaApp 的版本演进，按「阶段完成即提交 + 打 annotated tag」的节奏维护。
 
+## v0.2.0 - 设备状态机与多设备连接池
+
+### 新增
+
+- `core/state`：`DeviceState`（未连接 / 连接中 / 已连接 / 鉴权中 / 就绪 / 断开中 / 异常）、
+  `DeviceEvent`（连接、建链、鉴权、断开、故障、重置等）与 `TransitionResult`（Accepted / Ignored / Rejected）。
+- `DeviceStateMachine`：集中管理生命周期迁移，非法事件返回 `Rejected` 不抛异常，重复事件返回 `Ignored`，
+  支持迁移历史（默认保留 32 条）与迁移回调。
+- `data/pool`：`ConnectionSession` 会话抽象与 `MultiDeviceConnectionPool`。
+- 连接池能力：信号量限制并发建链数、同设备请求串行化（重复点击幂等）、建链超时、
+  失败/超时立即归还容量、`StateFlow<Map<String, DeviceState>>` 状态聚合与 `SharedFlow<PoolEvent>` 事件广播。
+- `ConnectResult`（Connected / AlreadyConnected / InProgress / Failed）与 `PoolFailure`（Timeout / Transport）
+  结构化结果，便于 UI 区分排队超时与链路异常。
+- 20 个新增 JVM 单元测试：状态机 12 项（生命周期、非法/重复事件、历史容量、回调、故障恢复），
+  连接池 8 项（幂等、并发上限、超时、失败释放槽位、断开重连、事件广播）。
+
+### 验证
+
+- `./gradlew :core:jvmTest`：50 项通过。
+- `./gradlew :data:jvmTest`：8 项通过。
+
 ## v0.1.0 - 协议层与指令调度
 
 ### 新增
