@@ -21,6 +21,9 @@ import com.valhalla.core.protocol.message.OtaProgressNotification
 import com.valhalla.core.protocol.message.OtaStage
 import com.valhalla.core.protocol.message.StartOtaRequest
 import com.valhalla.core.protocol.message.StartOtaResponse
+import com.valhalla.core.profile.DeviceProfileRepository
+import com.valhalla.core.profile.OtaHistoryRecord
+import com.valhalla.core.profile.OtaOutcome
 import com.valhalla.data.ble.BleException
 import com.valhalla.feature.toFailureInfo
 import kotlinx.coroutines.CancellationException
@@ -35,6 +38,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.yield
+import kotlin.time.Clock
+import kotlin.time.ExperimentalTime
 
 /** OTA 流程状态。 */
 sealed interface OtaState {
@@ -120,6 +125,7 @@ sealed interface OtaState {
  * - 断点是否可续传仍先由本地 `matchesPayload(版本/总长/CRC32/CRC16)` 判定，
  *   身份不一致时不会发送续传扩展。
  */
+@OptIn(ExperimentalTime::class)
 class OtaController(
     private val dispatcher: ConcurrentCommandDispatcher,
     private val chunkSize: Int = 64,
@@ -128,6 +134,10 @@ class OtaController(
     private val connectionState: StateFlow<Boolean>? = null,
     private val maxChunkRetries: Int = 2,
     private val checkpointStore: OtaCheckpointStore? = null,
+    /** 当前会话设备 id；与 [profileRepository] 一起提供时，OTA 终态会写入设备档案。 */
+    private val deviceId: String? = null,
+    private val profileRepository: DeviceProfileRepository? = null,
+    private val clockMillis: () -> Long = { Clock.System.now().toEpochMilliseconds() },
 ) {
 
     init {
@@ -300,6 +310,7 @@ class OtaController(
         var chunks = 0
         var sessionId: Long? = null
         var lastCheckpointBytes = 0
+        val startedAt = clockMillis()
 
         startProgressCollector()
         yield()
@@ -400,18 +411,36 @@ class OtaController(
                 rebootRequired = finishResponse.rebootRequired,
             )
             mutableState.value = done
+            recordOtaHistory(version, startedAt, OtaOutcome.SUCCEEDED, total, total)
             return done
         } catch (cancellation: CancellationException) {
             persistInterruptedCheckpoint(sessionId, sent, total, crc16, crc32, version, resumeFrom)
             mutableState.value = OtaState.Aborted(OtaAbortReason.USER_CANCELLED.name, sent, total)
+            recordOtaHistory(
+                version = version,
+                startedAt = startedAt,
+                outcome = OtaOutcome.ABORTED,
+                sentBytes = sent,
+                totalBytes = total,
+                detail = "协程取消",
+            )
             throw cancellation
         } catch (aborted: OtaAbortedException) {
             clearCheckpointStore()
             val state = OtaState.Aborted(aborted.reason.name, sent, total)
             mutableState.value = state
+            recordOtaHistory(
+                version = version,
+                startedAt = startedAt,
+                outcome = OtaOutcome.ABORTED,
+                sentBytes = sent,
+                totalBytes = total,
+                detail = aborted.reason.name,
+            )
             return state
         } catch (error: Throwable) {
             val info = error.toFailureInfo()
+            val failureMessage = error.toOtaFailureMessage(info.message)
             val resumePoint = persistInterruptedCheckpoint(
                 sessionId = sessionId,
                 sentBytes = sent,
@@ -423,13 +452,22 @@ class OtaController(
             )
             lastResumePoint = resumePoint
             val state = OtaState.Failed(
-                reason = error.toOtaFailureMessage(info.message),
+                reason = failureMessage,
                 sentBytes = sent,
                 totalBytes = total,
                 status = info.status,
                 resumePoint = resumePoint,
             )
             mutableState.value = state
+            recordOtaHistory(
+                version = version,
+                startedAt = startedAt,
+                outcome = OtaOutcome.FAILED,
+                sentBytes = sent,
+                totalBytes = total,
+                errorCode = info.status?.describe(),
+                detail = failureMessage,
+            )
             return state
         } finally {
             progressJob?.cancel()
@@ -714,6 +752,38 @@ class OtaController(
         version: FirmwareVersion,
     ) {
         pointOf(sessionId, sentBytes, totalBytes, crc16, crc32, version)?.let(::saveCheckpoint)
+    }
+
+    /**
+     * OTA 终态写入设备档案；未配置设备 id / 仓储或写入失败时静默跳过，不影响升级结果。
+     */
+    private fun recordOtaHistory(
+        version: FirmwareVersion,
+        startedAt: Long,
+        outcome: OtaOutcome,
+        sentBytes: Int,
+        totalBytes: Int,
+        errorCode: String? = null,
+        detail: String? = null,
+    ) {
+        val repository = profileRepository ?: return
+        val id = deviceId ?: return
+        val finishedAt = clockMillis()
+        runCatching {
+            repository.recordOta(
+                deviceId = id,
+                record = OtaHistoryRecord(
+                    firmwareVersion = version.toString(),
+                    finishedAtEpochMillis = finishedAt,
+                    durationMillis = (finishedAt - startedAt).coerceAtLeast(0),
+                    outcome = outcome,
+                    errorCode = errorCode,
+                    detail = detail,
+                    sentBytes = sentBytes,
+                    totalBytes = totalBytes,
+                ),
+            )
+        }
     }
 
     private fun saveCheckpoint(point: OtaResumePoint) {

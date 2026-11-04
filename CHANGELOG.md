@@ -2,6 +2,52 @@
 
 本文件记录 ValhallaApp 的版本演进，按「阶段完成即提交 + 打 annotated tag」的节奏维护。
 
+## v1.3.0 - 新增功能：设备档案、配置编辑与报文日志
+
+### 新增
+
+- **设备档案持久化**
+  - `core/profile` 新增 `DeviceProfile`、`OtaHistoryRecord`、`DeviceProfileCodec`、
+    `DeviceProfileStore` / `InMemoryDeviceProfileStore` 与 `DeviceProfileRepository`；
+  - 档案字段：设备 id / 显示名 / 厂商 / 型号 / 最后连接时间 / 最近固件版本 / 电量 /
+    充电状态 / OTA 历史（版本、结果、耗时、错误码、原因、发送字节）；
+  - 提供按最后连接时间倒序列表、单条查询、删除、清空；默认最多 50 个设备、
+    每个设备最多 10 条 OTA 历史，超出淘汰最旧；
+  - `data/profile` 新增 `createDeviceProfileStore()`：Android SharedPreferences、
+    iOS NSUserDefaults、JVM 内存；仓储与编解码在 `commonMain`，可纯逻辑测试；
+  - 选择「平台键值 + 版本化行式编码」而非 SQLDelight，原因与表结构见 `docs/storage.md`。
+- **档案写入联动**
+  - `DeviceDetailController` 连接建立时 `recordConnection`，信息刷新成功后
+    `updateSnapshot`（固件、电量、厂商/型号）；
+  - `OtaController` 在成功、失败、中止/取消终态写入 `OtaHistoryRecord`，
+    失败记录设备错误码与可操作原因；档案写入失败不影响主流程。
+- **配置读写 UI**
+  - `core/config/ConfigCatalog` 定义可编辑键（`device_name`、`led_enabled`、
+    `sample_interval_ms`、`tx_power_dbm`）与只读键，并提供字符串长度、布尔、整数区间校验；
+  - `feature/config/ConfigEditorController` 读取配置、校验后下发 `SET_CONFIG`；
+    未知键/只读键标注原因，校验失败不发请求，同一时刻仅允许一个保存请求在途；
+  - 详情页新增配置区：读取中/保存中/已保存/失败状态、校验提示与设备错误码可见。
+- **报文日志可视化**
+  - `PacketRecordingFrameLink` 装饰 `BleFrameLink`，记录 TX/RX 报文；
+  - `InMemoryPacketLog` 环形缓冲默认 500 条，超出淘汰最旧，避免 OTA 长传输内存膨胀；
+  - 每条记录包含方向、命令、seq、完整 HEX、解析摘要与错误标记；
+  - 详情页新增「报文日志」页：按时间倒序、按命令/错误过滤、关键字搜索、
+    单条复制与清空；日志写入不参与请求/应答配对，不阻塞主流程。
+- **文档**
+  - 新增 `docs/storage.md`：持久化选型取舍、平台 driver、表结构、序列化格式、保留策略与未验证项；
+  - `docs/architecture.md` 增加 v1.3.0 档案/配置/报文日志数据流与装配说明。
+
+### 测试
+
+- 新增 35 项测试：
+  - `core`：档案 CRUD/排序/保留淘汰/OTA 历史/编码往返/损坏回退，
+    配置表校验与格式化，报文日志环形淘汰/命令与错误过滤/关键字搜索/解析失败；
+  - `feature`：配置读取/校验/保存/只读/重复提交/设备拒绝/单键失败隔离，
+    OTA 成功/失败/中止历史写入，连接建档与信息快照更新。
+- 全量 `:core:jvmTest :data:jvmTest :feature:jvmTest`：311 项通过
+  （core 211 + data 11 + feature 89；v1.2.0 为 276 项，既有断言未削弱）。
+- `:composeApp:assembleDebug` 与 `:composeApp:linkDebugFrameworkIosSimulatorArm64` 构建通过。
+
 ## v1.2.0 - 功能完善：预检单一入口与断点续传状态机收敛
 
 ### 修复

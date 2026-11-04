@@ -3,6 +3,7 @@
 本文说明 `core` 协议栈如何经 `data` 的 BLE 适配层进入 `feature` 控制器与 Compose UI，
 重点覆盖 `FrameLink`、`ConcurrentCommandDispatcher` 与 OTA 时序。协议字段定义见
 [protocol.md](protocol.md)；固件包格式、本地预检与断点持久化见 [firmware.md](firmware.md)；
+设备档案、配置与本地保留策略见 [storage.md](storage.md)；
 设备侧测试桩、故障注入矩阵与 CI 见 [testing.md](testing.md)；
 安全模型、签名与令牌存储的防护边界见 [security.md](security.md)。
 
@@ -18,6 +19,8 @@ DeviceDetailController / OtaController (feature)
 ConcurrentCommandDispatcher (core/command)
         │ Frame（seq 配对、超时重试、通知广播）
         ▼
+PacketRecordingFrameLink (core/command)  ← 仅在装配时装饰，记录 TX/RX 报文
+        │
 FrameLink (core/command)  ◄── BleFrameLink (data/ble)
         │ 下行 write / 上行 notifications
         ▼
@@ -77,7 +80,9 @@ val ota = OtaController(dispatcher)
 - `refreshInfo()` 通过 `supervisorScope + async` 并行发出 `GET_DEVICE_INFO`、
   `GET_FIRMWARE_VERSION`、`GET_BATTERY` 三个请求；应答按 sequence 精确回到各自等待者，
   设备乱序回复不会串包，单项失败不影响其它项。
-- 配置读写使用 `SetConfigRequest` / `GetConfigRequest`，成功后同步 `configuration` 缓存。
+- 配置读写使用 `SetConfigRequest` / `GetConfigRequest`；v1.3.0 起由
+  `ConfigEditorController` 按命令表 `ConfigCatalog` 统一做可编辑性判断与类型/长度校验，
+  成功后同步 `configuration` 缓存。
 - 上传/接收协议帧不再出现在 `feature` 层：`Grep "connection.write"` 在 `feature` 中已无命中。
 
 ## 4. OTA 时序
@@ -170,3 +175,38 @@ UI                OtaController            Dispatcher            Device
   `.github/workflows/ci.yml`（macOS + JDK 21，按 core/data/feature 测试、Android 打包、
   iOS Framework 分档）。
 - 边界：端到端测试只证明协议一致性，不代表真机 BLE/固件行为。
+
+## 6. 设备档案、配置编辑与报文日志（v1.3.0）
+
+### 6.1 设备档案
+
+- `DeviceProfileRepository`（`core/profile`）负责档案 CRUD、按最后连接时间排序、OTA 历史与保留策略；
+  编解码格式与表结构见 [storage.md](storage.md)。
+- 平台差异只在 `createDeviceProfileStore()`：Android `SharedPreferences`、iOS `NSUserDefaults`、
+  JVM 内存；仓储本身不依赖平台，`jvmTest` 可直接验证。
+- 写入联动：
+  - `DeviceDetailController` 初始化时 `recordConnection`，`refreshInfo()` 成功后 `updateSnapshot`；
+  - `OtaController` 在成功/失败/中止终态调用 `recordOta`，记录版本、结果、耗时、错误码与偏移；
+  - 档案写入失败不影响主流程。
+
+### 6.2 配置编辑
+
+```
+ConfigEditorController (feature/config)
+        │ 命令表：ConfigCatalog（可编辑键/类型/长度/区间）
+        ▼
+ConcurrentCommandDispatcher → GET_CONFIG / SET_CONFIG
+```
+
+- 可编辑键在命令表中定义；未知键与设备只读键在 UI 标注原因，不能下发；
+- 校验在本地完成，失败不发请求；同一时刻只允许一个保存请求在途；
+- 每个键的读取失败独立展示，不影响其它键。
+
+### 6.3 报文日志
+
+- `PacketRecordingFrameLink` 装饰 `BleFrameLink`：下行 `send` 前、上行 `incoming` 收集后
+  各记录一条 `PacketLogEntry`，不参与请求/应答配对；
+- `InMemoryPacketLog` 默认保留 500 条，环形淘汰最旧记录，避免 OTA 长时间传输导致内存膨胀；
+- 每条日志包含方向（TX/RX）、命令、seq、完整 HEX、解析摘要与错误标记；
+- UI 在详情页提供「报文日志」入口：按时间倒序、按命令/错误过滤、关键字搜索、单条复制与清空。
+- 运行时开销只在帧边界做一次解析摘要与字符串拼接，不阻塞传输；极端并发下允许丢日志。

@@ -20,6 +20,7 @@ import com.valhalla.core.protocol.message.GetDeviceInfoRequest
 import com.valhalla.core.protocol.message.GetFirmwareVersionRequest
 import com.valhalla.core.protocol.message.SetConfigRequest
 import com.valhalla.core.protocol.message.SetConfigResponse
+import com.valhalla.core.profile.DeviceProfileRepository
 import com.valhalla.core.state.DeviceEvent
 import com.valhalla.core.state.DeviceState
 import com.valhalla.core.state.DeviceStateMachine
@@ -69,6 +70,10 @@ class DeviceDetailController(
     /** 会话令牌安全存储；为 null 时仅保留在内存中（测试/旧调用）。 */
     private val tokenStore: TokenStore? = null,
     private val clockMillis: () -> Long = { Clock.System.now().toEpochMilliseconds() },
+    /** 设备档案仓储；为 null 时不写入档案（测试/旧调用）。 */
+    private val profileRepository: DeviceProfileRepository? = null,
+    /** 扫描到设备时展示的名称，写入档案作为初始显示名。 */
+    private val deviceDisplayName: String? = null,
 ) {
 
     private val machine = DeviceStateMachine(initialState = DeviceState.CONNECTED)
@@ -91,6 +96,14 @@ class DeviceDetailController(
 
     init {
         log(LogLevel.INFO, "链路已建立：$deviceId")
+        // 连接成功即建档/刷新最近连接时间；档案写入失败不影响主流程。
+        runCatching {
+            profileRepository?.recordConnection(
+                deviceId = deviceId,
+                displayName = deviceDisplayName,
+                lastConnectedAtEpochMillis = clockMillis(),
+            )
+        }
     }
 
     /** 发送 AUTH 鉴权。成功进入 READY，失败进入 FAULT 并把错误码暴露到 UI 状态。 */
@@ -294,6 +307,17 @@ class DeviceDetailController(
                 "信息刷新：型号=${info?.model ?: "未知"}，" +
                     "固件=${firmware?.version ?: "未知"}，电量=${battery?.percent ?: "未知"}",
             )
+            runCatching {
+                profileRepository?.updateSnapshot(
+                    deviceId = deviceId,
+                    displayName = deviceDisplayName,
+                    vendor = info?.vendor,
+                    model = info?.model,
+                    firmwareVersion = firmware?.version?.toString(),
+                    batteryPercent = battery?.percent,
+                    charging = battery?.charging,
+                )
+            }
         }
     }
 
