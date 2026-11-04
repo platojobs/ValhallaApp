@@ -94,9 +94,43 @@ UI                OtaController            Dispatcher            Device
 - 分片由 `OtaController` 按 `StartOtaResponse.chunkSize` 重新确定（设备可覆盖本地默认值），
   offset 为固件内的绝对字节偏移，便于设备校验乱序与重传。
 - 每个 `OTA_DATA` 都通过调度器等待应答，因此天然具备超时重试与序号配对能力。
-- `OTA_PROGRESS_NOTIFY` 进入调度器 `notifications` 流，可在不阻塞传输的情况下驱动进度条。
+- `OTA_PROGRESS_NOTIFY` 进入调度器 `notifications` 流，由 `OtaController` 在升级期间订阅，
+  在不阻塞传输的情况下更新 `Transferring.stage` 与进度；会话号不匹配的通知会被丢弃。
 - 失败语义：超时/传输异常 → `CommandFailure.Timeout|TransportFailure`，
   设备拒绝 → `CommandFailure.DeviceRejected`（如 `OTA_STATE_INVALID`、`CRC_MISMATCH`）。
+
+### 4.1 状态机
+
+| 状态 | 进入条件 | UI 展示 |
+| --- | --- | --- |
+| `Idle` | 初始 / `reset()` | 等待开始 |
+| `Preparing` | 计算 CRC、发出 `START_OTA` | 总长度、CRC、会话号 |
+| `Transferring` | 收到 `StartOtaResponse` 后逐片发送 | 进度条、阶段、重传次数 |
+| `Verifying` | 全部分片确认后发出 `FINISH_OTA` | 设备校验中 |
+| `Succeeded` | `FinishOtaResponse` 成功 | 分片数、CRC、是否重启 |
+| `Aborted` | 用户 `abort()` 或协程取消 | 中止原因、已发送字节 |
+| `Failed` | 超时、传输异常、设备拒绝、CRC 不匹配、断连 | 错误码、已发送字节、断点 |
+
+### 4.2 分片重传与进度
+
+- 设备以 `BUSY` / `CRC_MISMATCH` / `INTERNAL_ERROR` 拒绝分片，或应答的
+  `receivedBytes` 小于 `offset + chunk.size` 时，`OtaController` 以**同一 offset**
+  重传该分片，默认最多 `maxChunkRetries = 2` 次；重传次数累计到
+  `Transferring.retransmissions` 并在 UI 显示。
+- 超时与传输异常已由调度器内建重试处理，不再在分片层重复放大重试次数。
+- `FakeFrameLink.emitNotification` 可在测试中模拟设备进度通知，验证阶段与进度更新。
+
+### 4.3 中止、断连与断点续传
+
+- `abort(reason)`：置位中止标记并尽力发送 `ABORT_OTA`（单次尝试、1s 超时）；
+  传输循环在下一个分片边界抛出内部中止异常，状态落到 `Aborted`。
+- 断连：`OtaController` 可接收 `connectionState`（`BleConnection.connected`），
+  在分片边界与 `FINISH_OTA` 前快速失败；在途请求由调度器超时/传输异常兜底。
+  `reset()` 清除断点并回到 `Idle`，便于用户重新发起。
+- 断点续传：`start(firmware, resumeFrom)` 已预留锚点参数 `OtaResumePoint`
+  （`sessionId + sentBytes + totalBytes + crc16`），失败时写入 `lastResumePoint`。
+  当前协议没有独立恢复指令，`START_OTA` 也不携带起始偏移，因此只有设备在新会话中
+  复用相同 `sessionId` 时才会从断点继续，否则从头开始——**恢复语义待真机协议确认**。
 
 ## 5. 测试策略
 
@@ -105,4 +139,4 @@ UI                OtaController            Dispatcher            Device
 - 上行使用无界 `Channel`，避免应答在收集器启动前丢失，使并发/乱序用例在
   `StandardTestDispatcher` 下确定可复现。
 - 覆盖点：完整会话（鉴权 → 读信息/版本/电量）、并行请求交错与乱序应答、
-  设备错误码向 UI 状态传播、配置读写、OTA 正常路径/分片大小协商/中断/拒绝/空包/重置。
+  设备错误码向 UI 状态传播、配置读写、OTA 正常路径/分片大小协商/重传/CRC 失败/中止/断连复位/空包/重置。

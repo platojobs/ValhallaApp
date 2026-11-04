@@ -2,6 +2,7 @@ package com.valhalla.feature
 
 import com.valhalla.core.command.FrameLink
 import com.valhalla.core.protocol.Frame
+import com.valhalla.core.protocol.message.DeviceNotification
 import com.valhalla.core.protocol.message.DeviceRequest
 import com.valhalla.core.protocol.message.DeviceResponse
 import com.valhalla.core.protocol.message.MessageCodec
@@ -49,6 +50,18 @@ class FakeFrameLink(
                 sequence = frame.sequence,
                 payload = response.encode(),
                 isResponse = true,
+            ),
+        )
+    }
+
+    /** 模拟设备主动通知（如 OTA 进度）。 */
+    fun emitNotification(notification: DeviceNotification) {
+        incomingChannel.trySend(
+            Frame(
+                type = notification.command,
+                sequence = 0,
+                payload = notification.encode(),
+                isNotification = true,
             ),
         )
     }

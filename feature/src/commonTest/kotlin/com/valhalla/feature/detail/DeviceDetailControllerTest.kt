@@ -75,7 +75,7 @@ class DeviceDetailControllerTest {
 
         val request = link.requests.single()
         assertTrue(request is AuthRequest)
-        assertEquals(AuthMode.TOKEN, (request as AuthRequest).mode)
+        assertEquals(AuthMode.TOKEN, request.mode)
         assertEquals("token-123", request.credential.decodeToString())
         assertNull(controller.state.value.error)
     }

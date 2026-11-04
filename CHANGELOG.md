@@ -2,6 +2,50 @@
 
 本文件记录 ValhallaApp 的版本演进，按「阶段完成即提交 + 打 annotated tag」的节奏维护。
 
+## v0.7.0 - OTA 完整化
+
+### 新增
+
+- `OtaController` 完整升级会话：
+  - `START_OTA` 携带固件总长度、CRC16、期望分片大小与目标版本；
+  - 按 `StartOtaResponse.chunkSize` 重新切片，`OTA_DATA` 使用固件内绝对偏移；
+  - 全部分片确认后发送 `FINISH_OTA`，以设备校验结果收尾。
+- 分片重传：设备以 `BUSY` / `CRC_MISMATCH` / `INTERNAL_ERROR` 拒绝分片，
+  或应答 `receivedBytes` 小于 `offset + chunk.size` 时，按同一 offset 重传，
+  默认最多 `maxChunkRetries = 2` 次，重传次数累计到 `Transferring.retransmissions`。
+- `ABORT_OTA`：`abort(reason)` 置位中止标记并尽力发送中止指令（单次尝试、1s 超时），
+  传输循环在下一个分片边界退出，状态落到 `Aborted`。
+- `OTA_PROGRESS_NOTIFY` 驱动 UI：升级期间订阅调度器通知流，按会话号过滤后更新
+  `Transferring.stage` 与进度，不阻塞数据发送。
+- 失败处理：
+  - 超时 / 传输异常 → `Failed`，文案来自 `CommandFailure`；
+  - 设备拒绝 / `CRC_MISMATCH` → `Failed` 携带 `DeviceStatus` 错误码；
+  - 中途断连 → 通过 `connectionState` 在分片边界快速失败，`reset()` 复位到 `Idle`。
+- 断点续传预留：新增 `OtaResumePoint(sessionId, sentBytes, totalBytes, crc16)`、
+  `lastResumePoint` 与 `start(firmware, resumeFrom)`。协议暂未定义恢复指令，
+  仅当新会话复用相同 `sessionId` 时从断点继续，否则从头开始，恢复语义待真机确认。
+- UI 升级页展示当前阶段、百分比进度、重传次数、中止原因、错误码与断点信息，
+  新增「中止升级」按钮，运行中返回会先中止升级。
+- 新增 4 项 OTA 测试（feature 18 → 22）：分片重传、CRC 校验失败、主动中止、
+  断连快速失败与复位、进度通知驱动阶段（共覆盖 10 个 OTA 场景）。
+- `docs/architecture.md` 补充 OTA 状态机、重传/进度、中止与断连、断点续传说明。
+
+### 变更
+
+- `OtaState` 扩展：`Transferring` 增加 `sessionId/stage/retransmissions`，
+  `Verifying` 增加 `sessionId/retransmissions`，`Succeeded` 增加 `rebootRequired`，
+  新增 `Aborted`，`Failed` 增加 `totalBytes/status/resumePoint`。
+- `OtaController` 构造参数新增可选的 `scope`、`connectionState` 与 `maxChunkRetries`，
+  旧调用方式保持可用。
+- 取消升级不再落为 `Failed("OTA 已取消")`，统一为 `Aborted(USER_CANCELLED)`。
+
+### 验证
+
+- `JAVA_HOME=$(/usr/libexec/java_home -v 21) ./gradlew :core:jvmTest :data:jvmTest :feature:jvmTest`：
+  core 86 + data 11 + feature 22 = 119 项全部通过。
+- `:composeApp:assembleDebug` 与 `:composeApp:linkDebugFrameworkIosSimulatorArm64` 均通过。
+- OTA 分片大小、重传上限、进度通知节奏与断点恢复均未与真实固件联调，需真机确认。
+
 ## v0.6.0 - 特性层接入新协议栈
 
 ### 新增

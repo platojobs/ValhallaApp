@@ -35,6 +35,7 @@ import com.valhalla.data.ble.createBleClient
 import com.valhalla.feature.detail.DeviceDetailController
 import com.valhalla.feature.ota.OtaController
 import com.valhalla.feature.ota.OtaState
+import com.valhalla.core.protocol.message.OtaStage
 import com.valhalla.feature.scan.ScanController
 import com.valhalla.feature.scan.ScanUiState
 import kotlinx.coroutines.CancellationException
@@ -101,7 +102,11 @@ fun ValhallaApp() {
                                 deviceId = connection.deviceId,
                                 disconnectLink = { connection.disconnect() },
                             ),
-                            ota = OtaController(dispatcher),
+                            ota = OtaController(
+                                dispatcher = dispatcher,
+                                scope = scope,
+                                connectionState = connection.connected,
+                            ),
                         )
                         route = Route.Detail(session)
                     } catch (cancellation: CancellationException) {
@@ -268,7 +273,12 @@ private fun OtaScreen(
     ) {
         Row(modifier = Modifier.fillMaxWidth()) {
             Text("固件升级（OTA）", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
-            TextButton(onClick = onBack) { Text("返回") }
+            TextButton(
+                onClick = {
+                    if (running) scope.launch { controller.abort() }
+                    onBack()
+                },
+            ) { Text("返回") }
         }
 
         Text(
@@ -278,17 +288,40 @@ private fun OtaScreen(
 
         when (val current = state) {
             OtaState.Idle -> Text("等待开始")
-            is OtaState.Preparing -> Text("准备中：${current.totalBytes} 字节，CRC=${current.crc16}")
+            is OtaState.Preparing -> Text(
+                "准备中：${current.totalBytes} 字节，CRC=${current.crc16}" +
+                    (current.sessionId?.let { "，会话 $it" } ?: ""),
+            )
+
             is OtaState.Transferring -> {
                 LinearProgressIndicator(progress = { current.progress }, modifier = Modifier.fillMaxWidth())
-                Text("已发送 ${current.sentBytes}/${current.totalBytes} 字节")
+                Text("${current.stage.label()}：已发送 ${current.sentBytes}/${current.totalBytes} 字节（${(current.progress * 100).toInt()}%）")
+                if (current.retransmissions > 0) {
+                    Text("分片重传 ${current.retransmissions} 次", style = MaterialTheme.typography.bodySmall)
+                }
             }
-            is OtaState.Verifying -> Text("校验中：CRC=${current.crc16}")
-            is OtaState.Succeeded -> Text("升级完成：${current.chunks} 片，CRC=${current.crc16}")
-            is OtaState.Failed -> Text(
-                "升级失败：${current.reason}（已发送 ${current.sentBytes} 字节）",
+
+            is OtaState.Verifying -> Text("校验中：设备正在核对 CRC=${current.crc16}")
+            is OtaState.Succeeded -> Text(
+                "升级完成：${current.chunks} 片，CRC=${current.crc16}" +
+                    if (current.rebootRequired) "，设备将重启" else "",
+            )
+
+            is OtaState.Aborted -> Text(
+                "升级已中止：${current.reason}（已发送 ${current.sentBytes}/${current.totalBytes} 字节）",
                 color = MaterialTheme.colorScheme.error,
             )
+
+            is OtaState.Failed -> Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("升级失败：${current.reason}", color = MaterialTheme.colorScheme.error)
+                Text("已发送 ${current.sentBytes}/${current.totalBytes} 字节")
+                current.resumePoint?.let { point ->
+                    Text(
+                        "断点：${point.sentBytes} 字节（会话 ${point.sessionId}），恢复协议待真机确认",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
         }
 
         Spacer(modifier = Modifier.weight(1f))
@@ -305,6 +338,14 @@ private fun OtaScreen(
         }
 
         OutlinedButton(
+            onClick = { scope.launch { controller.abort() } },
+            enabled = running,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("中止升级")
+        }
+
+        OutlinedButton(
             onClick = { controller.reset() },
             enabled = !running,
             modifier = Modifier.fillMaxWidth(),
@@ -312,4 +353,12 @@ private fun OtaScreen(
             Text("重置状态")
         }
     }
+}
+
+private fun OtaStage.label(): String = when (this) {
+    OtaStage.PREPARING -> "准备中"
+    OtaStage.TRANSFERRING -> "传输中"
+    OtaStage.VERIFYING -> "校验中"
+    OtaStage.APPLYING -> "应用固件"
+    OtaStage.COMPLETED -> "已完成"
 }
