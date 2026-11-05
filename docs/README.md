@@ -10,7 +10,7 @@ ValhallaApp 的文档按「先看怎么交付、再看怎么实现」的顺序�
 | [delivery.md](delivery.md) | 交付物清单、模块说明、构建命令、产物路径、CI 入口、可交付 vs 未完成对照 |
 | [release-notes/v2.0.0.md](release-notes/v2.0.0.md) | v2.0.0 版本要点、能力边界、已知限制、安装前提、真机验收清单 |
 | [environment-report.md](environment-report.md) | 本机工具链版本与实际构建/测试记录 |
-| [../CHANGELOG.md](../CHANGELOG.md) | v0.0.1 → v2.0.0 全量版本演进 |
+| [../CHANGELOG.md](../CHANGELOG.md) | v0.0.1 → v2.1.0 全量版本演进 |
 
 ## 架构与协议
 

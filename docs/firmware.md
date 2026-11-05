@@ -50,21 +50,39 @@
 
 文件不足 104 字节抛 `Truncated`。
 
-### 1.1 签名段（v1.1.0）
+### 1.1 签名段（v1.1.0，v2.1.0 起生产验签为 ECDSA-P256）
 
 签名段**追加在 payload 之后**，不参与 OTA 协议传输（`totalBytes` 仍为 payload 长度），
 只在本地解析与预检时读取：
 
 | 偏移（相对签名段起点） | 长度 | 字段 | 说明 |
 | --- | --- | --- | --- |
-| 0 | 1 | algorithm | `0x01` = HMAC-SHA256（测试密钥/当前实现）；`0x02` = ECDSA-P256（预留） |
+| 0 | 1 | algorithm | `0x01` = HMAC-SHA256（仅测试/模拟器）；`0x02` = ECDSA-P256（生产） |
 | 1 | 2 | signatureLen | u16 小端，必须大于 0 |
-| 3 | N | signature | 签名内容 |
+| 3 | N | signature | ECDSA 时为 DER/X9.62 编码的 `r, s`；HMAC 时为 32 字节原始 MAC |
 
 - 签名对象为 `SHA-256(文件头 104 字节 || payload)`；文件头包含 flags 与头部 CRC，
   因此篡改任何头字段都会导致验签失败。
-- `FirmwareSignatureVerifier` 是验签接口；`HmacSha256TestVerifier` 使用测试密钥完成
-  完整验签，生产环境应替换为基于平台加密库的 ECDSA 实现（当前未接入）。
+- **签名格式统一为 DER（X9.62）**：JCA `NONEwithECDSA` 与 Apple
+  `SecKeyVerifySignature(...DigestX962SHA256)` 都直接消费该格式；两端输入都是 32 字节
+  摘要（不是原始报文），避免 `SHA256withECDSA` 造成二次哈希。
+  `EcdsaSignatureCodec` 另提供 DER ↔ 原始 `r||s` 互转，供只接受原始字节的第三方工具；
+  线格式不变，转换只在联调时使用。
+- 失败分类：`PUBLIC_KEY_PARSE`（PEM/DER 无法解析）、`PUBLIC_KEY_UNSUPPORTED`
+  （非 P-256）、`DIGEST_LENGTH`、`ALGORITHM_MISMATCH`（固件算法编号与验签器不符）、
+  `SIGNATURE_FORMAT`（非 DER）、`SIGNATURE_MISMATCH`（内容篡改/密钥不一致）、
+  `PLATFORM_ERROR`（平台加密库异常）。分类对象为 `EcdsaFailureCode`。
+- 生产装配：`FirmwarePrecheckFactory.production(pem)` 返回
+  `EcdsaP256FirmwareVerifier` + `REQUIRE`；公钥配置存在但无法解析时使用
+  全部拒绝的验签器并保持 `REQUIRE`（失败关闭），不会静默放行未签名固件。
+- **公钥注入方式**（仓库不内置任何生产密钥）：
+  - Android：`assets/firmware/signing-key.pem`
+  - iOS：app bundle `firmware/signing-key.pem`
+  - JVM：classpath `firmware/signing-key.pem`
+  - 文件内容支持 `-----BEGIN PUBLIC KEY-----`（SPKI）或
+    `-----BEGIN CERTIFICATE-----`（X.509）；私钥 PEM 会被明确拒绝。
+  - 未注入时预检器无验签器、策略为 `WARN`（开发/联调默认），文档与交付清单均标注此状态。
+- `HmacSha256TestVerifier` 保留给测试与模拟器，生产装配不再引用。
 - 未知算法编号 → `SignatureAlgorithmUnsupported`；签名段长度不符/被截断 →
   `SignatureSectionInvalid`。
 - **兼容策略**：旧固件没有签名段，解析与 OTA 行为完全不变；`FirmwareSignaturePolicy`
@@ -176,13 +194,14 @@ OTA 控制器本身也不接受未经选择流程的固件包。
 ```kotlin
 FirmwarePrechecker(
     maxPayloadBytes = 32 MiB,
-    signatureVerifier = HmacSha256TestVerifier(secret) /* 生产应替换为 ECDSA 验签器 */,
+    signatureVerifier = EcdsaP256FirmwareVerifier.fromPem(publicKeyPem),
     signaturePolicy = FirmwareSignaturePolicy.REQUIRE,
 )
 ```
 
-默认 `signaturePolicy = WARN`（兼容旧固件）；**生产构建必须显式注入验签器与 `REQUIRE`**，
-否则已签名固件无法验证、未签名固件仅告警放行。
+应用装配使用 `FirmwarePrecheckFactory.production(rememberFirmwareSigningKeyPem())`：
+注入公钥后为 ECDSA + `REQUIRE`；未注入时为 `WARN`，并在交付文档中标注为「生产密钥未配置」。
+测试/模拟器仍可显式使用 `HmacSha256TestVerifier`。
 
 ## 4. 断点持久化
 
@@ -267,9 +286,24 @@ v1|sessionId|major.minor.patch.build|channel|totalBytes|sentBytes|crc16|crc32
 | `acceptedOffset == 0` | 设备要求从头开始，从 0 传输，并记录回退原因 |
 | `0 < acceptedOffset <= resumeOffset` | 以设备确认值为起点（允许向下取整） |
 | `acceptedOffset > resumeOffset` | 应答非法，进入 `Failed` |
-| `acceptedOffset >= totalBytes` | 应答非法，进入 `Failed` |
+| `acceptedOffset >= totalBytes` | 应答非法，进入 `Failed`（**不进入 FINISH**） |
 | 未请求续传却返回非 0 偏移 | 应答非法，进入 `Failed` |
 | 续传请求被设备以非 0 状态码拒绝 | 自动重发不带扩展的旧格式 `START_OTA`，从 0 开始 |
+
+### 3.2 `acceptedOffset == totalBytes` 的结论（v2.1.0 补充）
+
+模拟器新增 `forcedAcceptedOffset` 与 `allowCompleteResume` 两个场景开关：
+
+- 默认 `allowCompleteResume = false`：模拟器自身把该应答视为非法，返回
+  `OTA_RESUME_OFFSET_INVALID`，客户端不会看到 `acceptedOffset == totalBytes`；
+- 置为 `true` 并配合 `forcedAcceptedOffset = totalBytes` 时，模拟器会真的返回
+  「已接收完」，用于压测客户端防御分支。
+
+结论（沿用 v1.2.0 的保守策略）：**客户端直接失败，不发送 `FINISH_OTA`，也不保留
+由设备声称的断点**。理由是无法确认设备侧已完整接收 payload 且校验通过，若直接 FINISH
+会把不可信状态写回本地；宁可让用户重新发起一轮完整 OTA。端到端用例
+`设备返回 acceptedOffset 等于 totalBytes 时保守失败且不发送 FINISH` 断言了
+`Failed`、零字节发送、无 `FINISH`/`OTA_DATA` 请求与断点被清除。
 
 回退/下调信息记录在 `OtaState.Transferring.resumeFallbackReason`，UI 直接展示。
 续传时 `sentBytes` 初始值等于设备确认起点，进度始终以完整 `totalBytes` 为分母。

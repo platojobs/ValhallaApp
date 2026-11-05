@@ -35,8 +35,19 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.progressBarRangeInfo
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.intl.Locale
+import kotlin.random.Random
+import com.valhalla.core.logging.PacketLogRedaction
+import com.valhalla.core.protocol.message.AuthMode
+import com.valhalla.core.security.HmacAuthSigner
 import com.valhalla.core.command.ConcurrentCommandDispatcher
 import com.valhalla.core.command.PacketRecordingFrameLink
 import com.valhalla.core.config.DeviceConfigTarget
@@ -103,9 +114,11 @@ import com.valhalla.feature.detail.DeviceDetailController
 import com.valhalla.feature.export.FileSaveStatus
 import com.valhalla.feature.export.SaveableFile
 import com.valhalla.feature.export.rememberFileSaver
+import com.valhalla.feature.firmware.FirmwarePrecheckFactory
 import com.valhalla.feature.firmware.FirmwareSelectionController
 import com.valhalla.feature.firmware.FirmwareSelectionState
 import com.valhalla.feature.firmware.rememberFirmwarePicker
+import com.valhalla.feature.firmware.rememberFirmwareSigningKeyPem
 import com.valhalla.feature.i18n.AppLanguageMode
 import com.valhalla.feature.i18n.LocaleFormat
 import com.valhalla.feature.i18n.LocalStrings
@@ -516,21 +529,43 @@ private fun ScanScreen(
             }
         }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm)) {
-            Button(onClick = onStart, enabled = canScan && !state.scanning) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm),
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+        ) {
+            Button(
+                onClick = onStart,
+                enabled = canScan && !state.scanning,
+                modifier = Modifier.semantics { contentDescription = strings.t(StringKey.START_SCAN) },
+            ) {
                 Text(strings.t(StringKey.START_SCAN))
             }
-            OutlinedButton(onClick = onStop, enabled = state.scanning) {
+            OutlinedButton(
+                onClick = onStop,
+                enabled = state.scanning,
+                modifier = Modifier.semantics { contentDescription = strings.t(StringKey.STOP_SCAN) },
+            ) {
                 Text(strings.t(StringKey.STOP_SCAN))
             }
         }
 
         if (state.scanning) {
-            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            LinearProgressIndicator(
+                modifier = Modifier.fillMaxWidth().semantics {
+                    contentDescription = strings.t(StringKey.SCAN_EMPTY_SCANNING)
+                },
+            )
         }
 
         errorMessage?.let { message ->
-            Text(strings.render(message), color = status.error)
+            Text(
+                strings.render(message),
+                color = status.error,
+                modifier = Modifier.semantics {
+                    liveRegion = LiveRegionMode.Polite
+                    contentDescription = strings.render(message)
+                },
+            )
         }
 
         if (state.devices.isEmpty() && errorMessage == null) {
@@ -560,9 +595,17 @@ private fun ScanScreen(
             verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm),
         ) {
             items(state.devices, key = { it.deviceId }) { device ->
+                val itemDescription = strings.t(
+                    StringKey.DEVICE_RSSI,
+                    "id" to device.deviceId,
+                    "rssi" to device.rssi.toString(),
+                )
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .semantics(mergeDescendants = true) {
+                            contentDescription = ((device.name ?: strings.t(StringKey.UNNAMED_DEVICE)) + ", " + itemDescription)
+                        }
                         .clickable(enabled = canScan) { onSelect(device) },
                 ) {
                     Column(modifier = Modifier.padding(DesignTokens.Spacing.md)) {
@@ -726,6 +769,8 @@ private fun DetailScreen(
     val errorReporter = LocalErrorReporter.current
     val profile = session.profileRepository.get(state.deviceId)
     val zoneOffsetMinutes = remember { currentTimeZoneOffsetMinutes(Clock.System.now().toEpochMilliseconds()) }
+    var authMode by remember { mutableStateOf(AuthMode.TOKEN) }
+    var credential by remember { mutableStateOf("") }
 
     LaunchedEffect(session, connected) {
         if (!connected && !session.userDisconnected) {
@@ -814,12 +859,69 @@ private fun DetailScreen(
             }
 
             item {
-                Row(horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm)) {
-                    Button(onClick = { scope.launchSafely(errorReporter, "auth") { controller.authenticate("demo-token") } }) {
-                        Text(strings.t(StringKey.AUTHENTICATE))
+                Column(verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm)) {
+                    Text(strings.t(StringKey.AUTH_MODE_LABEL), style = MaterialTheme.typography.titleSmall)
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm),
+                        modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    ) {
+                        FilterChip(
+                            selected = authMode == AuthMode.TOKEN,
+                            onClick = { authMode = AuthMode.TOKEN },
+                            label = { Text(strings.t(StringKey.AUTH_MODE_TOKEN)) },
+                        )
+                        FilterChip(
+                            selected = authMode == AuthMode.SIGNED,
+                            onClick = { authMode = AuthMode.SIGNED },
+                            label = { Text(strings.t(StringKey.AUTH_MODE_SIGNED)) },
+                        )
                     }
-                    OutlinedButton(onClick = { scope.launchSafely(errorReporter, "refresh-info") { controller.refreshInfo() } }) {
-                        Text(strings.t(StringKey.REFRESH_INFO))
+                    Text(
+                        strings.t(
+                            if (authMode == AuthMode.SIGNED) StringKey.AUTH_SIGNED_HINT
+                            else StringKey.AUTH_SECRET_HINT,
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    OutlinedTextField(
+                        value = credential,
+                        onValueChange = { credential = it },
+                        label = { Text(strings.t(StringKey.AUTH_CREDENTIAL_LABEL)) },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        modifier = Modifier.fillMaxWidth(),
+                        supportingText = {
+                            if (credential.isBlank()) {
+                                Text(strings.t(StringKey.AUTH_SECRET_HINT), style = MaterialTheme.typography.labelSmall)
+                            }
+                        },
+                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm),
+                        modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    ) {
+                        Button(
+                            enabled = credential.isNotBlank(),
+                            onClick = {
+                                val secret = credential
+                                scope.launchSafely(errorReporter, "auth") {
+                                    if (authMode == AuthMode.SIGNED) {
+                                        controller.authenticateSigned(
+                                            signer = HmacAuthSigner(secret.encodeToByteArray()),
+                                            clientNonce = Random.nextBytes(16),
+                                            deviceDigest = PacketLogRedaction.hashDeviceId(state.deviceId),
+                                        )
+                                    } else {
+                                        controller.authenticate(secret)
+                                    }
+                                }
+                            },
+                        ) {
+                            Text(strings.t(StringKey.AUTHENTICATE))
+                        }
+                        OutlinedButton(onClick = { scope.launchSafely(errorReporter, "refresh-info") { controller.refreshInfo() } }) {
+                            Text(strings.t(StringKey.REFRESH_INFO))
+                        }
                     }
                 }
             }
@@ -837,10 +939,26 @@ private fun DetailScreen(
 
             state.error?.let { message ->
                 item {
-                    Text(
-                        strings.render(message),
-                        color = status.error,
-                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs)) {
+                        Text(
+                            strings.render(message),
+                            color = status.error,
+                            modifier = Modifier.semantics {
+                                liveRegion = LiveRegionMode.Polite
+                                contentDescription = strings.render(message)
+                            },
+                        )
+                        state.errorCode?.let { code ->
+                            Text(
+                                strings.t(
+                                    StringKey.ERROR_CODE_LABEL,
+                                    "code" to "${code.name} (0x${code.code.toString(16).uppercase().padStart(4, '0')}): ${code.title}",
+                                ),
+                                color = status.error,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    }
                 }
             }
 
@@ -858,7 +976,13 @@ private fun DetailScreen(
 
             item { Text(strings.t(StringKey.DEVICE_LOGS), style = MaterialTheme.typography.titleMedium) }
             items(state.logs) { line ->
-                Text(line, style = MaterialTheme.typography.bodySmall)
+                Text(
+                    line,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.semantics {
+                        contentDescription = strings.t(StringKey.DEVICE_LOGS) + ": " + line
+                    },
+                )
             }
         }
     }
@@ -1652,8 +1776,13 @@ private fun OtaScreen(
     val state by controller.state.collectAsState()
     val detailState by session.detail.state.collectAsState()
     val picker = rememberFirmwarePicker()
-    val selection = remember(picker, session.checkpointStore) {
-        FirmwareSelectionController(picker, session.checkpointStore)
+    val signingKeyPem = rememberFirmwareSigningKeyPem()
+    val selection = remember(picker, session.checkpointStore, signingKeyPem) {
+        FirmwareSelectionController(
+            picker = picker,
+            checkpointStore = session.checkpointStore,
+            prechecker = FirmwarePrecheckFactory.production(signingKeyPem),
+        )
     }
     val selectionState by selection.state.collectAsState()
     val scope = rememberCoroutineScope()
@@ -1734,7 +1863,13 @@ private fun OtaScreen(
         if (selectionState.prechecking) {
             LinearProgressIndicator(
                 progress = { selectionState.precheckProgress },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().semantics {
+                    contentDescription = strings.t(
+                        StringKey.PRECHECK_PROGRESS,
+                        "percent" to (selectionState.precheckProgress * 100).toInt().toString(),
+                    )
+                    progressBarRangeInfo = ProgressBarRangeInfo(selectionState.precheckProgress, 0f..1f)
+                },
                 color = status.inProgress,
             )
             Text(
@@ -1775,9 +1910,20 @@ private fun OtaScreen(
             )
 
             is OtaState.Transferring -> {
+                val progressText = strings.t(
+                    StringKey.OTA_TRANSFERRING,
+                    "stage" to current.stage.label(strings),
+                    "sent" to format.number(current.sentBytes),
+                    "total" to format.number(current.totalBytes),
+                    "percent" to (current.progress * 100).toInt().toString(),
+                    "resume" to "",
+                )
                 LinearProgressIndicator(
                     progress = { current.progress },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().semantics {
+                        contentDescription = progressText
+                        progressBarRangeInfo = ProgressBarRangeInfo(current.progress, 0f..1f)
+                    },
                     color = status.inProgress,
                 )
                 val resumeNote = if (current.initialOffset > 0) {

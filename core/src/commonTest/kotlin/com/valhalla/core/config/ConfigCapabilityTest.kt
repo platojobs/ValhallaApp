@@ -120,6 +120,54 @@ class ConfigCapabilityTest {
     }
 
     @Test
+    fun `版本与型号矩阵覆盖 1_0_0_1_2_0_1_3_0 边界`() {
+        val matrix = listOf(
+            version(0, 9, 9, 9) to "VH-1000",
+            version(1, 0, 0, 0) to "VH-1000",
+            version(1, 1, 9, 9) to "VH-1000",
+            version(1, 2, 0, 0) to "VH-1000",
+            version(1, 2, 5, 1) to "VH-2000",
+            version(1, 3, 0, 0) to "VH-2000",
+            version(1, 3, 0, 1) to "VH-3000",
+        )
+
+        val expected = mapOf(
+            version(0, 9, 9, 9) to listOf(false, false, false),
+            version(1, 0, 0, 0) to listOf(true, false, false),
+            version(1, 1, 9, 9) to listOf(true, false, false),
+            version(1, 2, 0, 0) to listOf(true, true, false),
+            version(1, 2, 5, 1) to listOf(true, true, false),
+            version(1, 3, 0, 0) to listOf(true, true, true),
+            version(1, 3, 0, 1) to listOf(true, true, false), // VH-3000 不支持发射功率
+        )
+
+        matrix.forEach { (firmware, model) ->
+            val target = DeviceConfigTarget(firmwareVersion = firmware, model = model)
+            val actual = listOf("led_enabled", "sample_interval_ms", "tx_power_dbm")
+                .map { ConfigCatalog.capability(spec(it), target).supported }
+            assertEquals(expected.getValue(firmware), actual, "$firmware / $model 能力判定不符")
+        }
+    }
+
+    @Test
+    fun `型号白名单边界`() {
+        val firmware = version(1, 3, 0)
+        listOf("VH-1000", "vh-2000", " VH-2000 ").forEach { model ->
+            assertTrue(
+                ConfigCatalog.capability(spec("tx_power_dbm"), DeviceConfigTarget(firmware, model)).supported,
+                "$model 应在白名单内",
+            )
+        }
+        listOf("VH-100", "VH-3000", "VH-10000").forEach { model ->
+            assertEquals(
+                ConfigCapabilityStatus.MODEL_UNSUPPORTED,
+                ConfigCatalog.capability(spec("tx_power_dbm"), DeviceConfigTarget(firmware, model)).status,
+                "$model 不应通过白名单",
+            )
+        }
+    }
+
+    @Test
     fun `渠道名不参与版本比较`() {
         val beta = DeviceConfigTarget(
             firmwareVersion = FirmwareVersion(1, 2, 0, 0, "beta"),

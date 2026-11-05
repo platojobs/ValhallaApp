@@ -4,21 +4,22 @@
 OTA 升级与报文诊断在 Android / iOS 之间共享，平台能力通过 `expect/actual` 落到 Android BLE
 与 iOS CoreBluetooth。
 
-当前版本 **v2.0.0（versionCode 20）**。状态：**源码级可交付** —— 构建与测试可复现、
+当前版本 **v2.1.0（versionCode 21）**。状态：**源码级可交付** —— 构建与测试可复现、
 协议与行为有文档和自动化证据；release 产物默认未签名，权限弹窗、真实 BLE/OTA、
-Keystore/Keychain 等真机路径**未验证**。发布边界见
-[docs/release-notes/v2.0.0.md](docs/release-notes/v2.0.0.md)，交付清单见
-[docs/delivery.md](docs/delivery.md)。
+Keystore/Keychain、TalkBack/VoiceOver 等真机路径**未验证**。发布边界见
+[docs/release-notes/v2.0.0.md](docs/release-notes/v2.0.0.md)（v2.1.0 增量见
+[CHANGELOG.md](CHANGELOG.md)），交付清单见 [docs/delivery.md](docs/delivery.md)。
 
 ## 核心能力
 
-- **设备接入**：BLE 扫描/去重/排序、连接、鉴权（界面走令牌；HMAC-SHA256 签名挑战在控制器层可用，界面未接入）、设备信息、电量；
+- **设备接入**：BLE 扫描/去重/排序、连接、鉴权（预共享密钥 / HMAC-SHA256 签名挑战两种模式，界面可选）、设备信息、电量；
 - **配置管理**：按固件版本与型号做能力协商，只展示可编辑项，本地校验后才下发；
-- **OTA**：固件解析与签名段识别、本地预检、分片传输、同偏移重传、断点续传与手动清除；
+- **OTA**：固件解析与签名段识别、ECDSA-P256 生产验签（PEM/DER 公钥与证书注入）、本地预检、分片传输、同偏移重传、断点续传与手动清除；
 - **稳定性**：四类异常分类、统一错误边界、状态机终态收敛、连接池资源回收、报文日志并发安全；
 - **诊断与隐私**：500 条内存报文日志、命令/错误/时间/关键字筛选、TEXT/JSON/CSV 流式导出、
-  写入时脱敏（默认开启、不可关闭）、无网络上传；
-- **产品化**：中英双语、跟随系统/手动主题、设备档案与 OTA 历史、关于/帮助/隐私页。
+  写入时脱敏（默认开启、不可关闭）、设备自由文本字段级脱敏、可插拔错误上报接口（默认空实现，未接远端 SDK）；
+- **产品化**：中英双语、跟随系统/手动主题、设备档案与 OTA 历史、关于/帮助/隐私页、
+  无障碍语义与字体缩放支持。
 
 ## 快速开始
 
@@ -62,7 +63,7 @@ JAVA_HOME=$(/usr/libexec/java_home -v 21) ./gradlew :core:jvmTest :data:jvmTest 
 | [docs/storage.md](docs/storage.md) / [docs/export.md](docs/export.md) | 本地存储与报文导出 |
 | [docs/privacy.md](docs/privacy.md) / [docs/permissions.md](docs/permissions.md) | 脱敏规则与权限/重连 |
 | [docs/product.md](docs/product.md) / [docs/security.md](docs/security.md) | 产品功能与安全边界 |
-| [CHANGELOG.md](CHANGELOG.md) | v0.0.1 → v2.0.0 版本演进 |
+| [CHANGELOG.md](CHANGELOG.md) | v0.0.1 → v2.1.0 版本演进 |
 
 ## 技术栈
 
@@ -216,8 +217,8 @@ Xcode 构建阶段会自动调用 Gradle 链接对应架构的 Framework。权�
 唯一来源是 [gradle.properties](gradle.properties)
 
 ```properties
-valhalla.versionName=2.0.0
-valhalla.versionCode=20
+valhalla.versionName=2.1.0
+valhalla.versionCode=21
 ```
 
 - Android：`composeApp/build.gradle.kts` 通过 `providers.gradleProperty` 读取，写入

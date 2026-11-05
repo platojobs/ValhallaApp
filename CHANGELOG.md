@@ -2,6 +2,33 @@
 
 本文件记录 ValhallaApp 的版本演进，按「阶段完成即提交 + 打 annotated tag」的节奏维护。
 
+## v2.1.0 - 生产验签与无障碍
+
+### 新增
+
+- **生产固件验签（ECDSA-P256）**：`expect/actual` 三端实现 —— JVM/Android 使用
+  `java.security.Signature("NONEwithECDSA")`，iOS 使用
+  `SecKeyVerifySignature(...DigestX962SHA256)`；统一消费 32 字节 SHA-256 摘要与
+  DER/X9.62 签名，附带 DER ↔ 原始 `r||s` 转换与失败分类（`EcdsaFailureCode` 7 类）；
+  支持 PEM/DER 公钥与 X.509 证书注入，私钥 PEM 明确拒绝。
+- **生产装配切换**：`FirmwarePrecheckFactory.production()` 默认 ECDSA + `REQUIRE`；
+  公钥配置错误时失败关闭；`HmacSha256TestVerifier` 仅保留测试/模拟器用途。
+- **签名鉴权界面**：设备详情页新增「预共享密钥 / 签名挑战」模式切换，签名模式调用
+  `authenticateSigned`，失败展示设备错误码与结构化原因；令牌落盘与复用不变。
+- **可插拔错误上报**：`RemoteErrorReporter` / `RemoteErrorDispatcher`（批量、异步、
+  可关闭，默认空实现）；`ErrorReporter` 在本地环形记录之外投递脱敏载荷。
+- **自由文本脱敏**：`SensitiveTextRedaction` 覆盖 PEM、带标签凭据、MAC、UUID、
+  长十六进制/Base64；设备日志入库与设备档案编码/导出前统一执行。
+- **无障碍与布局**：扫描按钮、设备列表、扫描/OTA 进度、错误横幅、日志条目补语义；
+  按钮行支持横向滚动；RTL 使用 start/end；亮色警告色调深至 WCAG AA。
+- **联调边界用例**：模拟器可构造 `acceptedOffset == totalBytes`，确认为保守失败且不发送
+  `FINISH_OTA`；配置能力新增 1.0.0 / 1.2.0 / 1.3.0 边界与型号白名单矩阵测试。
+
+### 文档
+
+- architecture / privacy / firmware / protocol / permissions / delivery / 文档索引同步更新；
+- 明确标注：仓库不含生产密钥、未接真实远端 SDK、真机朗读/排版/OTA 仍未验证。
+
 ## v2.0.0 - 发布收口
 
 ### 变更

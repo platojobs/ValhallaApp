@@ -471,6 +471,12 @@ CompositionLocalProvider(LocalStrings) → 全部 Composable 页面
    `LocalErrorReporter`；所有可点击协程改为 `scope.launchSafely(reporter, origin)`，
    非取消异常被记录（保留原始异常类型、消息、截断栈），不会沿默认未捕获处理器崩溃进程。
    `ErrorReporter` 为 50 条环形内存记录，id 与写入均为线程安全。
+4. **遥测层（feature/error，v2.1.0）**：`ErrorReporter` 记录后可选地把错误交给
+   `RemoteErrorDispatcher`：内部无界 `Channel` + 单协程消费，攒够 `batchSize` 或等待
+   `flushIntervalMillis` 后批量调用 `RemoteErrorReporter.report`。载荷在入队时即完成
+   字段级脱敏（`SensitiveTextRedaction`），关闭时投递剩余批次并调用 `close`。
+   默认装配 `NoopRemoteErrorReporter`，**未接任何真实远端 SDK**；接入只需实现
+   `RemoteErrorReporter` 并在入口构造调度器，无需改动业务代码。
 
 ### 9.3 状态机收敛清单
 

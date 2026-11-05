@@ -12,7 +12,7 @@ plugins {
 // 版本号：唯一来源是 gradle.properties 的 valhalla.versionName / valhalla.versionCode。
 // Android 直接读取；iOS 通过生成的 Version.xcconfig 读取同一组值。
 // ---------------------------------------------------------------------------
-val appVersionName: String = providers.gradleProperty("valhalla.versionName").getOrElse("2.0.0")
+val appVersionName: String = providers.gradleProperty("valhalla.versionName").getOrElse("2.1.0")
 val appVersionCode: Int = providers.gradleProperty("valhalla.versionCode").getOrElse("20").toInt()
 
 // ---------------------------------------------------------------------------

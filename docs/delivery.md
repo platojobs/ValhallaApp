@@ -108,7 +108,7 @@ xcodebuild -project iosApp/iosApp.xcodeproj -scheme iosApp \
 | [environment-report.md](environment-report.md) | 本机工具链与实际构建记录 |
 | [delivery.md](delivery.md) | 本文：交付物、构建命令、产物路径、完成度对照 |
 | [release-notes/v2.0.0.md](release-notes/v2.0.0.md) | v2.0.0 发布说明与真机验收清单 |
-| [CHANGELOG.md](../CHANGELOG.md) | v0.0.1 → v2.0.0 版本演进 |
+| [CHANGELOG.md](../CHANGELOG.md) | v0.0.1 → v2.1.0 版本演进 |
 
 ## 6. 可交付状态与未完成项
 
@@ -123,6 +123,11 @@ xcodebuild -project iosApp/iosApp.xcodeproj -scheme iosApp \
 | 配置能力协商、报文日志筛选/导出/脱敏 | `core`/`feature` JVM 测试，TEXT/JSON/CSV 等价断言 |
 | 设备档案、OTA 历史、保留策略 | `core` 仓储测试 + `storage.md` |
 | 版本单一来源与 release 产物校验 | `verifyVersionConsistency` / `verifyReleaseArtifact` |
+| 生产固件验签（ECDSA-P256，PEM/证书注入） | `EcdsaP256VerifierTest` + `EcdsaFirmwarePrecheckJvmTest`（JVM）；iOS/Android 分支已编译链接 |
+| 签名挑战鉴权界面（预共享密钥 / 签名挑战） | 设备详情页模式切换 + 结构化错误码；控制器测试 |
+| 可插拔远端错误上报（默认空实现） | `RemoteErrorReporterTest`（批量、关闭、脱敏） |
+| 自由文本字段级脱敏（日志/档案/上报） | `SensitiveTextRedactionTest` / `DeviceTextRedactionStorageTest` |
+| 无障碍语义、字体缩放、RTL、状态色对比度 | 代码审查 + `StatusColorContrastTest`；真机朗读未验证 |
 | Android Debug/Release、iOS Framework 构建 | 本机 + CI 构建记录 |
 | 中英双语、主题、关于/帮助/隐私页 | 文案完整性与无硬编码中文测试；**渲染效果未验证** |
 
@@ -131,20 +136,21 @@ xcodebuild -project iosApp/iosApp.xcodeproj -scheme iosApp \
 | 未完成项 | 依赖 | 当前状态 |
 | --- | --- | --- |
 | 权限弹窗、系统设置跳转、蓝牙开关交互 | Android/iOS 真机 | 未验证 |
-| 签名鉴权界面接入与生产密钥注入 | 产品决策 / 密钥 | 控制器层已实现，界面默认走令牌，未接入 |
+| 生产固件公钥交付 | 固件团队 / 密钥管理 | 注入通道已实现，仓库**未内置密钥**；未注入时策略为 `WARN` |
 | 真实 BLE 连接/断连时序、弱信号重连 | 真机 + 设备固件 | 未验证 |
 | 真实 OTA（含断点续传、设备重启） | 真机 + 可升级固件 | 未验证（仅模拟器端到端） |
 | Keystore / Keychain 令牌读写与卸载行为 | 真机 | 未验证 |
 | 系统保存/分享面板与三方应用读取导出文件 | 真机 | 未验证 |
 | 生产签名与正式分发 | 自备 keystore / 分发渠道 | 未配置，仓库不含 keystore |
-| ECDSA-P256 验签与密钥分发 | 平台安全模块 + 固件 | 未实现（接口预留） |
+| 真实远端错误上报 SDK | 远端服务 | 接口与调度器就绪，默认空实现，未接入 |
 | 固件侧协议实现 | 设备固件团队 | 不在本仓库 |
 | 小时级长稳、弱信号、并发多设备 | 真机台架 | 未测量 |
-| 视觉/无障碍/横屏排版 | 设计 + 真机 | 未验证 |
+| TalkBack / VoiceOver 实际朗读、200% 字体与横屏排版 | 真机 | 语义与滚动容器已就绪，朗读/排版未验证 |
 | 崩溃埋点与遥测 | 远端服务 | 未接入 |
 
 ## 7. 交付结论
 
 - **可以作为源码级交付物**：构建可复现、测试可运行、协议与行为有文档与自动化证据；
 - **暂不能作为生产安装包交付**：release 未签名、真机关键路径未验收、固件侧未联调；
-- 达到生产交付还需：自备 keystore 出签名包、完成第 5 节真机清单、替换测试验签器、补齐固件侧实现。
+- 达到生产交付还需：自备 keystore 出签名包、完成真机清单、注入生产 ECDSA 公钥
+  （`assets/firmware/signing-key.pem` 等）、接入真实上报 SDK（可选）、补齐固件侧实现。

@@ -353,7 +353,28 @@ end
 （`ACCEPT` / `ADJUST` / `REJECT` / `LEGACY_DEVICE`）模拟，端到端用例见
 [testing.md](testing.md#6-端到端覆盖的命令链)。
 
-### 5.5 心跳
+边界值 `acceptedOffset == totalBytes`（设备声称已完整接收）在 v2.1.0 起可被模拟器
+显式构造（`forcedAcceptedOffset` + `allowCompleteResume`）。协议约定该应答非法：
+客户端直接进入 `Failed`，不发送 `FINISH_OTA`，也不把该偏移写入本地断点。
+详见 [firmware.md](firmware.md#32-acceptedoffset--totalbytes-的结论v210-补充)。
+
+### 5.5 签名与验签格式
+
+两种签名用途、两套格式，不能混用：
+
+| 用途 | 算法编号 | 输入 | 签名格式 |
+| --- | --- | --- | --- |
+| `AUTH` 签名挑战 | `AuthSigner.algorithm`（HMAC-SHA256） | `challenge \|\| clientNonce \|\| deviceDigest` | 32 字节原始 MAC |
+| 固件签名段 | `0x02` = ECDSA-P256 | `SHA-256(文件头 \|\| payload)` 摘要 | **DER/X9.62**（JCA 与 Apple 原生格式） |
+
+- ECDSA 验签的跨端对齐点：两端都对「已有的 32 字节摘要」验签，
+  JVM/Android 用 `NONEwithECDSA`，iOS 用 `SecKeyVerifySignature` 的
+  `...DigestX962SHA256`；不使用 `SHA256withECDSA`，否则摘要会被二次哈希。
+- 需要与只接受原始 `r||s` 的工具联调时，用 `EcdsaSignatureCodec.derToRaw/rawToDer`
+  转换，协议线格式仍为 DER。
+- 公钥/证书注入与失败分类见 [firmware.md](firmware.md#11-签名段v110v210-起生产验签为-ecdsa-p256)。
+
+### 5.6 心跳
 
 ```
 App -- HEARTBEAT(uptime=1000) --> Device

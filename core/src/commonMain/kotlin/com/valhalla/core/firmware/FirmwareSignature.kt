@@ -87,9 +87,52 @@ interface FirmwareSignatureVerifier {
 }
 
 /**
+ * 生产验签器：ECDSA-P256，公钥/证书通过 PEM 或 DER 注入。
+ *
+ * 签名段中的算法编号必须是 [FirmwareSignatureAlgorithm.ECDSA_P256]，
+ * 签名内容为 X9.62/DER（由 JCA 或 Apple Security 直接产出）。
+ * 失败原因可通过 [verifyDetailed] 获取分类。
+ */
+class EcdsaP256FirmwareVerifier(
+    private val verifier: com.valhalla.core.security.EcdsaP256Verifier,
+) : FirmwareSignatureVerifier {
+
+    val algorithm: String get() = verifier.algorithm
+
+    val source: com.valhalla.core.security.EcdsaP256Verifier.Source get() = verifier.source
+
+    fun verifyDetailed(
+        digest: ByteArray,
+        signature: FirmwareSignature,
+    ): com.valhalla.core.security.EcdsaVerificationResult {
+        if (signature.algorithm != FirmwareSignatureAlgorithm.ECDSA_P256) {
+            return com.valhalla.core.security.EcdsaVerificationResult.Invalid(
+                com.valhalla.core.security.EcdsaFailureCode.ALGORITHM_MISMATCH,
+                "固件算法编号 ${signature.algorithm.code} 与 ECDSA 验签器不匹配",
+            )
+        }
+        return verifier.verifyDetailed(digest, signature.bytes)
+    }
+
+    override fun verify(digest: ByteArray, signature: FirmwareSignature): Boolean =
+        verifyDetailed(digest, signature) is com.valhalla.core.security.EcdsaVerificationResult.Valid
+
+    companion object {
+
+        /** 从 PEM（公钥或证书）构建；失败抛 [com.valhalla.core.security.EcdsaKeyException]。 */
+        fun fromPem(pem: String): EcdsaP256FirmwareVerifier =
+            EcdsaP256FirmwareVerifier(com.valhalla.core.security.EcdsaP256Verifier.fromPem(pem))
+
+        /** 从 DER（SPKI 或证书）构建。 */
+        fun fromDer(der: ByteArray): EcdsaP256FirmwareVerifier =
+            EcdsaP256FirmwareVerifier(com.valhalla.core.security.EcdsaP256Verifier.fromDer(der))
+    }
+}
+
+/**
  * 测试密钥验签器：使用预共享密钥的 HMAC-SHA256。
  *
- * 仅用于测试与本地联调；生产环境应替换为基于平台加密库的 ECDSA 验签实现。
+ * 仅用于测试、模拟器与本地联调；**生产装配默认使用 [EcdsaP256FirmwareVerifier]**。
  */
 class HmacSha256TestVerifier(private val secret: ByteArray) : FirmwareSignatureVerifier {
 

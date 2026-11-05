@@ -1,5 +1,7 @@
 package com.valhalla.core.profile
 
+import com.valhalla.core.logging.SensitiveTextRedaction
+
 /** OTA 一次执行的结果。 */
 enum class OtaOutcome {
     SUCCEEDED,
@@ -128,17 +130,19 @@ object DeviceProfileCodec {
         profiles.forEach { profile ->
             append(PROFILE)
             append(SEPARATOR)
+            // deviceId 是档案主键，必须保留原值用于匹配；
+            // 其余自由文本在落盘/导出前统一脱敏（见 docs/privacy.md 字段级规则）。
             append(escape(profile.deviceId))
             append(SEPARATOR)
-            append(escape(profile.displayName))
+            append(escape(redactInline(profile.displayName)))
             append(SEPARATOR)
-            append(escape(profile.vendor))
+            append(escape(redactInline(profile.vendor)))
             append(SEPARATOR)
-            append(escape(profile.model))
+            append(escape(redactInline(profile.model)))
             append(SEPARATOR)
             append(profile.lastConnectedAtEpochMillis)
             append(SEPARATOR)
-            append(escape(profile.lastKnownFirmwareVersion))
+            append(escape(redactInline(profile.lastKnownFirmwareVersion)))
             append(SEPARATOR)
             append(profile.lastKnownBatteryPercent?.toString().orEmpty())
             append(SEPARATOR)
@@ -147,7 +151,7 @@ object DeviceProfileCodec {
             profile.otaHistory.forEach { record ->
                 append(OTA)
                 append(SEPARATOR)
-                append(escape(record.firmwareVersion))
+                append(escape(redactInline(record.firmwareVersion)))
                 append(SEPARATOR)
                 append(record.finishedAtEpochMillis)
                 append(SEPARATOR)
@@ -155,9 +159,9 @@ object DeviceProfileCodec {
                 append(SEPARATOR)
                 append(record.outcome.name)
                 append(SEPARATOR)
-                append(escape(record.errorCode))
+                append(escape(redactInline(record.errorCode)))
                 append(SEPARATOR)
-                append(escape(record.detail))
+                append(escape(redactInline(record.detail)))
                 append(SEPARATOR)
                 append(record.sentBytes)
                 append(SEPARATOR)
@@ -166,6 +170,9 @@ object DeviceProfileCodec {
             }
         }
     }
+
+    private fun redactInline(value: String?): String? =
+        value?.let { SensitiveTextRedaction.redactInline(it) }
 
     fun decode(raw: String?): List<DeviceProfile> {
         if (raw.isNullOrBlank()) return emptyList()

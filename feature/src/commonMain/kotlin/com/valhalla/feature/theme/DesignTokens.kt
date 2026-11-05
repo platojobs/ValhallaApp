@@ -49,7 +49,8 @@ object DesignTokens {
 
     val lightStatusColors = StatusColors(
         success = Color(0xFF1B7F3B),
-        warning = Color(0xFFB26A00),
+        // 原 #B26A00 与浅色背景对比度 4.16:1，低于 WCAG AA 4.5:1，调深至 6.28:1。
+        warning = Color(0xFF8A5200),
         error = Color(0xFFB3261E),
         inProgress = Color(0xFF1B5E9E),
     )

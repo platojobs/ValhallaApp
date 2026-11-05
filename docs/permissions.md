@@ -1,4 +1,4 @@
-# 权限与连接体验（v1.7.0）
+# 权限与连接体验（v2.1.0）
 
 本文说明 Android / iOS 的蓝牙权限声明、统一权限状态机、连接生命周期与自动重连策略。
 纯逻辑部分位于 `feature/src/commonMain/kotlin/com/valhalla/feature/ble/`，平台入口为
@@ -139,6 +139,38 @@ IDLE ──断开──▶ WAITING ──beginAttempt──▶ CONNECTING ──
 已有设备 → 扫描错误 → 权限/蓝牙不可用 → 扫描中（未超时）→ 扫描超时 → 扫描结束无设备。
 
 「无权限」「蓝牙关闭」「扫描超时」「真的没有设备」四类文案完全独立，不会互相混淆。
+
+## 无障碍与布局（v2.1.0）
+
+### 语义标注
+
+| 控件 | 处理 |
+| --- | --- |
+| 扫描/停止按钮 | `Modifier.semantics { contentDescription = ... }`，读屏可听到完整动作 |
+| 设备列表项 | `semantics(mergeDescendants = true)`，合并名称、deviceId、RSSI 为一条描述 |
+| 扫描中进度 | 不确定进度条带 `contentDescription`（「正在扫描」） |
+| OTA/预检进度 | 确定进度条带 `progressBarRangeInfo` 与百分比描述，读屏能播报进度 |
+| 错误横幅 | `liveRegion = Polite` + `contentDescription`，错误出现即播报 |
+| 设备日志条目 | 每条 `contentDescription = "设备日志: …"`，避免逐行无上下文朗读 |
+| 鉴权模式 | FilterChip 自带选中语义；密钥输入框有标签与说明，并使用密码可视化变换 |
+
+### 字体缩放与布局
+
+- 所有正文位于 `LazyColumn` 或可滚动 `Column`，字体放大后不会裁切；
+- 扫描/鉴权按钮行、配置行使用 `horizontalScroll`，避免双重 `Row` 在小屏或大字体下挤压；
+- 未使用硬编码 `width`/`height` 或 `maxLines` 限制阅读；
+- RTL：布局全部使用 `start/end` 与 `Arrangement`，未发现硬编码 `left/right`。
+
+### 主题对比度
+
+`StatusColorContrastTest` 用 WCAG 公式核对 `DesignTokens` 状态色与亮/暗主题 `background`：
+亮色 `warning` 从 `#B26A00`（4.16:1）调深为 `#8A5200`（约 6.28:1），其余状态色均 ≥ 4.5:1。
+
+### 未验证
+
+- TalkBack / VoiceOver 的实际朗读顺序、语速与焦点遍历；
+- 系统超大字体（200%）、横屏与小屏真机截图级排版；
+- 深色模式切换时的实时渲染与品牌色叠加效果。
 
 ## 8. 测试边界
 

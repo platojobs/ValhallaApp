@@ -216,6 +216,18 @@ object AppStrings {
             "Model: {vendor} {model} · S/N {serial}",
         ),
         StringKey.AUTHENTICATE to StringsEntry("鉴权", "Authenticate"),
+        StringKey.AUTH_MODE_LABEL to StringsEntry("鉴权模式", "Auth mode"),
+        StringKey.AUTH_MODE_TOKEN to StringsEntry("预共享密钥", "Pre-shared key"),
+        StringKey.AUTH_MODE_SIGNED to StringsEntry("签名挑战", "Signed challenge"),
+        StringKey.AUTH_CREDENTIAL_LABEL to StringsEntry("密钥 / 令牌", "Key / token"),
+        StringKey.AUTH_SECRET_HINT to StringsEntry(
+            "直接以预共享密钥/令牌鉴权（TOKEN 模式）。",
+            "Authenticate with the pre-shared key or token (TOKEN mode).",
+        ),
+        StringKey.AUTH_SIGNED_HINT to StringsEntry(
+            "先取设备挑战，再用 HMAC-SHA256 对挑战、随机数与设备摘要签名（SIGNED 模式）。",
+            "Fetch the device challenge, then HMAC-SHA256 sign challenge, nonce and device digest (SIGNED mode).",
+        ),
         StringKey.REFRESH_INFO to StringsEntry("刷新信息", "Refresh info"),
         StringKey.ENTER_OTA to StringsEntry("进入 OTA 升级", "Open OTA update"),
         StringKey.OPEN_LOGS to StringsEntry("报文日志（TX/RX）", "Packet logs (TX/RX)"),

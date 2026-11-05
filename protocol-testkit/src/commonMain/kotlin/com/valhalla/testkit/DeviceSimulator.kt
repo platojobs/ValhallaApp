@@ -369,7 +369,7 @@ class DeviceSimulator(
             }
         }
 
-        val accepted = when {
+        val accepted = scenario.forcedAcceptedOffset ?: when {
             !hasExtension -> 0L
             scenario.resumePolicy == ResumePolicy.IGNORE -> 0L
             scenario.resumePolicy == ResumePolicy.ADJUST ->
@@ -377,7 +377,7 @@ class DeviceSimulator(
 
             else -> request.resumeOffset
         }
-        if (accepted >= request.totalBytes) {
+        if (!scenario.allowCompleteResume && accepted >= request.totalBytes) {
             respond(
                 frame,
                 ErrorResponse(CommandType.START_OTA, DeviceStatus.OTA_RESUME_OFFSET_INVALID, "续传偏移越界"),

@@ -408,6 +408,50 @@ class DeviceSimulatorE2ETest {
     }
 
     @Test
+    fun `设备返回 acceptedOffset 等于 totalBytes 时保守失败且不发送 FINISH`() = runTest {
+        val store = InMemoryOtaCheckpointStore()
+        store.save(resumePoint(128))
+        val simulator = DeviceSimulator(
+            scenario = SimulatorScenario(
+                deviceVersion = deviceVersion,
+                existingPayload = payload,
+                resumePolicy = ResumePolicy.ACCEPT,
+                forcedAcceptedOffset = payload.size.toLong(),
+                allowCompleteResume = true,
+            ),
+            scope = backgroundScope,
+        )
+        val dispatcher = ConcurrentCommandDispatcher(simulator, scope = backgroundScope)
+        val selection = FirmwareSelectionController(
+            picker = SingleFirmwarePicker("firmware.bin", packageBytes()),
+            checkpointStore = store,
+        )
+        selection.pickAndPrecheck(deviceVersion, "VH-100")
+
+        val controller = OtaController(
+            dispatcher = dispatcher,
+            chunkSize = 64,
+            scope = backgroundScope,
+            checkpointStore = store,
+        )
+        val result = controller.startPackage(
+            assertNotNull(selection.firmware),
+            resumeFrom = selection.state.value.resumePoint,
+        )
+
+        // 期望行为（v1.2.0 起的保守策略）：设备声称「已接收完」属于非法应答，
+        // 直接失败，不进入 TRANSFERRING/FINISH。
+        val failed = result as OtaState.Failed
+        assertTrue(failed.reason.asChinese().contains("偏移"))
+        assertEquals(0, failed.sentBytes)
+        assertTrue(simulator.requests.filterIsInstance<FinishOtaRequest>().isEmpty())
+        assertTrue(simulator.requests.filterIsInstance<OtaDataRequest>().isEmpty())
+        // 未发送任何字节，设备声称「已接收完」不可信；保守策略丢弃断点，
+        // 避免把设备侧状态写回本地导致下次续传从错误位置开始。
+        assertNull(store.load(), "校验失败时不应保留由设备声称的已完成偏移")
+    }
+
+    @Test
     fun `超时与忙时同偏移重传且最终成功`() = runTest {
         val simulator = DeviceSimulator(
             scenario = SimulatorScenario(

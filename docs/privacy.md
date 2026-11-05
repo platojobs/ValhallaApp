@@ -1,6 +1,6 @@
-# 隐私与日志脱敏说明（v1.9.0）
+# 隐私与脱敏说明（v2.1.0）
 
-本文说明报文日志与导出中的脱敏规则。脱敏**默认开启、写入时执行、没有关闭入口**：
+本文说明报文日志、设备自由文本与错误上报的脱敏规则。脱敏**默认开启、写入时执行、没有关闭入口**：
 `InMemoryPacketLog.record` 先对帧载荷脱敏，再生成 HEX 与摘要，因此 TEXT / JSON / CSV
 三种导出格式、复制到剪贴板和界面展示拿到的都是同一份已脱敏数据。
 
@@ -34,25 +34,51 @@ MAC / deviceId 不在协议 payload 中；若导出或界面需要展示，提�
 
 设备信息应答中的 `serialNumber` 在写入报文日志时已截断为「前 4 字节 + 掩码」。
 
+### 2.1 自由文本字段级脱敏（v2.1.0）
+
+固件回传、设备日志与错误消息无法按协议结构定位，统一由
+`SensitiveTextRedaction`（`core/logging/SensitiveTextRedaction.kt`）按正则规则过滤。
+**入库前**（`InMemoryDeviceLogger.log`、`DeviceProfileCodec.encode`）与**上报前**
+（`RemoteErrorDispatcher`）执行，因此 UI、导出与远端载荷拿到的是同一份脱敏结果。
+
+| 形态 | 规则 | 输出示例 |
+| --- | --- | --- |
+| PEM 块（公钥/证书/私钥） | 整块替换 | `[REDACTED PEM]` |
+| `token=…`、`credential=…`、`secret=…`、`password=…`、`signature=…`、`nonce=…`、`serialNumber=…`、`deviceId=…`、`authKey=…` | 保留标签与分隔符，值替换为 `***` | `token=***` |
+| MAC 地址 `AA:BB:CC:DD:EE:FF` | 保留前 2 位，其余每段替换为 `**` | `AA:**:**:**:**:**` |
+| UUID | FNV-1a 32 位哈希 | `dev#1a2b3c4d` |
+| 连续 ≥ 32 位十六进制 | 整体替换 | `[REDACTED KEY]` |
+| 无标签 ≥ 40 位 Base64 | 整体替换 | `[REDACTED B64]` |
+
+不变式：
+
+- 规则幂等：重复执行不会继续套娃，便于入库前与导出前二次兜底；
+- 普通文案不受影响（版本号、耗时、百分比等测试断言原样保留）；
+- 设备档案的 `deviceId` 是主键，必须保留原值用于匹配；导出到用户可见位置时仍需用
+  `maskDeviceId` / `hashDeviceId` 处理。
+
 ## 3. 本地存储与上传
 
-脱敏只影响**报文日志与导出**。本地持久化仍包含设备档案、OTA 断点、鉴权令牌与偏好，
-其位置与 key 见隐私页（`StorageInventory`）。当前版本没有网络上传能力（Android manifest
-未声明 `INTERNET`），导出文件只通过系统保存/分享面板交给用户。
+脱敏影响报文日志、设备日志、设备档案自由文本字段与错误上报载荷。本地持久化仍包含
+设备档案、OTA 断点、鉴权令牌与偏好，其位置与 key 见隐私页（`StorageInventory`）。
+
+`RemoteErrorReporter` 是**可插拔接口**，当前默认装配为 `NoopRemoteErrorReporter`，
+未接入任何真实远端 SDK，也没有网络请求。接入时替换实现并在应用入口构造
+`RemoteErrorDispatcher`（批量、异步、可关闭）；载荷字段在进入调度器时即完成脱敏。
+Android manifest 仍未声明 `INTERNET`，导出文件只通过系统保存/分享面板交给用户。
 
 ## 4. 验证与限制
 
 自动化测试（JVM 宿主）覆盖：
 
-- `PacketLogRedactionTest.authRequestCredentialIsMaskedWithSameLength`
-- `PacketLogRedactionTest.authResponseTokenAndChallengeAreMaskedAndExpiryPreserved`
-- `PacketLogRedactionTest.deviceSerialKeepsOnlyPrefix`
-- `PacketLogRedactionTest.nonSensitiveCommandIsUntouched`
-- `PacketLogRedactionTest.packetLogExportsAreRedactedInAllFormats`
-- `PacketLogRedactionTest.deviceIdMaskingAndHashingAreStableAndIrreversible`
+- `PacketLogRedactionTest`：`AUTH` credential/token/challenge 掩码、序列号截断、
+  非敏感命令不变、三种导出格式一致、设备标识哈希稳定；
+- `SensitiveTextRedactionTest`：标签值、MAC、UUID、长十六进制、PEM、幂等与普通文案不误伤；
+- `RemoteErrorReporterTest`：上报载荷不含 token/credential/序列号/MAC/密钥片段，批量切分与关闭清空；
+- `DeviceTextRedactionStorageTest`：设备日志入库与设备档案编码后敏感串消失。
 
 未验证：
 
-- 设备日志（非报文日志）中由固件回传的自由文本是否含敏感信息，当前不解析、不脱敏；
 - 真机系统分享面板、第三方应用读取导出文件的行为；
-- 崩溃埋点上报链路（本轮未接入远端上报，不涉及脱敏验证）。
+- 真实远端 SDK 的网络传输与重试（接口就绪，但未接入服务）；
+- 设备固件是否会在自由文本中输出未知格式的标识（规则表外的形态无法自动识别）。

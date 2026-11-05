@@ -49,8 +49,10 @@ class InMemoryDeviceLogger(private val capacity: Int = 200) : DeviceLogger {
             id = nextId++,
             timestampMillis = timestampMillis,
             level = level,
-            tag = tag,
-            message = message,
+            tag = SensitiveTextRedaction.redactInline(tag),
+            // 设备回传的自由文本可能夹带 deviceId/序列号/密钥片段，入库前统一过滤；
+            // UI 与后续导出都读取同一份已脱敏快照，不存在绕过路径。
+            message = SensitiveTextRedaction.redact(message),
         )
         val appended = snapshot + entry
         snapshot = if (appended.size > capacity) {

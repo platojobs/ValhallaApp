@@ -37,6 +37,19 @@ data class SimulatorScenario(
     val resumeDownBytes: Int = 0,
     /** [ResumePolicy.REJECT] 时返回的错误码。 */
     val resumeRejectStatus: DeviceStatus = DeviceStatus.OTA_RESUME_CONTEXT_INVALID,
+    /**
+     * 强制返回的续传确认偏移，用于构造边界场景（例如 `acceptedOffset == totalBytes`）。
+     * 非 null 时忽略 [resumePolicy] 的计算结果。
+     */
+    val forcedAcceptedOffset: Long? = null,
+    /**
+     * 是否允许 `acceptedOffset >= totalBytes`。
+     *
+     * 默认 false：模拟器认为该应答非法并返回 [DeviceStatus.OTA_RESUME_OFFSET_INVALID]。
+     * 设为 true 时模拟「设备声称已完整接收」，仅用于验证客户端防御分支；
+     * App 侧 v1.2.0 起的保守策略会直接失败，不发送 FINISH（见 `docs/firmware.md`）。
+     */
+    val allowCompleteResume: Boolean = false,
     val faults: FaultInjection = FaultInjection(),
 ) {
 

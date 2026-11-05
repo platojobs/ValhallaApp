@@ -83,6 +83,8 @@ data class AppError(
 class ErrorReporter(
     private val capacity: Int = DEFAULT_CAPACITY,
     private val clockMillis: () -> Long = { Clock.System.now().toEpochMilliseconds() },
+    /** 可选的远端批量上报调度器；默认 null（仅本地环形记录）。 */
+    private val remoteDispatcher: RemoteErrorDispatcher? = null,
 ) {
 
     init {
@@ -119,11 +121,18 @@ class ErrorReporter(
                 appended
             }
         }
+        // 本地记录先落盘（内存），再异步批量投递；投递失败不影响本地记录。
+        remoteDispatcher?.submit(entry)
         return entry
     }
 
     fun clear() {
         mutableItems.value = emptyList()
+    }
+
+    /** 停止远端上报并异步清空队列；本地记录仍可继续使用。 */
+    fun closeRemoteReporting() {
+        remoteDispatcher?.close()
     }
 
     companion object {
