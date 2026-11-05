@@ -6,8 +6,8 @@ import com.valhalla.feature.ui.ValhallaApp
 
 /** 跨平台 App 入口：只负责主题与特性层根界面装配。 */
 @Composable
-fun App() {
+fun App(startRoute: String? = null) {
     MaterialTheme {
-        ValhallaApp()
+        ValhallaApp(startRoute = startRoute)
     }
 }

@@ -81,6 +81,20 @@ class DeviceMetricSamplesTest {
     }
 
     @Test
+    fun `旧采样格式按空处理并标记`() {
+        val store = InMemoryDeviceMetricStore()
+        store.saveRaw("dev", "v0\nS|1|80|-50")
+
+        val status = DeviceMetricRepository(store).seriesWithStatus("dev")
+
+        assertTrue(status.legacyIgnored)
+        assertTrue(status.series.samples.isEmpty())
+        // 新样本仍会以当前格式追加，不会被旧内容阻断。
+        DeviceMetricRepository(store).record("dev", batteryPercent = 70, rssi = -55)
+        assertFalse(DeviceMetricRepository(store).seriesWithStatus("dev").legacyIgnored)
+    }
+
+    @Test
     fun `设备之间互不影响`() {
         val repository = repository()
         repository.record("a", 80, -50)

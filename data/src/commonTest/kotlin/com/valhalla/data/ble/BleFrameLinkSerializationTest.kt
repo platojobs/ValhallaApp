@@ -75,6 +75,8 @@ class BleFrameLinkSerializationTest {
         override fun observe(serviceUuid: String, characteristicUuid: String): Flow<ByteArray> =
             kotlinx.coroutines.flow.emptyFlow()
 
+        override suspend fun readRssi(): Int? = null
+
         override suspend fun disconnect() {
             mutableConnected.value = false
         }

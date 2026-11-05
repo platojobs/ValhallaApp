@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -86,7 +87,12 @@ import com.valhalla.core.logging.PacketLogIndex
 import com.valhalla.core.logging.formatForCopy
 import com.valhalla.core.logging.formatAbsoluteTime
 import com.valhalla.core.metrics.DeviceMetricRepository
+import com.valhalla.core.metrics.DeviceMetricSample
 import com.valhalla.core.metrics.DeviceMetricSeries
+import com.valhalla.feature.diagnostics.DiagnosticPackageBuilder
+import com.valhalla.feature.diagnostics.DiagnosticPackageInput
+import com.valhalla.feature.diagnostics.DiagnosticPackageProgress
+import com.valhalla.feature.diagnostics.DiagnosticPackageResult
 import com.valhalla.data.metrics.createDeviceMetricStore
 import com.valhalla.feature.health.DeviceHealthCheckController
 import com.valhalla.feature.health.HealthCheckItemType
@@ -206,7 +212,16 @@ import com.valhalla.core.firmware.FirmwareReuseReason
 import com.valhalla.data.event.createDeviceEventStore
 import com.valhalla.data.firmware.createFirmwareLibraryStore
 import com.valhalla.feature.firmware.FirmwareLibraryReuse
+import com.valhalla.feature.metrics.RssiDegradedReason
+import com.valhalla.feature.metrics.RssiSource
+import com.valhalla.feature.metrics.RssiSubscriptionController
+import com.valhalla.feature.notification.NotificationCenter
+import com.valhalla.feature.notification.NotificationDecision
+import com.valhalla.feature.notification.NotificationEvent
+import com.valhalla.feature.notification.NotificationEventType
+import com.valhalla.feature.notification.NotificationPage
 import com.valhalla.feature.notification.NotificationPresenter
+import com.valhalla.feature.notification.NotificationTarget
 import com.valhalla.feature.notification.LowBatteryAlertTracker
 import com.valhalla.feature.notification.NotificationPolicy
 import com.valhalla.feature.notification.rememberNotificationPresenter
@@ -240,6 +255,9 @@ private class DeviceSession(
 ) {
     /** 用户主动返回断开时为 true，用于区分「设备侧断开」与「主动断开」。 */
     var userDisconnected: Boolean = false
+
+    /** 最近一次体检报告的脱敏文本，供诊断包复用（未做过体检时为 null）。 */
+    var lastHealthReport: String? = null
 }
 
 /** 正在进行的自动重连：保留设备与报文日志，成功后沿用同一份日志。 */
@@ -272,7 +290,7 @@ private sealed interface Route {
  */
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-fun ValhallaApp() {
+fun ValhallaApp(startRoute: String? = null) {
     val settingsStore = remember { createAppSettingsStore() }
     var preferences by remember { mutableStateOf(AppPreferenceStore.load(settingsStore)) }
     var appSettings by remember { mutableStateOf(AppSettingsRepository.load(settingsStore)) }
@@ -294,6 +312,7 @@ fun ValhallaApp() {
                 preferences = preferences,
                 settings = appSettings,
                 showOnboardingOnLaunch = showOnboardingOnLaunch,
+                startRoute = startRoute,
                 onLanguageChange = { mode ->
                     preferences = preferences.copy(language = mode)
                     AppPreferenceStore.saveLanguage(settingsStore, mode)
@@ -312,6 +331,10 @@ fun ValhallaApp() {
                     AppSettingsRepository.saveExportEntries(settingsStore, updated.exportEntries)
                     AppSettingsRepository.saveExportBytesKb(settingsStore, updated.exportBytesKb)
                     AppSettingsRepository.saveExportHexChars(settingsStore, updated.exportHexChars)
+                    AppSettingsRepository.saveNotifyMasterEnabled(
+                        settingsStore,
+                        updated.notifyMasterEnabled,
+                    )
                     AppSettingsRepository.saveNotifyOtaEnabled(settingsStore, updated.notifyOtaEnabled)
                     AppSettingsRepository.saveNotifyDisconnectEnabled(
                         settingsStore,
@@ -321,7 +344,23 @@ fun ValhallaApp() {
                         settingsStore,
                         updated.notifyLowBatteryEnabled,
                     )
+                    AppSettingsRepository.saveNotifyReconnectEnabled(
+                        settingsStore,
+                        updated.notifyReconnectEnabled,
+                    )
+                    AppSettingsRepository.saveNotifyHealthEnabled(
+                        settingsStore,
+                        updated.notifyHealthEnabled,
+                    )
                     AppSettingsRepository.saveLowBatteryThreshold(settingsStore, updated.lowBatteryThreshold)
+                    AppSettingsRepository.saveRssiSubscriptionEnabled(
+                        settingsStore,
+                        updated.rssiSubscriptionEnabled,
+                    )
+                    AppSettingsRepository.saveRssiSamplePeriodSeconds(
+                        settingsStore,
+                        updated.rssiSamplePeriodSeconds,
+                    )
                     appSettings = AppSettingsRepository.load(settingsStore)
                 },
                 onboardingStore = settingsStore,
@@ -340,6 +379,7 @@ private fun ValhallaContent(
     preferences: com.valhalla.feature.theme.AppPreferences,
     settings: AppSettings,
     showOnboardingOnLaunch: Boolean,
+    startRoute: String?,
     onboardingStore: com.valhalla.data.settings.AppSettingsStore,
     onLanguageChange: (AppLanguageMode) -> Unit,
     onThemeChange: (ThemeMode) -> Unit,
@@ -373,6 +413,10 @@ private fun ValhallaContent(
     }
     var lastDiagnosticReport by remember { mutableStateOf<String?>(null) }
     val notificationPresenter = rememberNotificationPresenter()
+    val notificationCenter = remember {
+        NotificationCenter(nowMillis = { Clock.System.now().toEpochMilliseconds() })
+    }
+    var notificationBanner by remember { mutableStateOf<NotificationEvent?>(null) }
     val scanController = remember {
         ScanController(
             bleClient = bleClient,
@@ -401,6 +445,26 @@ private fun ValhallaContent(
         mutableStateOf<Route>(
             if (showOnboardingOnLaunch) Route.Onboarding(review = false) else Route.Scan,
         )
+    }
+
+    fun notificationRoute(target: NotificationTarget): Route? = when (target.page) {
+        NotificationPage.HOME -> Route.Scan
+        NotificationPage.DETAIL -> target.deviceId
+            ?.takeIf { sessions.containsKey(it) }
+            ?.let { Route.Detail(it) }
+
+        NotificationPage.OTA -> target.deviceId
+            ?.takeIf { sessions.containsKey(it) }
+            ?.let { Route.Ota(it) }
+
+        NotificationPage.DIAGNOSTIC -> target.deviceId
+            ?.takeIf { sessions.containsKey(it) }
+            ?.let { Route.Diagnostic(it) }
+    }
+
+    LaunchedEffect(startRoute) {
+        val target = NotificationTarget.fromWire(startRoute) ?: return@LaunchedEffect
+        notificationRoute(target)?.let { route = it }
     }
     var connectingDeviceId by remember { mutableStateOf<String?>(null) }
     var errorMessage by remember { mutableStateOf<UiMessage?>(null) }
@@ -558,6 +622,35 @@ private fun ValhallaContent(
         controller.start()
     }
 
+    // 自动重连耗尽：仅在 App 存活期间提醒；权限缺失时降级为应用内横幅。
+    val reconnectSnapshot = reconnect
+    val reconnectPhase = reconnectSnapshot?.controller?.state?.collectAsState()?.value?.phase
+    LaunchedEffect(reconnectPhase, reconnectSnapshot) {
+        if (reconnectPhase != ReconnectPhase.EXHAUSTED || reconnectSnapshot == null) {
+            return@LaunchedEffect
+        }
+        if (!NotificationPolicy.shouldNotifyReconnectExhausted(settings)) return@LaunchedEffect
+        val event = NotificationEvent(
+            type = NotificationEventType.RECONNECT_EXHAUSTED,
+            title = strings.t(StringKey.NOTIFICATION_RECONNECT_EXHAUSTED_TITLE),
+            body = strings.t(
+                StringKey.NOTIFICATION_RECONNECT_EXHAUSTED_BODY,
+                "device" to (reconnectSnapshot.device.name ?: reconnectSnapshot.device.deviceId),
+                "attempts" to settings.reconnectMaxAttempts.toString(),
+            ),
+            target = NotificationTarget(NotificationPage.DETAIL, reconnectSnapshot.device.deviceId),
+            deviceId = reconnectSnapshot.device.deviceId,
+        )
+        val decision = notificationCenter.dispatch(
+            event = event,
+            enabled = true,
+            canNotify = notificationPresenter.canNotify,
+        ) { title, body, target -> notificationPresenter.show(title, body, target) }
+        if (decision == NotificationDecision.FALLBACK_BANNER) {
+            notificationBanner = event
+        }
+    }
+
     // 蓝牙开关变化时暂停/恢复自动重连。
     LaunchedEffect(adapterState) {
         reconnect?.controller?.onBluetoothStateChanged(
@@ -573,6 +666,7 @@ private fun ValhallaContent(
         }
     }
 
+    Box(modifier = Modifier.fillMaxSize()) {
     when (val current = route) {
         Route.Scan -> ScanScreen(
             state = scanController.state.collectAsState().value,
@@ -777,6 +871,8 @@ private fun ValhallaContent(
                     metrics = metrics,
                     presets = presetRepository,
                     notificationPresenter = notificationPresenter,
+                    notificationCenter = notificationCenter,
+                    onNotificationFallback = { notificationBanner = it },
                     connectedCount = deviceState.occupied,
                     disconnectInfo = disconnectInfo,
                     reconnectState = reconnect
@@ -834,6 +930,8 @@ private fun ValhallaContent(
                     library = firmwareLibrary,
                     settings = settings,
                     notificationPresenter = notificationPresenter,
+                    notificationCenter = notificationCenter,
+                    onNotificationFallback = { notificationBanner = it },
                     onBack = { route = Route.Detail(current.deviceId) },
                     onOtaSucceeded = { triggerAutomation(AutomationTrigger.OTA_SUCCESS, session) },
                 )
@@ -860,8 +958,46 @@ private fun ValhallaContent(
             } else {
                 DiagnosticScreen(
                     session = session,
+                    metrics = metrics,
                     onBack = { route = Route.Detail(current.deviceId) },
                 )
+            }
+        }
+    }
+        notificationBanner?.let { event ->
+            Card(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(DesignTokens.Spacing.lg),
+            ) {
+                Column(
+                    modifier = Modifier.padding(DesignTokens.Spacing.md),
+                    verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs),
+                ) {
+                    Text(
+                        strings.t(StringKey.NOTIFICATION_BANNER_TITLE),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(event.title, style = MaterialTheme.typography.titleSmall)
+                    Text(event.body, style = MaterialTheme.typography.bodySmall)
+                    Row(horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm)) {
+                        TextButton(onClick = { notificationBanner = null }) {
+                            Text(strings.t(StringKey.CLOSE))
+                        }
+                        val target = notificationRoute(event.target)
+                        if (target != null) {
+                            TextButton(
+                                onClick = {
+                                    route = target
+                                    notificationBanner = null
+                                },
+                            ) {
+                                Text(strings.t(StringKey.REFRESH))
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -1322,6 +1458,9 @@ private fun DeviceDashboardCard(
     detail: DeviceDetailState,
     series: DeviceMetricSeries,
     rssi: Int?,
+    rssiSource: RssiSource,
+    degradedReason: RssiDegradedReason?,
+    legacyMetricsIgnored: Boolean,
     observedAtMillis: Long,
     strings: StringResolver,
     format: LocaleFormat,
@@ -1371,8 +1510,31 @@ private fun DeviceDashboardCard(
                 Text(
                     strings.t(
                         StringKey.DASH_SIGNAL_SOURCE,
-                        "source" to strings.t(StringKey.DASH_SOURCE_CONNECT),
+                        "source" to strings.t(
+                            if (rssiSource == RssiSource.CONNECTED_LIVE) {
+                                StringKey.DASH_SOURCE_LIVE
+                            } else {
+                                StringKey.DASH_SOURCE_CONNECT
+                            },
+                        ),
                         "time" to formatAbsoluteTime(observedAtMillis, zoneOffsetMinutes),
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = muted,
+                )
+            }
+            degradedReason?.let { reason ->
+                Text(
+                    strings.t(
+                        StringKey.DASH_RSSI_DEGRADED,
+                        "reason" to strings.t(
+                            if (reason == RssiDegradedReason.READ_FAILED) {
+                                StringKey.DASH_RSSI_READ_ERROR
+                            } else {
+                                StringKey.DASH_RSSI_DISCONNECTED
+                            },
+                        ),
+                        "source" to strings.t(StringKey.DASH_SOURCE_CONNECT),
                     ),
                     style = MaterialTheme.typography.bodySmall,
                     color = muted,
@@ -1383,6 +1545,13 @@ private fun DeviceDashboardCard(
                 style = MaterialTheme.typography.labelSmall,
                 color = muted,
             )
+            if (legacyMetricsIgnored) {
+                Text(
+                    strings.t(StringKey.DASH_LEGACY_METRICS),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = muted,
+                )
+            }
             if (series.canDrawBattery || series.canDrawRssi) {
                 Text(
                     strings.t(
@@ -1526,6 +1695,8 @@ private fun DetailScreen(
     metrics: DeviceMetricRepository,
     presets: ConfigPresetRepository,
     notificationPresenter: NotificationPresenter,
+    notificationCenter: NotificationCenter,
+    onNotificationFallback: (NotificationEvent) -> Unit,
     connectedCount: Int,
     disconnectInfo: DisconnectInfo?,
     reconnectState: ReconnectState?,
@@ -1572,19 +1743,70 @@ private fun DetailScreen(
     }
     val healthState by healthCheck.state.collectAsState()
     var metricsVersion by remember { mutableStateOf(0) }
-    val metricSeries = remember(metricsVersion, state.deviceId) { metrics.series(state.deviceId) }
+    val metricLoad = remember(metricsVersion, state.deviceId) { metrics.seriesWithStatus(state.deviceId) }
+    val metricSeries = metricLoad.series
     var healthMessage by remember { mutableStateOf<String?>(null) }
     var healthMessageSuccess by remember { mutableStateOf(false) }
     var healthJob by remember { mutableStateOf<Job?>(null) }
     val fileSaver = rememberFileSaver()
     val connectObservedAt = remember(session) { Clock.System.now().toEpochMilliseconds() }
+    val rssiController = remember(session) {
+        RssiSubscriptionController(readRssi = { session.connection.readRssi() })
+    }
+    val rssiState by rssiController.state.collectAsState()
 
-    // 每次信息刷新完成都采样一次；存储层按设备保留最近 50 个点。
-    LaunchedEffect(state.deviceId, state.loading, state.batteryPercent, state.uptimeSeconds) {
+    LaunchedEffect(healthState.result) {
+        healthState.result?.let { result ->
+            session.lastHealthReport = healthReportText(result, format, zoneOffsetMinutes, strings)
+        }
+    }
+
+    // 连接期间周期读取实时 RSSI；断开自动停止，开关关闭时回到扫描快照。
+    LaunchedEffect(connected, settings.rssiSubscriptionEnabled, settings.rssiSamplePeriodSeconds, rssiController) {
+        if (!connected) {
+            rssiController.markDisconnected()
+            return@LaunchedEffect
+        }
+        if (!settings.rssiSubscriptionEnabled) {
+            rssiController.stop()
+            return@LaunchedEffect
+        }
+        rssiController.run(settings.rssiSamplePeriodSeconds * 1_000L) {
+            session.connection.connected.value
+        }
+    }
+
+    // 每次信息刷新或实时样本到达都采样一次；存储层按设备保留最近 50 个点。
+    LaunchedEffect(
+        state.deviceId,
+        state.loading,
+        state.batteryPercent,
+        state.uptimeSeconds,
+        rssiState.latest?.timestampMillis,
+    ) {
         if (state.loading) return@LaunchedEffect
         val percent = state.batteryPercent ?: return@LaunchedEffect
-        metrics.record(state.deviceId, percent, session.device.rssi)
+        val liveRssi = rssiState.latest
+            ?.takeIf { it.source == RssiSource.CONNECTED_LIVE }
+            ?.rssi
+        metrics.record(state.deviceId, percent, liveRssi ?: session.device.rssi)
         metricsVersion++
+    }
+
+    fun dispatchNotification(
+        event: NotificationEvent,
+        enabled: Boolean,
+        pageVisible: Boolean = false,
+    ) {
+        val decision = notificationCenter.dispatch(
+            event = event,
+            enabled = enabled,
+            canNotify = notificationPresenter.canNotify,
+            pageVisible = pageVisible,
+        ) { title, body, target -> notificationPresenter.show(title, body, target) }
+        if (decision == NotificationDecision.FALLBACK_BANNER) {
+            onNotificationFallback(event)
+        }
     }
 
     LaunchedEffect(session, connected) {
@@ -1598,15 +1820,21 @@ private fun DetailScreen(
         val percent = state.batteryPercent ?: return@LaunchedEffect
         val shouldNotify = NotificationPolicy.shouldNotifyLowBattery(settings, percent, state.charging)
         val triggered = lowBatteryTracker.update(percent, state.charging)
-        if (shouldNotify && triggered && notificationPresenter.canNotify) {
-            notificationPresenter.show(
-                strings.t(StringKey.NOTIFICATION_LOW_BATTERY_TITLE),
-                strings.t(
-                    StringKey.NOTIFICATION_LOW_BATTERY_BODY,
-                    "device" to (state.deviceInfo?.model ?: state.deviceId),
-                    "percent" to percent.toString(),
-                    "threshold" to settings.lowBatteryThreshold.toString(),
+        if (shouldNotify && triggered) {
+            dispatchNotification(
+                NotificationEvent(
+                    type = NotificationEventType.LOW_BATTERY,
+                    title = strings.t(StringKey.NOTIFICATION_LOW_BATTERY_TITLE),
+                    body = strings.t(
+                        StringKey.NOTIFICATION_LOW_BATTERY_BODY,
+                        "device" to (state.deviceInfo?.model ?: state.deviceId),
+                        "percent" to percent.toString(),
+                        "threshold" to settings.lowBatteryThreshold.toString(),
+                    ),
+                    target = NotificationTarget(NotificationPage.DETAIL, state.deviceId),
+                    deviceId = state.deviceId,
                 ),
+                enabled = shouldNotify,
             )
         }
     }
@@ -1618,16 +1846,21 @@ private fun DetailScreen(
         } else if (
             !session.userDisconnected &&
             !disconnectNotified &&
-            NotificationPolicy.shouldNotifyDisconnect(settings) &&
-            notificationPresenter.canNotify
+            NotificationPolicy.shouldNotifyDisconnect(settings)
         ) {
             disconnectNotified = true
-            notificationPresenter.show(
-                strings.t(StringKey.NOTIFICATION_DISCONNECTED_TITLE),
-                strings.t(
-                    StringKey.NOTIFICATION_DISCONNECTED_BODY,
-                    "device" to (state.deviceInfo?.model ?: state.deviceId),
+            dispatchNotification(
+                NotificationEvent(
+                    type = NotificationEventType.DISCONNECTED,
+                    title = strings.t(StringKey.NOTIFICATION_DISCONNECTED_TITLE),
+                    body = strings.t(
+                        StringKey.NOTIFICATION_DISCONNECTED_BODY,
+                        "device" to (state.deviceInfo?.model ?: state.deviceId),
+                    ),
+                    target = NotificationTarget(NotificationPage.DETAIL, state.deviceId),
+                    deviceId = state.deviceId,
                 ),
+                enabled = true,
             )
         }
     }
@@ -1697,11 +1930,16 @@ private fun DetailScreen(
             verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.md),
         ) {
             item {
+                val liveReading = rssiState.latest
+                    ?.takeIf { it.source == RssiSource.CONNECTED_LIVE }
                 DeviceDashboardCard(
                     detail = state,
                     series = metricSeries,
-                    rssi = session.device.rssi,
-                    observedAtMillis = connectObservedAt,
+                    rssi = liveReading?.rssi ?: session.device.rssi,
+                    rssiSource = if (liveReading != null) RssiSource.CONNECTED_LIVE else RssiSource.SNAPSHOT,
+                    degradedReason = if (liveReading == null) rssiState.degradedReason else null,
+                    legacyMetricsIgnored = metricLoad.legacyIgnored,
+                    observedAtMillis = liveReading?.timestampMillis ?: connectObservedAt,
                     strings = strings,
                     format = format,
                     zoneOffsetMinutes = zoneOffsetMinutes,
@@ -1758,6 +1996,27 @@ private fun DetailScreen(
                                                 detail = "ok=${checked.okCount}, abnormal=${checked.abnormalCount}, " +
                                                     "failed=${checked.failedCount}, skipped=${checked.skippedCount}",
                                             )
+                                            if (checked.abnormalCount > 0) {
+                                                dispatchNotification(
+                                                    NotificationEvent(
+                                                        type = NotificationEventType.HEALTH_ABNORMAL,
+                                                        title = strings.t(
+                                                            StringKey.NOTIFICATION_HEALTH_ABNORMAL_TITLE,
+                                                        ),
+                                                        body = strings.t(
+                                                            StringKey.NOTIFICATION_HEALTH_ABNORMAL_BODY,
+                                                            "device" to (state.deviceInfo?.model ?: state.deviceId),
+                                                            "count" to checked.abnormalCount.toString(),
+                                                        ),
+                                                        target = NotificationTarget(
+                                                            NotificationPage.DIAGNOSTIC,
+                                                            state.deviceId,
+                                                        ),
+                                                        deviceId = state.deviceId,
+                                                    ),
+                                                    enabled = NotificationPolicy.shouldNotifyHealthAbnormal(settings),
+                                                )
+                                            }
                                         }
                                     }
                                 },
@@ -2892,6 +3151,7 @@ private fun paramTypeKey(type: ParamValueType): StringKey = when (type) {
 @Composable
 private fun DiagnosticScreen(
     session: DeviceSession,
+    metrics: DeviceMetricRepository,
     onBack: () -> Unit,
 ) {
     val packetLog = session.packetLog
@@ -2917,6 +3177,12 @@ private fun DiagnosticScreen(
     var reportResult by remember { mutableStateOf<DiagnosticReportResult?>(null) }
     var reportMessage by remember { mutableStateOf<String?>(null) }
     var reportMessageSuccess by remember { mutableStateOf(false) }
+    var packageGenerating by remember { mutableStateOf(false) }
+    var packageProgress by remember { mutableStateOf<DiagnosticPackageProgress?>(null) }
+    var packageJob by remember { mutableStateOf<Job?>(null) }
+    var packageMessage by remember { mutableStateOf<String?>(null) }
+    var packageMessageSuccess by remember { mutableStateOf(false) }
+    var packageResult by remember { mutableStateOf<DiagnosticPackageResult?>(null) }
 
     // 输入只来自真实快照：本会话状态 + 设备档案 + 本机报文日志，缺失项由报告标注「暂无数据」。
     fun currentReportInput(generatedAt: Long): DiagnosticReportInput {
@@ -3006,6 +3272,101 @@ private fun DiagnosticScreen(
                     StringKey.LOGS_SAVE_FAILED,
                     "detail" to (save.message ?: strings.t(StringKey.UNKNOWN)),
                 )
+            }
+        }
+    }
+
+    fun packageInput(): DiagnosticPackageInput {
+        val profile = session.profileRepository.get(detail.deviceId)
+        val quality = buildString {
+            append("requests=").append(stats.requests)
+            append("; sampleCount=").append(stats.sampleCount)
+            append("; successRate=").append(stats.successRate?.toString() ?: "null")
+            append("; averageLatencyMillis=").append(stats.averageLatencyMillis?.toString() ?: "null")
+            append("; maxLatencyMillis=").append(stats.maxLatencyMillis?.toString() ?: "null")
+            append("; retransmissions=").append(stats.retransmissions)
+            append("; outOfOrder=").append(stats.outOfOrderResponses)
+            append("; noResponses=").append(stats.noResponses)
+            append("; unmatchedResponses=").append(stats.unmatchedResponses)
+            append("; insufficientSample=").append(stats.insufficientSample)
+        }
+        val profileSummary = buildString {
+            append("deviceId=").append(detail.deviceId).append('\n')
+            append("displayName=").append(profile?.displayName ?: "-").append('\n')
+            append("vendor=").append(profile?.vendor ?: "-").append('\n')
+            append("model=").append(profile?.model ?: detail.deviceInfo?.model ?: "-").append('\n')
+            append("firmware=").append(profile?.lastKnownFirmwareVersion ?: detail.firmwareVersion ?: "-")
+                .append('\n')
+            append("batteryPercent=").append(profile?.lastKnownBatteryPercent ?: detail.batteryPercent ?: "-")
+                .append('\n')
+            append("charging=").append(profile?.lastKnownCharging ?: detail.charging ?: "-").append('\n')
+            append("otaRecords=").append(profile?.otaHistory?.size ?: 0).append('\n')
+            append("lastConnectedAtMillis=").append(profile?.lastConnectedAtEpochMillis ?: 0L)
+        }
+        return DiagnosticPackageInput(
+            generatedAtEpochMillis = Clock.System.now().toEpochMilliseconds(),
+            zoneOffsetMinutes = zoneOffsetMinutes,
+            appVersion = AppBuildInfo.VERSION_NAME,
+            buildNumber = AppBuildInfo.VERSION_CODE.toString(),
+            buildChannel = AppBuildInfo.BUILD_CHANNEL,
+            buildCommit = AppBuildInfo.BUILD_COMMIT,
+            deviceId = detail.deviceId,
+            healthReport = session.lastHealthReport,
+            connectionQuality = quality,
+            deviceProfileSummary = profileSummary,
+            packetLogEntries = entries,
+            metricSamples = metrics.series(detail.deviceId).samples,
+            packetLogOptions = AppSettings.DEFAULTS.exportOptions(),
+        )
+    }
+
+    fun startPackage() {
+        if (packageGenerating) return
+        packageGenerating = true
+        packageProgress = null
+        packageResult = null
+        packageMessage = null
+        val input = packageInput()
+        packageJob = scope.launchSafely(errorReporter, "diagnostic-package") {
+            try {
+                val built = withContext(Dispatchers.Default) {
+                    DiagnosticPackageBuilder.build(input) { packageProgress = it }
+                }
+                packageResult = built
+                // 构建完成前不触碰文件；保存失败也不会留下半成品。
+                val save = fileSaver.save(
+                    SaveableFile(built.fileName, built.text, "application/octet-stream"),
+                )
+                packageMessageSuccess = save.status == FileSaveStatus.SAVED
+                packageMessage = when (save.status) {
+                    FileSaveStatus.SAVED -> strings.t(
+                        StringKey.DIAG_PACKAGE_SAVE_SUCCESS,
+                        "name" to built.fileName,
+                        "bytes" to format.number(built.byteSize.toLong()),
+                    )
+
+                    FileSaveStatus.CANCELLED -> strings.t(StringKey.DIAG_PACKAGE_SAVE_CANCELLED)
+                    FileSaveStatus.UNAVAILABLE -> strings.t(StringKey.LOGS_SAVE_UNAVAILABLE)
+                    FileSaveStatus.FAILED -> strings.t(
+                        StringKey.DIAG_PACKAGE_FAILED,
+                        "reason" to (save.message ?: strings.t(StringKey.UNKNOWN)),
+                    )
+                }
+            } catch (cancellation: CancellationException) {
+                packageMessageSuccess = false
+                packageMessage = strings.t(StringKey.DIAG_PACKAGE_CANCELLED)
+                throw cancellation
+            } catch (error: Throwable) {
+                packageMessageSuccess = false
+                packageMessage = strings.t(
+                    StringKey.DIAG_PACKAGE_FAILED,
+                    "reason" to (error.message ?: error::class.simpleName ?: "unknown"),
+                )
+                errorReporter.record("diagnostic-package", error)
+            } finally {
+                packageGenerating = false
+                packageProgress = null
+                packageJob = null
             }
         }
     }
@@ -3141,6 +3502,70 @@ private fun DiagnosticScreen(
                                 message,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = if (reportMessageSuccess) cards.success else cards.error,
+                            )
+                        }
+                    }
+                }
+            }
+            item {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(
+                        modifier = Modifier.padding(DesignTokens.Spacing.md),
+                        verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs),
+                    ) {
+                        Text(
+                            strings.t(StringKey.DIAG_PACKAGE_TITLE),
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                        Text(
+                            strings.t(StringKey.DIAG_PACKAGE_HINT),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        if (packageGenerating) {
+                            LinearProgressIndicator(
+                                progress = { packageProgress?.fraction ?: 0f },
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            Text(
+                                strings.t(StringKey.DIAG_PACKAGE_EXPORTING),
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                            OutlinedButton(onClick = { packageJob?.cancel() }) {
+                                Text(strings.t(StringKey.DIAG_PACKAGE_CANCEL))
+                            }
+                        } else {
+                            Button(onClick = { startPackage() }) {
+                                Text(strings.t(StringKey.DIAG_PACKAGE_EXPORT))
+                            }
+                        }
+                        packageResult?.let { built ->
+                            Text(
+                                strings.t(
+                                    StringKey.DIAG_PACKAGE_ENTRIES,
+                                    "names" to built.entries.joinToString(", ") { it.name },
+                                ),
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                            if (built.truncated) {
+                                Text(
+                                    strings.t(StringKey.DIAG_PACKAGE_TRUNCATED),
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
+                        }
+                        Text(
+                            strings.t(StringKey.DIAG_PACKAGE_EXCLUDED),
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                        Text(
+                            strings.t(StringKey.DIAG_PACKAGE_REDACTED),
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                        packageMessage?.let { message ->
+                            Text(
+                                message,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (packageMessageSuccess) cards.success else cards.error,
                             )
                         }
                     }
@@ -4013,6 +4438,8 @@ private fun OtaScreen(
     library: FirmwareLibraryRepository,
     settings: AppSettings,
     notificationPresenter: NotificationPresenter,
+    notificationCenter: NotificationCenter,
+    onNotificationFallback: (NotificationEvent) -> Unit,
     onBack: () -> Unit,
     onOtaSucceeded: () -> Unit,
 ) {
@@ -4106,26 +4533,40 @@ private fun OtaScreen(
             libraryVersion++
         }
 
-        if (settings.notifyOtaEnabled && notificationPresenter.canNotify) {
-            when (current) {
-                is OtaState.Succeeded -> notificationPresenter.show(
-                    strings.t(StringKey.NOTIFICATION_OTA_SUCCESS_TITLE),
-                    strings.t(
-                        StringKey.NOTIFICATION_OTA_SUCCESS_BODY,
-                        "version" to (version?.toString() ?: strings.t(StringKey.UNKNOWN)),
-                    ),
-                )
+        val otaEvent = when (current) {
+            is OtaState.Succeeded -> NotificationEvent(
+                type = NotificationEventType.OTA_SUCCESS,
+                title = strings.t(StringKey.NOTIFICATION_OTA_SUCCESS_TITLE),
+                body = strings.t(
+                    StringKey.NOTIFICATION_OTA_SUCCESS_BODY,
+                    "version" to (version?.toString() ?: strings.t(StringKey.UNKNOWN)),
+                ),
+                target = NotificationTarget(NotificationPage.OTA, session.device.deviceId),
+                deviceId = session.device.deviceId,
+            )
 
-                is OtaState.Failed -> notificationPresenter.show(
-                    strings.t(StringKey.NOTIFICATION_OTA_FAILED_TITLE),
-                    strings.t(
-                        StringKey.NOTIFICATION_OTA_FAILED_BODY,
-                        "version" to (version?.toString() ?: strings.t(StringKey.UNKNOWN)),
-                        "reason" to strings.render(current.reason),
-                    ),
-                )
+            is OtaState.Failed -> NotificationEvent(
+                type = NotificationEventType.OTA_FAILED,
+                title = strings.t(StringKey.NOTIFICATION_OTA_FAILED_TITLE),
+                body = strings.t(
+                    StringKey.NOTIFICATION_OTA_FAILED_BODY,
+                    "version" to (version?.toString() ?: strings.t(StringKey.UNKNOWN)),
+                    "reason" to strings.render(current.reason),
+                ),
+                target = NotificationTarget(NotificationPage.OTA, session.device.deviceId),
+                deviceId = session.device.deviceId,
+            )
 
-                else -> Unit
+            else -> null
+        }
+        if (otaEvent != null) {
+            val decision = notificationCenter.dispatch(
+                event = otaEvent,
+                enabled = NotificationPolicy.shouldNotifyOta(settings),
+                canNotify = notificationPresenter.canNotify,
+            ) { title, body, target -> notificationPresenter.show(title, body, target) }
+            if (decision == NotificationDecision.FALLBACK_BANNER) {
+                onNotificationFallback(otaEvent)
             }
         }
     }

@@ -17,10 +17,15 @@ data class AppSettings(
     val exportEntries: Int = DEFAULT_EXPORT_ENTRIES,
     val exportBytesKb: Int = DEFAULT_EXPORT_BYTES_KB,
     val exportHexChars: Int = DEFAULT_EXPORT_HEX_CHARS,
+    val notifyMasterEnabled: Boolean = DEFAULT_NOTIFY_MASTER_ENABLED,
     val notifyOtaEnabled: Boolean = DEFAULT_NOTIFY_ENABLED,
     val notifyDisconnectEnabled: Boolean = DEFAULT_NOTIFY_ENABLED,
     val notifyLowBatteryEnabled: Boolean = DEFAULT_NOTIFY_ENABLED,
+    val notifyReconnectEnabled: Boolean = DEFAULT_NOTIFY_ENABLED,
+    val notifyHealthEnabled: Boolean = DEFAULT_NOTIFY_ENABLED,
     val lowBatteryThreshold: Int = DEFAULT_LOW_BATTERY_THRESHOLD,
+    val rssiSubscriptionEnabled: Boolean = DEFAULT_RSSI_SUBSCRIPTION_ENABLED,
+    val rssiSamplePeriodSeconds: Int = DEFAULT_RSSI_SAMPLE_PERIOD_SECONDS,
 ) {
 
     /** 转换为导出选项；构造前再夹取一次，避免边界外的持久化值导致构造异常。 */
@@ -58,9 +63,18 @@ data class AppSettings(
 
         /** 本地提醒默认全部关闭，避免首次安装即弹窗。 */
         const val DEFAULT_NOTIFY_ENABLED = false
+
+        /** 本地通知总开关：默认开启，但各事件渠道仍默认关闭。 */
+        const val DEFAULT_NOTIFY_MASTER_ENABLED = true
         const val DEFAULT_LOW_BATTERY_THRESHOLD = 20
         const val MIN_LOW_BATTERY_THRESHOLD = 5
         const val MAX_LOW_BATTERY_THRESHOLD = 50
+
+        /** 实时 RSSI 订阅默认开启，每 3 秒采样一次。 */
+        const val DEFAULT_RSSI_SUBSCRIPTION_ENABLED = true
+        const val DEFAULT_RSSI_SAMPLE_PERIOD_SECONDS = 3
+        const val MIN_RSSI_SAMPLE_PERIOD_SECONDS = 1
+        const val MAX_RSSI_SAMPLE_PERIOD_SECONDS = 10
 
         /** 默认值：5 次重连、30 秒封顶、500 条日志、200 条导出 / 512 KiB。 */
         val DEFAULTS = AppSettings()
@@ -82,6 +96,9 @@ data class AppSettings(
 
         fun isValidLowBatteryThreshold(value: Int): Boolean =
             value in MIN_LOW_BATTERY_THRESHOLD..MAX_LOW_BATTERY_THRESHOLD
+
+        fun isValidRssiSamplePeriodSeconds(value: Int): Boolean =
+            value in MIN_RSSI_SAMPLE_PERIOD_SECONDS..MAX_RSSI_SAMPLE_PERIOD_SECONDS
     }
 }
 
@@ -132,6 +149,11 @@ object AppSettingsRepository {
                 default = defaults.exportHexChars,
                 valid = { AppSettings.isValidExportHexChars(it) },
             ),
+            notifyMasterEnabled = storedBoolean(
+                store,
+                SettingsKeys.NOTIFY_MASTER_ENABLED,
+                defaults.notifyMasterEnabled,
+            ),
             notifyOtaEnabled = storedBoolean(
                 store,
                 SettingsKeys.NOTIFY_OTA_ENABLED,
@@ -147,11 +169,32 @@ object AppSettingsRepository {
                 SettingsKeys.NOTIFY_LOW_BATTERY_ENABLED,
                 defaults.notifyLowBatteryEnabled,
             ),
+            notifyReconnectEnabled = storedBoolean(
+                store,
+                SettingsKeys.NOTIFY_RECONNECT_ENABLED,
+                defaults.notifyReconnectEnabled,
+            ),
+            notifyHealthEnabled = storedBoolean(
+                store,
+                SettingsKeys.NOTIFY_HEALTH_ENABLED,
+                defaults.notifyHealthEnabled,
+            ),
             lowBatteryThreshold = storedInt(
                 store = store,
                 key = SettingsKeys.NOTIFY_LOW_BATTERY_THRESHOLD,
                 default = defaults.lowBatteryThreshold,
                 valid = { AppSettings.isValidLowBatteryThreshold(it) },
+            ),
+            rssiSubscriptionEnabled = storedBoolean(
+                store,
+                SettingsKeys.RSSI_SUBSCRIPTION_ENABLED,
+                defaults.rssiSubscriptionEnabled,
+            ),
+            rssiSamplePeriodSeconds = storedInt(
+                store = store,
+                key = SettingsKeys.RSSI_SAMPLE_PERIOD_SECONDS,
+                default = defaults.rssiSamplePeriodSeconds,
+                valid = { AppSettings.isValidRssiSamplePeriodSeconds(it) },
             ),
         )
     }
@@ -184,6 +227,9 @@ object AppSettingsRepository {
             AppSettings.isValidExportHexChars(it)
         }
 
+    fun saveNotifyMasterEnabled(store: AppSettingsStore, value: Boolean): Boolean =
+        saveBoolean(store, SettingsKeys.NOTIFY_MASTER_ENABLED, value)
+
     fun saveNotifyOtaEnabled(store: AppSettingsStore, value: Boolean): Boolean =
         saveBoolean(store, SettingsKeys.NOTIFY_OTA_ENABLED, value)
 
@@ -192,6 +238,20 @@ object AppSettingsRepository {
 
     fun saveNotifyLowBatteryEnabled(store: AppSettingsStore, value: Boolean): Boolean =
         saveBoolean(store, SettingsKeys.NOTIFY_LOW_BATTERY_ENABLED, value)
+
+    fun saveNotifyReconnectEnabled(store: AppSettingsStore, value: Boolean): Boolean =
+        saveBoolean(store, SettingsKeys.NOTIFY_RECONNECT_ENABLED, value)
+
+    fun saveNotifyHealthEnabled(store: AppSettingsStore, value: Boolean): Boolean =
+        saveBoolean(store, SettingsKeys.NOTIFY_HEALTH_ENABLED, value)
+
+    fun saveRssiSubscriptionEnabled(store: AppSettingsStore, value: Boolean): Boolean =
+        saveBoolean(store, SettingsKeys.RSSI_SUBSCRIPTION_ENABLED, value)
+
+    fun saveRssiSamplePeriodSeconds(store: AppSettingsStore, value: Int): Boolean =
+        saveInt(store, SettingsKeys.RSSI_SAMPLE_PERIOD_SECONDS, value) {
+            AppSettings.isValidRssiSamplePeriodSeconds(it)
+        }
 
     fun saveLowBatteryThreshold(store: AppSettingsStore, value: Int): Boolean =
         saveInt(store, SettingsKeys.NOTIFY_LOW_BATTERY_THRESHOLD, value) {
@@ -207,10 +267,15 @@ object AppSettingsRepository {
             SettingsKeys.EXPORT_DEFAULT_ENTRIES,
             SettingsKeys.EXPORT_DEFAULT_BYTES_KB,
             SettingsKeys.EXPORT_DEFAULT_HEX_CHARS,
+            SettingsKeys.NOTIFY_MASTER_ENABLED,
             SettingsKeys.NOTIFY_OTA_ENABLED,
             SettingsKeys.NOTIFY_DISCONNECT_ENABLED,
             SettingsKeys.NOTIFY_LOW_BATTERY_ENABLED,
+            SettingsKeys.NOTIFY_RECONNECT_ENABLED,
+            SettingsKeys.NOTIFY_HEALTH_ENABLED,
             SettingsKeys.NOTIFY_LOW_BATTERY_THRESHOLD,
+            SettingsKeys.RSSI_SUBSCRIPTION_ENABLED,
+            SettingsKeys.RSSI_SAMPLE_PERIOD_SECONDS,
         ).forEach { store.write(it, null) }
     }
 

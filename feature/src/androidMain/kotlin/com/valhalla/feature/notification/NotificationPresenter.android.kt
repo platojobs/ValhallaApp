@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
@@ -32,6 +33,9 @@ private const val CHANNEL_ID = "valhalla_local_alerts"
 private const val NOTIFICATION_PREFS = "valhalla_notification_permission"
 private const val REQUESTED_KEY = "requested"
 
+/** 与 MainActivity 约定的点击深链 extra。 */
+const val EXTRA_NOTIFICATION_ROUTE = "valhalla.notification.route"
+
 @Composable
 actual fun rememberNotificationPresenter(): NotificationPresenter {
     val context = LocalContext.current
@@ -47,7 +51,7 @@ actual fun rememberNotificationPresenter(): NotificationPresenter {
                 override fun requestPermission() = Unit
                 override fun openAppSettings() = Unit
                 override fun refresh() = Unit
-                override fun show(title: String, body: String) = Unit
+                override fun show(title: String, body: String, target: NotificationTarget) = Unit
             }
         }
     }
@@ -123,7 +127,7 @@ actual fun rememberNotificationPresenter(): NotificationPresenter {
                 canNotifyState.value = activity.notificationsAllowed()
             }
 
-            override fun show(title: String, body: String) {
+            override fun show(title: String, body: String, target: NotificationTarget) {
                 if (!activity.notificationsAllowed()) return
                 val manager = activity.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
                     ?: return
@@ -136,6 +140,18 @@ actual fun rememberNotificationPresenter(): NotificationPresenter {
                         ),
                     )
                 }
+                val intent = activity.packageManager
+                    .getLaunchIntentForPackage(activity.packageName)
+                    ?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                    ?.putExtra(EXTRA_NOTIFICATION_ROUTE, target.wireValue())
+                val pendingIntent = intent?.let {
+                    PendingIntent.getActivity(
+                        activity,
+                        nextId.get(),
+                        it,
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                    )
+                }
                 val notification = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     Notification.Builder(activity, CHANNEL_ID)
                 } else {
@@ -145,6 +161,7 @@ actual fun rememberNotificationPresenter(): NotificationPresenter {
                     .setSmallIcon(android.R.drawable.ic_dialog_info)
                     .setContentTitle(title)
                     .setContentText(body)
+                    .setContentIntent(pendingIntent)
                     .setAutoCancel(true)
                     .build()
                 runCatching { manager.notify(nextId.getAndIncrement(), notification) }

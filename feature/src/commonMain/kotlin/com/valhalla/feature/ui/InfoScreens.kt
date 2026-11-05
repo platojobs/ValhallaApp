@@ -195,6 +195,9 @@ private fun SettingsValuesSection(
     var entries by remember(settings) { mutableStateOf(settings.exportEntries.toString()) }
     var bytes by remember(settings) { mutableStateOf(settings.exportBytesKb.toString()) }
     var hex by remember(settings) { mutableStateOf(settings.exportHexChars.toString()) }
+    var rssiPeriod by remember(settings) {
+        mutableStateOf(settings.rssiSamplePeriodSeconds.toString())
+    }
     var status by remember(settings) { mutableStateOf<StringKey?>(null) }
 
     val attemptsValue = parseSettingInt(
@@ -227,8 +230,20 @@ private fun SettingsValuesSection(
         1,
         PacketLogExportOptions.MAX_HEX_CHARS,
     )
-    val allValid = listOf(attemptsValue, delayValue, capacityValue, entriesValue, bytesValue, hexValue)
-        .all { it != null }
+    val rssiPeriodValue = parseSettingInt(
+        rssiPeriod,
+        AppSettings.MIN_RSSI_SAMPLE_PERIOD_SECONDS,
+        AppSettings.MAX_RSSI_SAMPLE_PERIOD_SECONDS,
+    )
+    val allValid = listOf(
+        attemptsValue,
+        delayValue,
+        capacityValue,
+        entriesValue,
+        bytesValue,
+        hexValue,
+        rssiPeriodValue,
+    ).all { it != null }
 
     SectionTitle(strings.t(StringKey.SETTINGS_RECONNECT_SECTION))
     SettingNumberField(
@@ -282,6 +297,26 @@ private fun SettingsValuesSection(
         onValueChange = { hex = it; status = null },
     )
 
+    SectionTitle(strings.t(StringKey.SETTINGS_RSSI_SECTION))
+    NotificationToggleRow(
+        label = strings.t(StringKey.SETTINGS_RSSI_ENABLED),
+        checked = settings.rssiSubscriptionEnabled,
+        onCheckedChange = { onSettingsChange(settings.copy(rssiSubscriptionEnabled = it)) },
+    )
+    SettingNumberField(
+        label = strings.t(
+            StringKey.SETTINGS_RSSI_PERIOD,
+            "seconds" to rssiPeriod,
+        ),
+        value = rssiPeriod,
+        min = AppSettings.MIN_RSSI_SAMPLE_PERIOD_SECONDS,
+        max = AppSettings.MAX_RSSI_SAMPLE_PERIOD_SECONDS,
+        onValueChange = {
+            rssiPeriod = it
+            status = null
+        },
+    )
+
     Row(horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm)) {
         Button(
             enabled = allValid,
@@ -295,10 +330,15 @@ private fun SettingsValuesSection(
                             exportEntries = entriesValue!!,
                             exportBytesKb = bytesValue!!,
                             exportHexChars = hexValue!!,
+                            notifyMasterEnabled = settings.notifyMasterEnabled,
                             notifyOtaEnabled = settings.notifyOtaEnabled,
                             notifyDisconnectEnabled = settings.notifyDisconnectEnabled,
                             notifyLowBatteryEnabled = settings.notifyLowBatteryEnabled,
+                            notifyReconnectEnabled = settings.notifyReconnectEnabled,
+                            notifyHealthEnabled = settings.notifyHealthEnabled,
                             lowBatteryThreshold = settings.lowBatteryThreshold,
+                            rssiSubscriptionEnabled = settings.rssiSubscriptionEnabled,
+                            rssiSamplePeriodSeconds = rssiPeriodValue!!,
                         ),
                     )
                     status = StringKey.SETTINGS_APPLIED
@@ -313,6 +353,7 @@ private fun SettingsValuesSection(
                 entries = AppSettings.DEFAULTS.exportEntries.toString()
                 bytes = AppSettings.DEFAULTS.exportBytesKb.toString()
                 hex = AppSettings.DEFAULTS.exportHexChars.toString()
+                rssiPeriod = AppSettings.DEFAULTS.rssiSamplePeriodSeconds.toString()
                 onSettingsChange(AppSettings.DEFAULTS)
                 status = StringKey.SETTINGS_RESET_DONE
             },
@@ -370,6 +411,16 @@ private fun NotificationSettingsSection(
     }
 
     NotificationToggleRow(
+        label = strings.t(StringKey.SETTINGS_NOTIFY_MASTER),
+        checked = settings.notifyMasterEnabled,
+        onCheckedChange = { enabled ->
+            if (enabled && permissionState != BlePermissionState.GRANTED) {
+                presenter.requestPermission()
+            }
+            onSettingsChange(settings.copy(notifyMasterEnabled = enabled))
+        },
+    )
+    NotificationToggleRow(
         label = strings.t(StringKey.SETTINGS_NOTIFY_OTA),
         checked = settings.notifyOtaEnabled,
         onCheckedChange = { enabled ->
@@ -399,6 +450,26 @@ private fun NotificationSettingsSection(
             onSettingsChange(settings.copy(notifyLowBatteryEnabled = enabled))
         },
     )
+    NotificationToggleRow(
+        label = strings.t(StringKey.SETTINGS_NOTIFY_RECONNECT),
+        checked = settings.notifyReconnectEnabled,
+        onCheckedChange = { enabled ->
+            if (enabled && permissionState != BlePermissionState.GRANTED) {
+                presenter.requestPermission()
+            }
+            onSettingsChange(settings.copy(notifyReconnectEnabled = enabled))
+        },
+    )
+    NotificationToggleRow(
+        label = strings.t(StringKey.SETTINGS_NOTIFY_HEALTH),
+        checked = settings.notifyHealthEnabled,
+        onCheckedChange = { enabled ->
+            if (enabled && permissionState != BlePermissionState.GRANTED) {
+                presenter.requestPermission()
+            }
+            onSettingsChange(settings.copy(notifyHealthEnabled = enabled))
+        },
+    )
     SettingNumberField(
         label = strings.t(StringKey.SETTINGS_NOTIFY_THRESHOLD),
         value = threshold,
@@ -409,6 +480,10 @@ private fun NotificationSettingsSection(
             parseSettingInt(text, AppSettings.MIN_LOW_BATTERY_THRESHOLD, AppSettings.MAX_LOW_BATTERY_THRESHOLD)
                 ?.let { onSettingsChange(settings.copy(lowBatteryThreshold = it)) }
         },
+    )
+    Text(
+        strings.t(StringKey.SETTINGS_NOTIFY_BACKGROUND_NOTE),
+        style = MaterialTheme.typography.bodySmall,
     )
 }
 

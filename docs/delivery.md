@@ -1,7 +1,7 @@
 # 交付说明
 
 本文汇总 ValhallaApp 的可交付内容、构建方式、产物路径与完成度对照。最新发布说明见
-[release-notes/v2.7.0.md](release-notes/v2.7.0.md)，历史版本见
+[release-notes/v2.8.0.md](release-notes/v2.8.0.md)，历史版本见
 [release-notes/v2.0.0.md](release-notes/v2.0.0.md)，全部文档入口见 [README.md](README.md)。
 
 ## 1. 交付物清单
@@ -198,3 +198,16 @@ xcodebuild -project iosApp/iosApp.xcodeproj -scheme iosApp \
 
 - 自动化规则只在 App 前台触发，不做后台唤起；统计只用本机真实数据，不做估算；
 - 备份 JSON 只含白名单字段，测试断言不出现令牌、密钥、凭证、设备档案、日志与断点键名。
+
+## 10. 实时信号、通知与诊断包（v2.8.0）
+
+| 能力 | 实现位置 | 自动化验证 |
+| --- | --- | --- |
+| 实时 RSSI 订阅（启停、周期、失败降级、断开/重连） | `BleConnection.readRssi()` + `feature/metrics/RssiSubscription.kt` + 详情页 | `RssiSubscriptionTest` |
+| 旧采样格式兼容 | `core/metrics/DeviceMetricSamples.kt`（`decodeWithStatus`） | `DeviceMetricSamplesTest` |
+| 通知事件、去重、权限降级、深链目标 | `feature/notification/NotificationCenter.kt` + 平台 Presenter | `NotificationCenterTest` |
+| 诊断包（白名单、manifest、截断、取消） | `feature/diagnostics/DiagnosticPackage.kt` + 诊断页 | `DiagnosticPackageTest` |
+
+- 通知只在 App 存活期间送出，不注册后台任务或远程推送；权限被拒后降级为应用内横幅；
+- 诊断包只写白名单条目，构建完成前不触碰文件系统，取消或失败不留半成品；
+- 明确排除令牌、密钥、凭据、断点文件、固件二进制与未脱敏原文。

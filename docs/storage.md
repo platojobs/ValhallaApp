@@ -162,3 +162,17 @@ Keystore/Keychain 常量；`PrivacyDisclosureTest` 断言隐私页条目与清�
   规则默认上限 20 条；
 - 使用统计不新增存储：连接/写入/体检来自事件时间线，OTA 来自设备档案；
 - 偏好备份只导出白名单字段，不含令牌、密钥、凭证、设备档案、日志与断点。
+
+## 11. 实时信号与通知偏好（v2.8.0）
+
+| 键 | 类型 | 默认 | 说明 |
+| --- | --- | --- | --- |
+| `rssi_subscription_enabled` | Boolean | `true` | 连接期间实时 RSSI 订阅开关 |
+| `rssi_sample_period_seconds` | Int | `3` | 采样周期，1–10 秒 |
+| `notify_master_enabled` | Boolean | `true` | 本地通知总开关（各事件渠道仍默认关闭） |
+| `notify_reconnect_enabled` | Boolean | `false` | 自动重连耗尽提醒 |
+| `notify_health_enabled` | Boolean | `false` | 体检异常提醒 |
+
+- 采样仍写入既有 `DeviceMetricStore`（`v1` 头，50 点/设备）；旧格式读取时按空处理并返回
+  `legacyIgnored=true`，新样本继续追加。
+- 诊断包不新增持久化：生成在内存中完成，保存走既有文件通道。

@@ -128,5 +128,7 @@ private class FakeConnection(override val deviceId: String) : BleConnection {
 
     override fun observe(serviceUuid: String, characteristicUuid: String): Flow<ByteArray> = emptyFlow()
 
+    override suspend fun readRssi(): Int? = null
+
     override suspend fun disconnect() = Unit
 }

@@ -19,6 +19,6 @@ actual fun rememberNotificationPresenter(): NotificationPresenter =
             override fun requestPermission() = Unit
             override fun openAppSettings() = Unit
             override fun refresh() = Unit
-            override fun show(title: String, body: String) = Unit
+            override fun show(title: String, body: String, target: NotificationTarget) = Unit
         }
     }

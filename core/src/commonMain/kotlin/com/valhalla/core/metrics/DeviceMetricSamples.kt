@@ -50,6 +50,12 @@ data class DeviceMetricSeries(
     }
 }
 
+/** 采样序列 + 解码状态；[legacyIgnored] 表示读到的是旧版本格式。 */
+data class DeviceMetricSeriesStatus(
+    val series: DeviceMetricSeries,
+    val legacyIgnored: Boolean,
+)
+
 /** 按设备分开存储采样；平台实现只负责字符串读写。 */
 interface DeviceMetricStore {
 
@@ -77,9 +83,21 @@ class InMemoryDeviceMetricStore : DeviceMetricStore {
 }
 
 /**
+ * 采样解码结果。
+ *
+ * [legacyIgnored] 为 true 表示存储里是旧版本/不可识别格式：按空数据处理，
+ * 界面应说明「旧采样格式已忽略」，而不是把它当成损坏的当前数据。
+ */
+data class DeviceMetricDecodeResult(
+    val samples: List<DeviceMetricSample>,
+    val legacyIgnored: Boolean,
+)
+
+/**
  * 采样编码：`v1` 头 + 每行 `S|timestamp|battery|rssi`。
  *
  * 空值写 `-`；任何一行结构损坏都跳过，全部损坏时回退为空。
+ * 读取旧版本格式时按空处理并标记 [DeviceMetricDecodeResult.legacyIgnored]。
  */
 object DeviceMetricCodec {
 
@@ -104,10 +122,16 @@ object DeviceMetricCodec {
         }
     }
 
-    fun decode(raw: String?): List<DeviceMetricSample> {
-        if (raw.isNullOrBlank()) return emptyList()
+    fun decode(raw: String?): List<DeviceMetricSample> = decodeWithStatus(raw).samples
+
+    fun decodeWithStatus(raw: String?): DeviceMetricDecodeResult {
+        if (raw.isNullOrBlank()) return DeviceMetricDecodeResult(emptyList(), legacyIgnored = false)
         val lines = raw.split('\n')
-        if (lines.firstOrNull()?.trim() != VERSION) return emptyList()
+        val header = lines.firstOrNull()?.trim()
+        if (header != VERSION) {
+            // 旧版本或手改格式统一按空处理，并明确标记，避免界面把「读不懂」误判为没有采样。
+            return DeviceMetricDecodeResult(emptyList(), legacyIgnored = true)
+        }
         val result = mutableListOf<DeviceMetricSample>()
         lines.drop(1).forEach { line ->
             if (line.isBlank()) return@forEach
@@ -120,7 +144,7 @@ object DeviceMetricCodec {
                 DeviceMetricSample(timestampMillis = timestamp, batteryPercent = battery, rssi = rssi)
             }.getOrNull()?.let(result::add)
         }
-        return result
+        return DeviceMetricDecodeResult(result, legacyIgnored = false)
     }
 }
 
@@ -143,9 +167,16 @@ class DeviceMetricRepository(
         }
     }
 
-    fun series(deviceId: String): DeviceMetricSeries {
+    fun series(deviceId: String): DeviceMetricSeries = seriesWithStatus(deviceId).series
+
+    /** 读采样并保留「旧格式被忽略」标记，供界面说明。 */
+    fun seriesWithStatus(deviceId: String): DeviceMetricSeriesStatus {
         require(deviceId.isNotBlank()) { "设备 id 不能为空" }
-        return DeviceMetricSeries(deviceId, DeviceMetricCodec.decode(store.loadRaw(deviceId)))
+        val decoded = DeviceMetricCodec.decodeWithStatus(store.loadRaw(deviceId))
+        return DeviceMetricSeriesStatus(
+            series = DeviceMetricSeries(deviceId, decoded.samples),
+            legacyIgnored = decoded.legacyIgnored,
+        )
     }
 
     /** 记录一次采样并立即淘汰超限点；电池与 RSSI 都为空时不写入。 */

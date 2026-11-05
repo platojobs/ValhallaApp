@@ -249,6 +249,7 @@ internal class IosBleConnection(
     private var pendingWrite: CompletableDeferred<Unit>? = null
     private var pendingRead: CompletableDeferred<ByteArray>? = null
     private var pendingReadUuid: String? = null
+    private var pendingRssi: CompletableDeferred<Int>? = null
     private var pendingServiceCount = 0
 
     init {
@@ -257,6 +258,7 @@ internal class IosBleConnection(
             onDiscoverCharacteristics = { service, error -> handleDiscoverCharacteristics(service, error) },
             onWriteValue = { characteristic, error -> handleWriteValue(characteristic, error) },
             onUpdateValue = { characteristic, error -> handleUpdateValue(characteristic, error) },
+            onReadRssi = { rssi, error -> handleReadRssi(rssi, error) },
         )
     }
 
@@ -310,6 +312,22 @@ internal class IosBleConnection(
             }
         }
 
+    override suspend fun readRssi(): Int? = operationMutex.withLock {
+        if (!mutableConnected.value) return@withLock null
+        val deferred = CompletableDeferred<Int>()
+        pendingRssi = deferred
+        peripheral.readRSSI()
+        try {
+            withTimeoutOrNull(OPERATION_TIMEOUT_MILLIS) { deferred.await() }
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (_: Throwable) {
+            null
+        } finally {
+            pendingRssi = null
+        }
+    }
+
     override fun observe(serviceUuid: String, characteristicUuid: String): Flow<ByteArray> =
         callbackFlow {
             val characteristic = requireCharacteristic(serviceUuid, characteristicUuid)
@@ -349,9 +367,11 @@ internal class IosBleConnection(
         startDeferred?.completeExceptionally(BleException(message))
         pendingWrite?.completeExceptionally(BleException(message))
         pendingRead?.completeExceptionally(BleException(message))
+        pendingRssi?.completeExceptionally(BleException(message))
         startDeferred = null
         pendingWrite = null
         pendingRead = null
+        pendingRssi = null
     }
 
     private fun handleDiscoverServices(peripheral: CBPeripheral, error: NSError?) {
@@ -408,6 +428,15 @@ internal class IosBleConnection(
         }
     }
 
+    private fun handleReadRssi(rssi: NSNumber, error: NSError?) {
+        val deferred = pendingRssi ?: return
+        if (error == null) {
+            deferred.complete(rssi.intValue)
+        } else {
+            deferred.completeExceptionally(BleException(error.localizedDescription))
+        }
+    }
+
     private fun completeStart() {
         startDeferred?.complete(Unit)
     }
@@ -438,6 +467,7 @@ private class PeripheralDelegate(
     private val onDiscoverCharacteristics: (CBService, NSError?) -> Unit,
     private val onWriteValue: (CBCharacteristic, NSError?) -> Unit,
     private val onUpdateValue: (CBCharacteristic, NSError?) -> Unit,
+    private val onReadRssi: (NSNumber, NSError?) -> Unit,
 ) : NSObject(), CBPeripheralDelegateProtocol {
 
     override fun peripheral(peripheral: CBPeripheral, didDiscoverServices: NSError?) {
@@ -468,6 +498,15 @@ private class PeripheralDelegate(
         error: NSError?,
     ) {
         onUpdateValue(didUpdateValueForCharacteristic, error)
+    }
+
+    @ObjCSignatureOverride
+    override fun peripheral(
+        peripheral: CBPeripheral,
+        didReadRSSI: NSNumber,
+        error: NSError?,
+    ) {
+        onReadRssi(didReadRSSI, error)
     }
 }
 

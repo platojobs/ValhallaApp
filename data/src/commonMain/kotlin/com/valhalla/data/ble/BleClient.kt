@@ -53,6 +53,14 @@ interface BleConnection {
     /** 订阅特征值通知（开启 CCCD 或 iOS notify），返回冷流，收集结束即退订。 */
     fun observe(serviceUuid: String, characteristicUuid: String): Flow<ByteArray>
 
+    /**
+     * 读取当前链路的实时 RSSI（dBm）。
+     *
+     * 与扫描快照不同，这里反映连接建立后的真实信号变化；平台读写必须与其它 GATT
+     * 操作串行。设备/平台不支持或读取失败时返回 null，由上层降级为快照，不阻断主流程。
+     */
+    suspend fun readRssi(): Int?
+
     /** 断开并释放底层资源，要求幂等。 */
     suspend fun disconnect()
 }

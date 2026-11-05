@@ -1695,6 +1695,88 @@ object AppStrings {
             "自动化规则：触发时机、动作与顺序，仅存本机。",
             "Automation rules: trigger, action and order stored locally only.",
         ),
+
+        // ---- 实时信号与通知（v2.8.0） ----
+        StringKey.DASH_SOURCE_LIVE to StringsEntry("连接实时", "Live connection"),
+        StringKey.DASH_RSSI_DEGRADED to StringsEntry(
+            "实时信号不可用（{reason}），已回退到扫描快照：{source}。",
+            "Live signal unavailable ({reason}); fell back to the scan snapshot: {source}.",
+        ),
+        StringKey.DASH_RSSI_READ_ERROR to StringsEntry("读取失败", "read failed"),
+        StringKey.DASH_RSSI_DISCONNECTED to StringsEntry("连接已断开", "disconnected"),
+        StringKey.DASH_LEGACY_METRICS to StringsEntry(
+            "检测到旧版本采样格式，已按空数据处理；新样本会继续追加。",
+            "Legacy metric format detected and treated as empty; new samples will still be appended.",
+        ),
+        StringKey.SETTINGS_RSSI_SECTION to StringsEntry("实时信号", "Live signal"),
+        StringKey.SETTINGS_RSSI_ENABLED to StringsEntry(
+            "连接期间订阅实时 RSSI（断开后自动停止，重连后恢复）",
+            "Subscribe to live RSSI while connected (stops on disconnect, resumes on reconnect)",
+        ),
+        StringKey.SETTINGS_RSSI_PERIOD to StringsEntry(
+            "采样周期（秒，1–10）：{seconds}",
+            "Sample interval (seconds, 1–10): {seconds}",
+        ),
+        StringKey.SETTINGS_NOTIFY_MASTER to StringsEntry("本地通知总开关", "Local notifications master switch"),
+        StringKey.SETTINGS_NOTIFY_RECONNECT to StringsEntry(
+            "自动重连失败达上限时提醒",
+            "Notify when automatic reconnect exhausts its attempts",
+        ),
+        StringKey.SETTINGS_NOTIFY_HEALTH to StringsEntry(
+            "体检发现异常项时提醒",
+            "Notify when a health check finds issues",
+        ),
+        StringKey.SETTINGS_NOTIFY_BACKGROUND_NOTE to StringsEntry(
+            "通知只在本 App 存活期间送出，不承诺进程被杀后仍能提醒；不包含远程推送。",
+            "Notifications are only delivered while this app is alive; no delivery after the process is killed, and no remote push.",
+        ),
+        StringKey.NOTIFICATION_RECONNECT_EXHAUSTED_TITLE to StringsEntry(
+            "自动重连失败",
+            "Automatic reconnect failed",
+        ),
+        StringKey.NOTIFICATION_RECONNECT_EXHAUSTED_BODY to StringsEntry(
+            "{device} 在 {attempts} 次尝试后仍未连上，请在设备页手动重试。",
+            "{device} is still unreachable after {attempts} attempts; retry manually from the devices page.",
+        ),
+        StringKey.NOTIFICATION_HEALTH_ABNORMAL_TITLE to StringsEntry(
+            "体检发现异常",
+            "Health check found issues",
+        ),
+        StringKey.NOTIFICATION_HEALTH_ABNORMAL_BODY to StringsEntry(
+            "{device} 有 {count} 项异常，点击查看体检报告。",
+            "{device} has {count} abnormal items; tap to view the report.",
+        ),
+        StringKey.NOTIFICATION_BANNER_TITLE to StringsEntry(
+            "通知权限未开启，改为应用内横幅",
+            "Notifications are off; showing an in-app banner",
+        ),
+
+        // ---- 诊断包（v2.8.0） ----
+        StringKey.DIAG_PACKAGE_TITLE to StringsEntry("诊断包导出", "Diagnostic package"),
+        StringKey.DIAG_PACKAGE_HINT to StringsEntry(
+            "打包体检报告、连接质量、最近报文（已脱敏）、设备档案摘要、版本信息与指标采样。",
+            "Bundles the health report, connection quality, recent packets (redacted), a profile summary, version info and metric samples.",
+        ),
+        StringKey.DIAG_PACKAGE_EXPORT to StringsEntry("导出诊断包", "Export diagnostic package"),
+        StringKey.DIAG_PACKAGE_EXPORTING to StringsEntry("正在生成诊断包…", "Generating diagnostic package…"),
+        StringKey.DIAG_PACKAGE_CANCEL to StringsEntry("取消导出", "Cancel export"),
+        StringKey.DIAG_PACKAGE_SAVE_SUCCESS to StringsEntry("诊断包已保存", "Diagnostic package saved"),
+        StringKey.DIAG_PACKAGE_SAVE_CANCELLED to StringsEntry("已取消保存", "Save cancelled"),
+        StringKey.DIAG_PACKAGE_FAILED to StringsEntry(
+            "诊断包生成失败：{reason}。请重试。",
+            "Diagnostic package generation failed: {reason}. Please retry.",
+        ),
+        StringKey.DIAG_PACKAGE_CANCELLED to StringsEntry("已取消生成诊断包", "Diagnostic package generation cancelled"),
+        StringKey.DIAG_PACKAGE_EXCLUDED to StringsEntry(
+            "不包含：令牌、密钥、凭据、断点文件、固件二进制、未脱敏原文。",
+            "Excluded: tokens, keys, credentials, checkpoints, firmware binaries and unredacted raw text.",
+        ),
+        StringKey.DIAG_PACKAGE_REDACTED to StringsEntry("已脱敏", "Redacted"),
+        StringKey.DIAG_PACKAGE_TRUNCATED to StringsEntry("部分条目已按上限截断", "Some entries were truncated at the limit"),
+        StringKey.DIAG_PACKAGE_ENTRIES to StringsEntry(
+            "条目：{names}",
+            "Entries: {names}",
+        ),
     )
 
     /** 查表；缺失 key 直接抛出，避免静默显示空文案。 */

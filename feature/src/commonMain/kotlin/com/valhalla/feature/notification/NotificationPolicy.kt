@@ -28,8 +28,12 @@ interface NotificationPresenter {
 
     fun refresh()
 
-    /** 展示一条即时通知；未授权、未开启或平台不支持时不做任何事。 */
-    fun show(title: String, body: String)
+    /**
+     * 展示一条即时通知；未授权或平台不支持时不做任何事。
+     *
+     * [target] 用于点击直达对应页面；调用方仍负责事件开关与去重。
+     */
+    fun show(title: String, body: String, target: NotificationTarget)
 }
 
 @Composable
@@ -43,15 +47,24 @@ expect fun rememberNotificationPresenter(): NotificationPresenter
  */
 object NotificationPolicy {
 
-    fun shouldNotifyOta(settings: AppSettings): Boolean = settings.notifyOtaEnabled
+    fun shouldNotifyOta(settings: AppSettings): Boolean =
+        settings.notifyMasterEnabled && settings.notifyOtaEnabled
 
-    fun shouldNotifyDisconnect(settings: AppSettings): Boolean = settings.notifyDisconnectEnabled
+    fun shouldNotifyDisconnect(settings: AppSettings): Boolean =
+        settings.notifyMasterEnabled && settings.notifyDisconnectEnabled
+
+    fun shouldNotifyReconnectExhausted(settings: AppSettings): Boolean =
+        settings.notifyMasterEnabled && settings.notifyReconnectEnabled
+
+    fun shouldNotifyHealthAbnormal(settings: AppSettings): Boolean =
+        settings.notifyMasterEnabled && settings.notifyHealthEnabled
 
     fun shouldNotifyLowBattery(
         settings: AppSettings,
         percent: Int,
         charging: Boolean?,
     ): Boolean {
+        if (!settings.notifyMasterEnabled) return false
         if (!settings.notifyLowBatteryEnabled) return false
         if (charging == true) return false
         return percent <= settings.lowBatteryThreshold

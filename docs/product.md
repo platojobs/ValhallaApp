@@ -1,4 +1,4 @@
-# 产品说明（v2.7.0）
+# 产品说明（v2.8.0）
 
 面向使用者的功能与文案约定。技术细节见 [architecture.md](architecture.md)，存储清单见
 [storage.md](storage.md)。
@@ -52,7 +52,7 @@
 
 ## 4. 关于、帮助与隐私
 
-- **关于**：应用名 `Valhalla`、版本 `2.7.0 (27)`（构建期从 `gradle.properties` 生成，
+- **关于**：应用名 `Valhalla`、版本 `2.8.0 (28)`（构建期从 `gradle.properties` 生成，
   与 Android/iOS 同源）、构建渠道、当前平台、提交号（构建时取自
   `VALHALLA_BUILD_COMMIT` / `GITHUB_SHA` / git，取不到显示「未知」）、依赖许可逐条列出
   （名称、版本、许可证、作用域）。

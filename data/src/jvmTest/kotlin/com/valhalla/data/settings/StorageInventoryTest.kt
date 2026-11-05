@@ -36,7 +36,7 @@ class StorageInventoryTest {
             SettingsKeys.ALL.map { StorageKeys.IOS_SETTINGS_PREFIX + it },
             ios.keys,
         )
-        assertEquals(15, SettingsKeys.ALL.size)
+        assertEquals(20, SettingsKeys.ALL.size)
     }
 
     @Test

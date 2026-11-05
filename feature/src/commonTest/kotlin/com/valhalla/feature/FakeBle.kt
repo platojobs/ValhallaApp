@@ -46,6 +46,7 @@ class FakeBleConnection(
     override val deviceId: String = "dev-1",
     private val readHandler: (String, String) -> ByteArray = { _, _ -> ByteArray(0) },
     private val writeHandler: (WriteRecord) -> Unit = {},
+    private val rssiReader: suspend () -> Int? = { null },
 ) : BleConnection {
 
     override val connected = MutableStateFlow(true)
@@ -67,6 +68,8 @@ class FakeBleConnection(
         readHandler(serviceUuid, characteristicUuid)
 
     override fun observe(serviceUuid: String, characteristicUuid: String): Flow<ByteArray> = emptyFlow()
+
+    override suspend fun readRssi(): Int? = rssiReader()
 
     override suspend fun disconnect() {
         connected.value = false

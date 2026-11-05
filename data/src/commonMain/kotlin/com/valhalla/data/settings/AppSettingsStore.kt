@@ -44,6 +44,9 @@ object SettingsKeys {
     /** 首次使用引导是否已完成（true/false）。 */
     const val ONBOARDING_COMPLETED = "onboarding_completed"
 
+    /** 本地通知总开关（默认开启；各事件渠道仍各自关闭）。 */
+    const val NOTIFY_MASTER_ENABLED = "notify_master_enabled"
+
     /** 本地提醒：OTA 完成/失败是否通知（默认关闭）。 */
     const val NOTIFY_OTA_ENABLED = "notify_ota_enabled"
 
@@ -53,8 +56,20 @@ object SettingsKeys {
     /** 本地提醒：低电量是否通知（默认关闭）。 */
     const val NOTIFY_LOW_BATTERY_ENABLED = "notify_low_battery_enabled"
 
+    /** 本地提醒：自动重连耗尽是否通知（默认关闭）。 */
+    const val NOTIFY_RECONNECT_ENABLED = "notify_reconnect_enabled"
+
+    /** 本地提醒：体检发现异常项是否通知（默认关闭）。 */
+    const val NOTIFY_HEALTH_ENABLED = "notify_health_enabled"
+
     /** 低电量阈值百分比，默认 20，取值 5..50。 */
     const val NOTIFY_LOW_BATTERY_THRESHOLD = "notify_low_battery_threshold"
+
+    /** 连接期间实时 RSSI 订阅开关（默认开启）。 */
+    const val RSSI_SUBSCRIPTION_ENABLED = "rssi_subscription_enabled"
+
+    /** 实时 RSSI 采样周期（秒），取值 1..10，默认 3。 */
+    const val RSSI_SAMPLE_PERIOD_SECONDS = "rssi_sample_period_seconds"
 
     /** 配置预设（行式编码，v1）。 */
     const val CONFIG_PRESETS = "config_presets"
@@ -73,10 +88,15 @@ object SettingsKeys {
         EXPORT_DEFAULT_BYTES_KB,
         EXPORT_DEFAULT_HEX_CHARS,
         ONBOARDING_COMPLETED,
+        NOTIFY_MASTER_ENABLED,
         NOTIFY_OTA_ENABLED,
         NOTIFY_DISCONNECT_ENABLED,
         NOTIFY_LOW_BATTERY_ENABLED,
+        NOTIFY_RECONNECT_ENABLED,
+        NOTIFY_HEALTH_ENABLED,
         NOTIFY_LOW_BATTERY_THRESHOLD,
+        RSSI_SUBSCRIPTION_ENABLED,
+        RSSI_SAMPLE_PERIOD_SECONDS,
         CONFIG_PRESETS,
         AUTOMATION_RULES,
     )

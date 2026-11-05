@@ -70,7 +70,7 @@ private class IosNotificationPresenter : NotificationPresenter {
         }
     }
 
-    override fun show(title: String, body: String) {
+    override fun show(title: String, body: String, target: NotificationTarget) {
         if (!canNotify) return
         val content = UNMutableNotificationContent().apply {
             setTitle(title)

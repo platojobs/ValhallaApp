@@ -45,6 +45,7 @@ internal class AndroidBleConnection private constructor(
 
     private var pendingWrite: CompletableDeferred<Unit>? = null
     private var pendingRead: CompletableDeferred<ByteArray>? = null
+    private var pendingRssi: CompletableDeferred<Int>? = null
     private var closed = false
 
     override suspend fun write(
@@ -97,6 +98,26 @@ internal class AndroidBleConnection private constructor(
             }
         }
 
+    @SuppressLint("MissingPermission")
+    override suspend fun readRssi(): Int? = operationMutex.withLock {
+        if (closed || !mutableConnected.value) return@withLock null
+        val deferred = CompletableDeferred<Int>()
+        pendingRssi = deferred
+        if (!runCatching { gatt.readRemoteRssi() }.getOrDefault(false)) {
+            pendingRssi = null
+            return@withLock null
+        }
+        try {
+            withTimeoutOrNull(OPERATION_TIMEOUT_MILLIS) { deferred.await() }
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (_: Throwable) {
+            null
+        } finally {
+            pendingRssi = null
+        }
+    }
+
     override fun observe(serviceUuid: String, characteristicUuid: String): Flow<ByteArray> =
         callbackFlow {
             val characteristic = requireCharacteristic(serviceUuid, characteristicUuid)
@@ -136,6 +157,8 @@ internal class AndroidBleConnection private constructor(
     /** 由系统断链回调触发。 */
     internal fun markDisconnected() {
         mutableConnected.value = false
+        pendingRssi?.completeExceptionally(BleException("链路已断开"))
+        pendingRssi = null
     }
 
     private fun requireCharacteristic(serviceUuid: String, characteristicUuid: String): BluetoothGattCharacteristic {
@@ -174,6 +197,15 @@ internal class AndroidBleConnection private constructor(
             deferred.complete(Unit)
         } else {
             deferred.completeExceptionally(BleException("特征值写入失败，status=$status"))
+        }
+    }
+
+    private fun handleRssi(status: Int, rssi: Int) {
+        val deferred = pendingRssi ?: return
+        if (status == BluetoothGatt.GATT_SUCCESS) {
+            deferred.complete(rssi)
+        } else {
+            deferred.completeExceptionally(BleException("RSSI 读取失败，status=$status"))
         }
     }
 
@@ -282,6 +314,14 @@ internal class AndroidBleConnection private constructor(
                             value: ByteArray,
                         ) {
                             holder.connection?.handleNotification(characteristic, value)
+                        }
+
+                        override fun onReadRemoteRssi(
+                            gatt: BluetoothGatt,
+                            rssi: Int,
+                            status: Int,
+                        ) {
+                            holder.connection?.handleRssi(status, rssi)
                         }
                     }
 
