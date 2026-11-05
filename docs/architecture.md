@@ -595,3 +595,14 @@ CompositionLocalProvider(LocalStrings) → 全部 Composable 页面
   报告只读真实快照，设备 ID 输出短哈希，所有自由文本走 `SensitiveTextRedaction`。
 - `feature/notification/NotificationPolicy.kt`：通知策略与低电去抖为纯逻辑；平台 presenters
   负责权限与展示（Android `POST_NOTIFICATIONS`、iOS `UNUserNotificationCenter`），JVM 空实现。
+
+## 11. 设备体检、升级向导与仪表盘（v2.6.0）
+
+- `feature/health/DeviceHealthCheck.kt`：固定七项顺序执行，单项失败不阻断后续；
+  链路断开为全局失败并中止。结论四态 `OK/ABNORMAL/SKIPPED/FAILED`，异常附设备错误码，
+  超时/传输失败附建议；`HealthCheckReportFormatter` 生成脱敏文本。
+- `feature/ota/OtaWizard.kt`：五步向导推进与取消语义为纯逻辑（`OtaWizardFlow`），
+  传输中禁止回退、取消等于中止；预检规则映射（`OtaPrecheckRuleEvaluator`）把错误码归到六条规则。
+- `core/metrics/DeviceMetricSamples.kt`：采样模型、行式编码与 50 点淘汰；仓库按设备隔离，
+  不足 3 点不画线。平台存储走 `DeviceMetricStore` expect/actual。
+- UI 仍是 `ValhallaApp.kt` 内的组合式接入，向导只重组展示层，不改 OTA 状态机。

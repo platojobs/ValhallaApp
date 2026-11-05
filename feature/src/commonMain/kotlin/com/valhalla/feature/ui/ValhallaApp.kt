@@ -1,5 +1,6 @@
 package com.valhalla.feature.ui
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -10,6 +11,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -35,6 +37,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -77,6 +81,17 @@ import com.valhalla.core.logging.PacketLogExporter
 import com.valhalla.core.logging.PacketLogFilter
 import com.valhalla.core.logging.PacketLogIndex
 import com.valhalla.core.logging.formatForCopy
+import com.valhalla.core.logging.formatAbsoluteTime
+import com.valhalla.core.metrics.DeviceMetricRepository
+import com.valhalla.core.metrics.DeviceMetricSeries
+import com.valhalla.data.metrics.createDeviceMetricStore
+import com.valhalla.feature.health.DeviceHealthCheckController
+import com.valhalla.feature.health.HealthCheckItemType
+import com.valhalla.feature.health.HealthCheckReportFormatter
+import com.valhalla.feature.health.HealthCheckResult
+import com.valhalla.feature.health.HealthCheckState
+import com.valhalla.feature.health.HealthCheckStatus
+import com.valhalla.feature.health.labelKey
 import com.valhalla.core.logging.parseLocalDateTimeMillis
 import com.valhalla.core.logging.validateByteLimitKb
 import com.valhalla.core.logging.validateEntryLimit
@@ -135,6 +150,7 @@ import com.valhalla.feature.config.ConfigEditorController
 import com.valhalla.feature.config.ConfigEditorState
 import com.valhalla.feature.config.ConfigFieldState
 import com.valhalla.feature.detail.DeviceDetailController
+import com.valhalla.feature.detail.DeviceDetailState
 import com.valhalla.feature.export.FileSaveStatus
 import com.valhalla.feature.export.SaveableFile
 import com.valhalla.feature.export.rememberFileSaver
@@ -152,7 +168,12 @@ import com.valhalla.feature.i18n.UiMessage
 import com.valhalla.feature.i18n.render
 import com.valhalla.feature.i18n.resolveLanguage
 import com.valhalla.feature.ota.OtaController
+import com.valhalla.feature.ota.OtaPrecheckRule
+import com.valhalla.feature.ota.OtaPrecheckRuleEvaluator
+import com.valhalla.feature.ota.OtaPrecheckRuleStatus
 import com.valhalla.feature.ota.OtaState
+import com.valhalla.feature.ota.OtaWizardFlow
+import com.valhalla.feature.ota.OtaWizardStep
 import com.valhalla.feature.onboarding.OnboardingController
 import com.valhalla.feature.onboarding.OnboardingStep
 import com.valhalla.feature.param.ParamEditorController
@@ -318,6 +339,8 @@ private fun ValhallaContent(
     // 事件时间线跨进程共享（存储层每次读取都走平台键值），固件库在同一 App 进程内共享。
     val eventStore = remember { createDeviceEventStore() }
     val firmwareLibrary = remember { FirmwareLibraryRepository(createFirmwareLibraryStore()) }
+    // 指标采样只保存在本机，按设备分片，最多 50 个点。
+    val metrics = remember { DeviceMetricRepository(createDeviceMetricStore()) }
     val notificationPresenter = rememberNotificationPresenter()
     val scanController = remember {
         ScanController(
@@ -650,6 +673,7 @@ private fun ValhallaContent(
                 DetailScreen(
                     session = session,
                     settings = settings,
+                    metrics = metrics,
                     notificationPresenter = notificationPresenter,
                     connectedCount = deviceState.occupied,
                     disconnectInfo = disconnectInfo,
@@ -1190,6 +1214,178 @@ private fun DisconnectBanner(
 private const val TIMELINE_VISIBLE_LIMIT = 20
 private const val LIBRARY_VISIBLE_LIMIT = 8
 
+@Composable
+private fun DeviceDashboardCard(
+    detail: DeviceDetailState,
+    series: DeviceMetricSeries,
+    rssi: Int?,
+    observedAtMillis: Long,
+    strings: StringResolver,
+    format: LocaleFormat,
+    zoneOffsetMinutes: Int,
+    accent: androidx.compose.ui.graphics.Color,
+    muted: androidx.compose.ui.graphics.Color,
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(DesignTokens.Spacing.md),
+            verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs),
+        ) {
+            Text(strings.t(StringKey.DASH_TITLE), style = MaterialTheme.typography.titleMedium)
+            DashboardRow(
+                strings.t(StringKey.DASH_BATTERY),
+                detail.batteryPercent?.let { "$it%" } ?: strings.t(StringKey.DASH_NO_DATA),
+            )
+            DashboardRow(
+                strings.t(StringKey.DASH_CHARGING),
+                detail.charging?.let {
+                    strings.t(if (it) StringKey.HEALTH_CHARGING else StringKey.HEALTH_NOT_CHARGING)
+                } ?: strings.t(StringKey.DASH_NO_DATA),
+            )
+            DashboardRow(
+                strings.t(StringKey.DASH_FIRMWARE),
+                detail.firmwareVersion ?: strings.t(StringKey.DASH_NO_DATA),
+            )
+            DashboardRow(
+                strings.t(StringKey.DASH_UPTIME),
+                detail.uptimeSeconds?.let { formatUptime(it, strings) }
+                    ?: strings.t(StringKey.DASH_NO_DATA),
+            )
+            DashboardRow(
+                strings.t(StringKey.DASH_SIGNAL),
+                rssi?.let { value ->
+                    val band = strings.t(
+                        when (RssiBand.of(value)) {
+                            RssiBand.STRONG -> StringKey.SCAN_RSSI_STRONG
+                            RssiBand.MEDIUM -> StringKey.SCAN_RSSI_MEDIUM
+                            RssiBand.WEAK -> StringKey.SCAN_RSSI_WEAK
+                        },
+                    )
+                    "$band ($value dBm)"
+                } ?: strings.t(StringKey.DASH_NO_DATA),
+            )
+            if (rssi != null) {
+                Text(
+                    strings.t(
+                        StringKey.DASH_SIGNAL_SOURCE,
+                        "source" to strings.t(StringKey.DASH_SOURCE_CONNECT),
+                        "time" to formatAbsoluteTime(observedAtMillis, zoneOffsetMinutes),
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = muted,
+                )
+            }
+            Text(
+                strings.t(StringKey.DASH_SAMPLE_NOTE),
+                style = MaterialTheme.typography.labelSmall,
+                color = muted,
+            )
+            if (series.canDrawBattery || series.canDrawRssi) {
+                Text(
+                    strings.t(
+                        StringKey.DASH_TREND_TITLE,
+                        "count" to series.samples.size.toString(),
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                if (series.canDrawBattery) {
+                    TrendLine(
+                        values = series.batteryPoints.map { it.second.toFloat() },
+                        minValue = 0f,
+                        maxValue = 100f,
+                        color = accent,
+                    )
+                }
+                if (series.canDrawRssi) {
+                    TrendLine(
+                        values = series.rssiPoints.map { it.second.toFloat() },
+                        minValue = -100f,
+                        maxValue = -30f,
+                        color = accent,
+                    )
+                }
+            } else {
+                Text(
+                    strings.t(StringKey.DASH_TREND_INSUFFICIENT),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = muted,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DashboardRow(label: String, value: String) {
+    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
+        )
+        Text(value, style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+@Composable
+private fun TrendLine(
+    values: List<Float>,
+    minValue: Float,
+    maxValue: Float,
+    color: androidx.compose.ui.graphics.Color,
+) {
+    Canvas(modifier = Modifier.fillMaxWidth().height(56.dp)) {
+        if (values.size < 2) return@Canvas
+        val range = (maxValue - minValue).coerceAtLeast(1f)
+        val stepX = size.width / (values.size - 1)
+        val points = values.mapIndexed { index, value ->
+            Offset(
+                x = index * stepX,
+                y = size.height - ((value - minValue) / range) * size.height,
+            )
+        }
+        for (index in 1 until points.size) {
+            drawLine(
+                color = color,
+                start = points[index - 1],
+                end = points[index],
+                strokeWidth = 2f,
+            )
+        }
+    }
+}
+
+private fun healthReportText(
+    result: HealthCheckResult,
+    format: LocaleFormat,
+    zoneOffsetMinutes: Int,
+    strings: StringResolver,
+): String = HealthCheckReportFormatter.format(
+    result = result,
+    generatedAtText = formatAbsoluteTime(result.completedAtMillis, zoneOffsetMinutes),
+    appVersion = AppBuildInfo.VERSION_NAME,
+    platform = platformDisplayName(),
+    resolve = { strings.render(it) },
+)
+
+private fun formatUptime(seconds: Long, strings: StringResolver): String {
+    val safe = seconds.coerceAtLeast(0)
+    return if (safe < 3_600) {
+        strings.t(
+            StringKey.DASH_UPTIME_MS,
+            "minutes" to (safe / 60).toString(),
+            "seconds" to (safe % 60).toString(),
+        )
+    } else {
+        strings.t(
+            StringKey.DASH_UPTIME_HM,
+            "hours" to (safe / 3_600).toString(),
+            "minutes" to ((safe % 3_600) / 60).toString(),
+        )
+    }
+}
+
 private fun DiagnosticReportSection.reportLabelKey(): StringKey = when (this) {
     DiagnosticReportSection.DEVICE -> StringKey.DIAG_REPORT_SECTION_DEVICE
     DiagnosticReportSection.FIRMWARE -> StringKey.DIAG_REPORT_SECTION_FIRMWARE
@@ -1222,6 +1418,7 @@ private fun DeviceEventType.timelineKey(): StringKey = when (this) {
 private fun DetailScreen(
     session: DeviceSession,
     settings: AppSettings,
+    metrics: DeviceMetricRepository,
     notificationPresenter: NotificationPresenter,
     connectedCount: Int,
     disconnectInfo: DisconnectInfo?,
@@ -1255,6 +1452,33 @@ private fun DetailScreen(
     var disconnectNotified by remember(session) { mutableStateOf(false) }
     val lowBatteryTracker = remember(session, settings.lowBatteryThreshold) {
         LowBatteryAlertTracker(settings.lowBatteryThreshold)
+    }
+    // 体检控制器绑定当前会话：链路断开时立即停止；不读取上次会话的缓存。
+    val healthCheck = remember(session) {
+        DeviceHealthCheckController(
+            dispatcher = session.dispatcher,
+            isLinkAlive = { session.connection.connected.value },
+            otaHistoryProvider = {
+                session.profileRepository.get(session.connection.deviceId)?.otaHistory.orEmpty()
+            },
+            knownUptimeSeconds = { session.detail.state.value.uptimeSeconds ?: 0L },
+        )
+    }
+    val healthState by healthCheck.state.collectAsState()
+    var metricsVersion by remember { mutableStateOf(0) }
+    val metricSeries = remember(metricsVersion, state.deviceId) { metrics.series(state.deviceId) }
+    var healthMessage by remember { mutableStateOf<String?>(null) }
+    var healthMessageSuccess by remember { mutableStateOf(false) }
+    var healthJob by remember { mutableStateOf<Job?>(null) }
+    val fileSaver = rememberFileSaver()
+    val connectObservedAt = remember(session) { Clock.System.now().toEpochMilliseconds() }
+
+    // 每次信息刷新完成都采样一次；存储层按设备保留最近 50 个点。
+    LaunchedEffect(state.deviceId, state.loading, state.batteryPercent, state.uptimeSeconds) {
+        if (state.loading) return@LaunchedEffect
+        val percent = state.batteryPercent ?: return@LaunchedEffect
+        metrics.record(state.deviceId, percent, session.device.rssi)
+        metricsVersion++
     }
 
     LaunchedEffect(session, connected) {
@@ -1366,6 +1590,163 @@ private fun DetailScreen(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.md),
         ) {
+            item {
+                DeviceDashboardCard(
+                    detail = state,
+                    series = metricSeries,
+                    rssi = session.device.rssi,
+                    observedAtMillis = connectObservedAt,
+                    strings = strings,
+                    format = format,
+                    zoneOffsetMinutes = zoneOffsetMinutes,
+                    accent = MaterialTheme.colorScheme.primary,
+                    muted = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            item {
+                val result = healthState.result
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(
+                        modifier = Modifier.padding(DesignTokens.Spacing.md),
+                        verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs),
+                    ) {
+                        Text(strings.t(StringKey.HEALTH_TITLE), style = MaterialTheme.typography.titleMedium)
+                        if (healthState.running) {
+                            LinearProgressIndicator(
+                                progress = {
+                                    if (healthState.total > 0) {
+                                        healthState.completed.toFloat() / healthState.total
+                                    } else {
+                                        0f
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            Text(
+                                strings.t(
+                                    StringKey.HEALTH_RUNNING,
+                                    "done" to healthState.completed.toString(),
+                                    "total" to healthState.total.toString(),
+                                ),
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                            OutlinedButton(onClick = { healthJob?.cancel() }) {
+                                Text(strings.t(StringKey.HEALTH_CANCEL))
+                            }
+                        } else {
+                            Button(
+                                onClick = {
+                                    healthMessage = null
+                                    healthJob = scope.launchSafely(errorReporter, "health-check") {
+                                        healthCheck.run()
+                                    }
+                                },
+                            ) {
+                                Text(strings.t(StringKey.HEALTH_RUN))
+                            }
+                        }
+                        result?.let { checked ->
+                            val overallText = when {
+                                checked.abortedByLinkLoss -> strings.t(StringKey.HEALTH_OVERALL_ABORTED)
+                                checked.abnormalCount > 0 -> strings.t(
+                                    StringKey.HEALTH_OVERALL_ABNORMAL,
+                                    "count" to checked.abnormalCount.toString(),
+                                )
+                                checked.failedCount > 0 -> strings.t(
+                                    StringKey.HEALTH_OVERALL_FAILED,
+                                    "count" to checked.failedCount.toString(),
+                                )
+                                else -> strings.t(StringKey.HEALTH_OVERALL_OK)
+                            }
+                            Text(
+                                overallText,
+                                style = MaterialTheme.typography.titleSmall,
+                                color = when (checked.overall) {
+                                    HealthCheckStatus.OK -> status.success
+                                    HealthCheckStatus.ABNORMAL -> status.warning
+                                    else -> status.error
+                                },
+                            )
+                            checked.items.forEach { item ->
+                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text(
+                                        strings.t(item.type.labelKey()) + " · " +
+                                            strings.t(item.status.labelKey()),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = when (item.status) {
+                                            HealthCheckStatus.OK -> status.success
+                                            HealthCheckStatus.ABNORMAL -> status.warning
+                                            HealthCheckStatus.SKIPPED -> MaterialTheme.colorScheme.onSurfaceVariant
+                                            HealthCheckStatus.FAILED -> status.error
+                                        },
+                                    )
+                                    item.detail?.let {
+                                        Text(strings.render(it), style = MaterialTheme.typography.bodySmall)
+                                    }
+                                    item.errorCode?.let { code ->
+                                        Text(
+                                            strings.t(StringKey.HEALTH_DETAIL_DEVICE_REJECTED) + " ($code)",
+                                            style = MaterialTheme.typography.bodySmall,
+                                        )
+                                    }
+                                    item.suggestion?.let {
+                                        Text(strings.render(it), style = MaterialTheme.typography.bodySmall)
+                                    }
+                                }
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs)) {
+                                OutlinedButton(
+                                    onClick = {
+                                        clipboard.setText(
+                                            AnnotatedString(
+                                                healthReportText(checked, format, zoneOffsetMinutes, strings),
+                                            ),
+                                        )
+                                        healthMessageSuccess = true
+                                        healthMessage = strings.t(StringKey.HEALTH_COPIED)
+                                    },
+                                ) {
+                                    Text(strings.t(StringKey.DIAG_REPORT_COPY))
+                                }
+                                OutlinedButton(
+                                    onClick = {
+                                        val text = healthReportText(checked, format, zoneOffsetMinutes, strings)
+                                        scope.launchSafely(errorReporter, "health-check-save") {
+                                            val fileName = "valhalla-health-${checked.completedAtMillis}.txt"
+                                            val save = fileSaver.save(SaveableFile(fileName, text, "text/plain"))
+                                            healthMessageSuccess = save.status == FileSaveStatus.SAVED
+                                            healthMessage = when (save.status) {
+                                                FileSaveStatus.SAVED -> strings.t(
+                                                    StringKey.DIAG_REPORT_SAVE_SUCCESS,
+                                                    "name" to fileName,
+                                                    "bytes" to format.number(text.length.toLong()),
+                                                )
+
+                                                FileSaveStatus.CANCELLED -> strings.t(StringKey.DIAG_REPORT_SAVE_CANCELLED)
+                                                FileSaveStatus.UNAVAILABLE -> strings.t(StringKey.LOGS_SAVE_UNAVAILABLE)
+                                                FileSaveStatus.FAILED -> strings.t(
+                                                    StringKey.LOGS_SAVE_FAILED,
+                                                    "detail" to (save.message ?: strings.t(StringKey.UNKNOWN)),
+                                                )
+                                            }
+                                        }
+                                    },
+                                    enabled = !healthState.running,
+                                ) {
+                                    Text(strings.t(StringKey.HEALTH_SAVE))
+                                }
+                            }
+                        }
+                        healthMessage?.let { message ->
+                            Text(
+                                message,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (healthMessageSuccess) status.success else status.error,
+                            )
+                        }
+                    }
+                }
+            }
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs)) {
                     Text(
@@ -3520,8 +3901,16 @@ private fun OtaScreen(
     val scope = rememberCoroutineScope()
     val errorReporter = LocalErrorReporter.current
     val running = state is OtaState.Preparing || state is OtaState.Transferring || state is OtaState.Verifying
+    var wizardStep by remember { mutableStateOf(OtaWizardStep.SELECT) }
 
     LaunchedEffect(selection) { selection.refreshResume() }
+    LaunchedEffect(state) {
+        wizardStep = when (state) {
+            is OtaState.Preparing, is OtaState.Transferring, is OtaState.Verifying -> OtaWizardFlow.onRunStarted()
+            is OtaState.Succeeded, is OtaState.Failed, is OtaState.Aborted -> OtaWizardFlow.onTerminal()
+            OtaState.Idle -> wizardStep
+        }
+    }
     val terminal = state is OtaState.Succeeded || state is OtaState.Failed || state is OtaState.Aborted
     LaunchedEffect(terminal, state) {
         if (!terminal) return@LaunchedEffect
@@ -3641,13 +4030,35 @@ private fun OtaScreen(
             }
         }
 
+        val stepTitle = when (wizardStep) {
+            OtaWizardStep.SELECT -> strings.t(StringKey.OTA_STEP_SELECT)
+            OtaWizardStep.PRECHECK -> strings.t(StringKey.OTA_STEP_PRECHECK)
+            OtaWizardStep.CONFIRM -> strings.t(StringKey.OTA_STEP_CONFIRM)
+            OtaWizardStep.TRANSFER -> strings.t(StringKey.OTA_STEP_TRANSFER)
+            OtaWizardStep.RESULT -> strings.t(StringKey.OTA_STEP_RESULT)
+        }
+        Text(
+            strings.t(
+                StringKey.OTA_WIZARD_STEP,
+                "current" to wizardStep.index.toString(),
+                "title" to stepTitle,
+            ),
+            style = MaterialTheme.typography.titleSmall,
+        )
+
+        if (wizardStep == OtaWizardStep.SELECT) {
         Button(
             onClick = {
                 scope.launchSafely(errorReporter, "firmware-pick") {
+                    val before = selection.state.value.precheck
                     selection.pickAndPrecheck(
                         currentVersion = detailState.firmware,
                         currentModel = detailState.deviceInfo?.model,
                     )
+                    val after = selection.state.value
+                    if (after.packageName != null && after.precheck != null && after.precheck !== before) {
+                        wizardStep = OtaWizardStep.PRECHECK
+                    }
                 }
             },
             enabled = !running && !selectionState.picking && !selectionState.prechecking,
@@ -3854,7 +4265,197 @@ private fun OtaScreen(
                 }
             }
         }
+        }
 
+        if (wizardStep == OtaWizardStep.PRECHECK) {
+            if (selectionState.prechecking) {
+                LinearProgressIndicator(
+                    progress = { selectionState.precheckProgress },
+                    modifier = Modifier.fillMaxWidth().semantics {
+                        contentDescription = strings.t(
+                            StringKey.PRECHECK_PROGRESS,
+                            "percent" to (selectionState.precheckProgress * 100).toInt().toString(),
+                        )
+                        progressBarRangeInfo = ProgressBarRangeInfo(selectionState.precheckProgress, 0f..1f)
+                    },
+                    color = status.inProgress,
+                )
+                Text(
+                    strings.t(
+                        StringKey.PRECHECK_PROGRESS,
+                        "percent" to (selectionState.precheckProgress * 100).toInt().toString(),
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                TextButton(onClick = { selection.cancelPrecheck() }) {
+                    Text(strings.t(StringKey.CANCEL_PRECHECK))
+                }
+            }
+            val precheck = selectionState.precheck
+            if (precheck == null) {
+                Text(
+                    selectionState.error?.let { strings.render(it) }
+                        ?: strings.t(StringKey.FIRMWARE_NOT_PRECHECKED),
+                    color = if (selectionState.error != null) {
+                        status.error
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+            } else {
+                Text(
+                    strings.t(StringKey.OTA_PRECHECK_RULES),
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                OtaPrecheckRuleEvaluator.evaluate(precheck).forEach { rule ->
+                    val ruleLabel = when (rule.rule) {
+                        OtaPrecheckRule.FILE_STRUCTURE -> strings.t(StringKey.OTA_RULE_STRUCTURE)
+                        OtaPrecheckRule.SIZE_LIMIT -> strings.t(StringKey.OTA_RULE_SIZE)
+                        OtaPrecheckRule.DEVICE_MODEL -> strings.t(StringKey.OTA_RULE_MODEL)
+                        OtaPrecheckRule.VERSION_DIRECTION -> strings.t(StringKey.OTA_RULE_VERSION)
+                        OtaPrecheckRule.PAYLOAD_CRC -> strings.t(StringKey.OTA_RULE_CRC)
+                        OtaPrecheckRule.SIGNATURE -> strings.t(StringKey.OTA_RULE_SIGNATURE)
+                    }
+                    val blocking = rule.status == OtaPrecheckRuleStatus.BLOCKING
+                    Text(
+                        ruleLabel + " · " + strings.t(
+                            if (blocking) StringKey.OTA_RULE_BLOCKING else StringKey.OTA_RULE_PASSED,
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (blocking) status.error else status.success,
+                    )
+                    rule.detail?.let { detail ->
+                        Text(
+                            detail,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = status.error,
+                        )
+                    }
+                }
+                if (precheck.warnings.isNotEmpty()) {
+                    Text(
+                        strings.t(StringKey.OTA_PRECHECK_WARNINGS),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = status.warning,
+                    )
+                    precheck.warnings.forEach { warning ->
+                        Text(
+                            warning,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = status.warning,
+                        )
+                    }
+                }
+                Text(
+                    strings.t(
+                        if (precheck.passed) {
+                            StringKey.FIRMWARE_PRECHECK_PASSED
+                        } else {
+                            StringKey.FIRMWARE_PRECHECK_FAILED
+                        },
+                    ),
+                    color = if (precheck.passed) status.success else status.error,
+                )
+            }
+            selectionState.error?.let { message ->
+                Text(
+                    strings.render(message) + (selectionState.errorCode?.let { " ($it)" } ?: ""),
+                    color = status.error,
+                )
+            }
+            TextButton(
+                onClick = {
+                    scope.launchSafely(errorReporter, "firmware-recheck") {
+                        selection.recheck(
+                            currentVersion = detailState.firmware,
+                            currentModel = detailState.deviceInfo?.model,
+                        )
+                    }
+                },
+                enabled = !selectionState.prechecking,
+            ) {
+                Text(strings.t(StringKey.RECHECK_FIRMWARE))
+            }
+        }
+
+        if (wizardStep == OtaWizardStep.CONFIRM) {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(DesignTokens.Spacing.md),
+                    verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs),
+                ) {
+                    Text(
+                        strings.t(
+                            StringKey.OTA_CONFIRM_VERSION,
+                            "from" to (detailState.firmwareVersion ?: strings.t(StringKey.UNKNOWN)),
+                            "to" to (selectionState.version?.toString() ?: strings.t(StringKey.UNKNOWN)),
+                        ),
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Text(
+                        strings.t(StringKey.OTA_CURRENT_VERSION) + ": " +
+                            (detailState.firmwareVersion ?: strings.t(StringKey.UNKNOWN)),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Text(
+                        strings.t(StringKey.OTA_TARGET_VERSION) + ": " +
+                            (selectionState.version?.toString() ?: strings.t(StringKey.UNKNOWN)),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    val battery = detailState.batteryPercent
+                    Text(
+                        if (battery != null) {
+                            strings.t(StringKey.OTA_CONFIRM_BATTERY, "percent" to battery.toString())
+                        } else {
+                            strings.t(StringKey.OTA_CONFIRM_BATTERY_UNKNOWN)
+                        },
+                        color = if (battery != null && battery >= 50) {
+                            status.success
+                        } else {
+                            status.warning
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Text(
+                        strings.t(StringKey.OTA_CONFIRM_KEEP_CONNECTED),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Text(
+                        strings.t(StringKey.OTA_CONFIRM_RESUME_NOTE),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+            val resumePoint = selectionState.resumePoint
+            if (resumePoint != null && selectionState.canResume) {
+                Text(
+                    strings.t(
+                        StringKey.OTA_RESUME_FROM,
+                        "percent" to OtaWizardFlow.resumePercent(
+                            resumePoint.sentBytes.toLong(),
+                            resumePoint.totalBytes.toLong(),
+                        ).toString(),
+                    ),
+                    color = status.inProgress,
+                )
+            } else {
+                selectionState.resumeBlockedReason?.let { reason ->
+                    Text(
+                        strings.t(StringKey.OTA_RESUME_INVALID, "reason" to strings.render(reason)),
+                        color = status.warning,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                if (selectionState.resumeBlockedReason == null) {
+                    Text(
+                        strings.t(StringKey.OTA_RESULT_RESUME_NONE),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+        }
+
+        if (wizardStep == OtaWizardStep.TRANSFER || wizardStep == OtaWizardStep.RESULT) {
         when (val current = state) {
             OtaState.Idle -> Text(strings.t(StringKey.OTA_IDLE))
             is OtaState.Preparing -> Text(
@@ -3966,75 +4567,196 @@ private fun OtaScreen(
                 }
             }
         }
-
-        Spacer(modifier = Modifier.weight(1f))
-
-        Button(
-            onClick = {
-                val firmware = selection.firmware
-                if (firmware != null) {
-                    scope.launchSafely(errorReporter, "ota-start") {
-                        controller.startPackage(firmware, knownCrc16 = selectionState.computedCrc16)
-                    }
-                }
-            },
-            enabled = !running && selectionState.readyForOta,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(strings.t(StringKey.START_OTA))
-        }
-
-        OutlinedButton(
-            onClick = {
-                val firmware = selection.firmware
-                val point = selectionState.resumePoint
-                if (firmware != null && point != null) {
-                    scope.launchSafely(errorReporter, "ota-resume") {
-                        controller.startPackage(
-                            firmware,
-                            resumeFrom = point,
-                            knownCrc16 = selectionState.computedCrc16,
-                        )
-                    }
-                }
-            },
-            enabled = !running && selectionState.canResume,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            val point = selectionState.resumePoint
-            Text(
-                if (point != null) {
-                    strings.t(
-                        StringKey.RESUME_OTA_WITH_PROGRESS,
-                        "sent" to format.number(point.sentBytes),
-                        "total" to format.number(point.totalBytes),
+            if (wizardStep == OtaWizardStep.RESULT) {
+                val resultPoint = (state as? OtaState.Failed)?.resumePoint ?: selectionState.resumePoint
+                if (resultPoint != null) {
+                    Text(
+                        strings.t(
+                            StringKey.OTA_RESULT_RESUME_SAVED,
+                            "percent" to OtaWizardFlow.resumePercent(
+                                resultPoint.sentBytes.toLong(),
+                                resultPoint.totalBytes.toLong(),
+                            ).toString(),
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
                     )
                 } else {
-                    strings.t(StringKey.RESUME_OTA)
-                },
-            )
-        }
-
-        if (selectionState.resumePoint != null || selectionState.resumeBlockedReason != null) {
-            TextButton(onClick = { selection.clearResume() }, enabled = !running) {
-                Text(strings.t(StringKey.CLEAR_RESUME))
+                    Text(
+                        strings.t(StringKey.OTA_RESULT_RESUME_NONE),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
             }
         }
 
-        OutlinedButton(
-            onClick = { scope.launchSafely(errorReporter, "ota-abort") { controller.abort() } },
-            enabled = running,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(strings.t(StringKey.ABORT_OTA))
-        }
+        Spacer(modifier = Modifier.weight(1f))
 
-        OutlinedButton(
-            onClick = { controller.reset() },
-            enabled = !running,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(strings.t(StringKey.RESET_STATE))
+        when (wizardStep) {
+            OtaWizardStep.SELECT -> Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm),
+            ) {
+                OutlinedButton(
+                    onClick = {
+                        selection.clearSelection()
+                        onBack()
+                    },
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(strings.t(StringKey.OTA_CANCEL))
+                }
+                Button(
+                    onClick = {
+                        wizardStep = OtaWizardFlow.next(
+                            OtaWizardStep.SELECT,
+                            selectionReady = selectionState.packageName != null,
+                            precheckPassed = selectionState.precheck?.passed == true,
+                        )
+                    },
+                    enabled = selectionState.packageName != null &&
+                        !selectionState.picking && !selectionState.prechecking,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(strings.t(StringKey.OTA_NEXT))
+                }
+            }
+
+            OtaWizardStep.PRECHECK -> Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm),
+            ) {
+                TextButton(
+                    onClick = {
+                        wizardStep = OtaWizardFlow.previous(OtaWizardStep.PRECHECK, running)
+                    },
+                ) {
+                    Text(strings.t(StringKey.OTA_PREVIOUS))
+                }
+                OutlinedButton(
+                    onClick = {
+                        selection.clearSelection()
+                        onBack()
+                    },
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(strings.t(StringKey.OTA_CANCEL))
+                }
+                Button(
+                    onClick = {
+                        wizardStep = OtaWizardFlow.next(
+                            OtaWizardStep.PRECHECK,
+                            selectionReady = selectionState.packageName != null,
+                            precheckPassed = selectionState.precheck?.passed == true,
+                        )
+                    },
+                    enabled = selectionState.precheck?.passed == true && !selectionState.prechecking,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(strings.t(StringKey.OTA_NEXT))
+                }
+            }
+
+            OtaWizardStep.CONFIRM -> Column(
+                verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm),
+                ) {
+                    TextButton(
+                        onClick = {
+                            wizardStep = OtaWizardFlow.previous(OtaWizardStep.CONFIRM, running)
+                        },
+                    ) {
+                        Text(strings.t(StringKey.OTA_PREVIOUS))
+                    }
+                    Button(
+                        onClick = {
+                            val firmware = selection.firmware
+                            if (firmware != null) {
+                                scope.launchSafely(errorReporter, "ota-start") {
+                                    controller.startPackage(
+                                        firmware,
+                                        knownCrc16 = selectionState.computedCrc16,
+                                    )
+                                }
+                            }
+                        },
+                        enabled = !running && selectionState.readyForOta,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text(strings.t(StringKey.OTA_START_FRESH))
+                    }
+                    TextButton(
+                        onClick = {
+                            selection.clearSelection()
+                            onBack()
+                        },
+                    ) {
+                        Text(strings.t(StringKey.OTA_CANCEL))
+                    }
+                }
+                val resumePoint = selectionState.resumePoint
+                if (resumePoint != null && selectionState.canResume) {
+                    OutlinedButton(
+                        onClick = {
+                            val firmware = selection.firmware
+                            if (firmware != null) {
+                                scope.launchSafely(errorReporter, "ota-resume") {
+                                    controller.startPackage(
+                                        firmware,
+                                        resumeFrom = resumePoint,
+                                        knownCrc16 = selectionState.computedCrc16,
+                                    )
+                                }
+                            }
+                        },
+                        enabled = !running,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            strings.t(
+                                StringKey.OTA_RESUME_FROM,
+                                "percent" to OtaWizardFlow.resumePercent(
+                                    resumePoint.sentBytes.toLong(),
+                                    resumePoint.totalBytes.toLong(),
+                                ).toString(),
+                            ),
+                        )
+                    }
+                }
+            }
+
+            OtaWizardStep.TRANSFER -> OutlinedButton(
+                onClick = {
+                    scope.launchSafely(errorReporter, "ota-abort") { controller.abort() }
+                },
+                enabled = running,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(strings.t(StringKey.ABORT_OTA))
+            }
+
+            OtaWizardStep.RESULT -> Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm),
+            ) {
+                TextButton(
+                    onClick = {
+                        controller.reset()
+                        selection.clearSelection()
+                        wizardStep = OtaWizardFlow.previous(OtaWizardStep.RESULT, running = false)
+                    },
+                ) {
+                    Text(strings.t(StringKey.OTA_WIZARD_AGAIN))
+                }
+                Button(
+                    onClick = { onBack() },
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(strings.t(StringKey.OTA_WIZARD_DONE))
+                }
+            }
         }
     }
 }

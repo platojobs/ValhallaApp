@@ -176,3 +176,12 @@ xcodebuild -project iosApp/iosApp.xcodeproj -scheme iosApp \
 - 达到生产交付还需：自备 keystore 出签名包、完成真机清单、通过
   `VALHALLA_FIRMWARE_PUBKEY` / `-Pvalhalla.firmwarePublicKey` 注入生产 ECDSA 公钥、
   接入真实上报 SDK（可选）、补齐固件侧实现。
+
+## 8. iOS 完整 App 构建（v2.6.0）
+
+- 新增 CI job `ios-app-build`：先 `linkDebugFrameworkIosSimulatorArm64`，再
+  `xcodebuild build -project iosApp/iosApp.xcodeproj -scheme iosApp -sdk iphonesimulator
+  -configuration Debug -destination 'generic/platform=iOS Simulator'
+  ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO`；失败即红。
+- 本期不做启动冒烟、性能基准与脚手架脚本；如需再单独立项。
+- 本地等价命令已验证通过，远程 runner 结论以待推送后的 Actions 记录为准。

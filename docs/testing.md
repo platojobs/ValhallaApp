@@ -244,3 +244,12 @@ CI 与本地使用同一套 Gradle 命令，唯一差异是 `JAVA_HOME` 由 `set
 3. iOS/Android 平台特有的 `FrameLink` 实现（`BleFrameLink`）不在测试桩覆盖范围。
 4. GitHub Actions 工作流尚未在远程 runner 实跑验证（本地只验证了 YAML 语法与命令等价性）；
    首次推送后需检查 Actions 运行结果。
+
+## 10. v2.6.0 新增逻辑测试
+
+- `DeviceHealthCheckTest`：七项全正常、低电量+心跳差异、能力不支持跳过、单项超时继续、
+  链路断开中止、设备拒绝错误码、失败归类、报告脱敏。
+- `OtaWizardTest`：步骤推进条件、传输/结果不可前进、回退规则、取消语义、断点百分比、
+  预检规则映射与全通过。
+- `DeviceMetricSamplesTest`：采样顺序、50 点淘汰、3 点阈值、空值不写、编码往返、
+  损坏回退、设备隔离。

@@ -140,3 +140,13 @@ Keystore/Keychain 常量；`PrivacyDisclosureTest` 断言隐私页条目与清�
 - 两者均为行式编码（百分号转义），损坏数据回退为空；
 - 固件库只保存元信息与平台文件引用，不缓存二进制；事件时间线每设备 100 条环形；
 - 通知开关与低电量阈值存入既有应用偏好（`SettingsKeys.NOTIFY_*`），JVM 恒为内存实现。
+
+## 9. 设备指标采样（v2.6.0）
+
+| 数据 | Android | iOS | JVM | 持久化 |
+| --- | --- | --- | --- | --- |
+| 设备指标采样 | `SharedPreferences(valhalla_device_metrics)`，键 `metrics.<deviceId>` | `NSUserDefaults`，键 `valhalla.metrics.<deviceId>` | 内存实现 | Android/iOS 是 |
+
+- 内容为 `timestamp|batteryPercent|rssi` 行式编码（`v1` 头），每设备最多 50 点，超出淘汰最旧；
+- 空值不写入，编码损坏或版本不符回退为空；读取走本机键值存储，跨进程可读；
+- 仪表盘每次刷新采样一次，不足 3 点只显示当前值，不画折线。

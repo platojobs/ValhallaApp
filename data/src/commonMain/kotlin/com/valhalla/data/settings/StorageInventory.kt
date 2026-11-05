@@ -25,6 +25,9 @@ enum class StorageItem {
 
     /** 设备事件时间线：每设备最近 100 条，跨进程可读。 */
     DEVICE_EVENTS,
+
+    /** 设备指标采样：电量与 RSSI，每设备最近 50 个点。 */
+    DEVICE_METRICS,
 }
 
 enum class StoragePlatform {
@@ -102,6 +105,11 @@ object StorageKeys {
     const val ANDROID_EVENTS_PREFS = "valhalla_device_events"
     const val ANDROID_EVENTS_KEY_PREFIX = "device."
     const val IOS_EVENTS_KEY_PREFIX = "valhalla.events."
+
+    // 设备指标采样（每设备一个键，仅数值，不含可识别信息）
+    const val ANDROID_METRICS_PREFS = "valhalla_device_metrics"
+    const val ANDROID_METRICS_KEY_PREFIX = "metrics."
+    const val IOS_METRICS_KEY_PREFIX = "valhalla.metrics."
 }
 
 /** 各平台真实的存储位置清单。 */
@@ -279,6 +287,27 @@ object StorageInventory {
             item = StorageItem.DEVICE_EVENTS,
             platform = StoragePlatform.JVM,
             location = "In-memory (InMemoryDeviceEventStore)",
+            keys = emptyList(),
+            persistent = false,
+        ),
+        StorageLocation(
+            item = StorageItem.DEVICE_METRICS,
+            platform = StoragePlatform.ANDROID,
+            location = "SharedPreferences(${StorageKeys.ANDROID_METRICS_PREFS})",
+            keys = listOf("${StorageKeys.ANDROID_METRICS_KEY_PREFIX}<deviceId>"),
+            persistent = true,
+        ),
+        StorageLocation(
+            item = StorageItem.DEVICE_METRICS,
+            platform = StoragePlatform.IOS,
+            location = "NSUserDefaults",
+            keys = listOf("${StorageKeys.IOS_METRICS_KEY_PREFIX}<deviceId>"),
+            persistent = true,
+        ),
+        StorageLocation(
+            item = StorageItem.DEVICE_METRICS,
+            platform = StoragePlatform.JVM,
+            location = "In-memory (InMemoryDeviceMetricStore)",
             keys = emptyList(),
             persistent = false,
         ),

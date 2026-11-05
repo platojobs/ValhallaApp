@@ -598,6 +598,7 @@ private fun storageDescriptionKey(item: StorageItem): StringKey = when (item) {
     StorageItem.BLE_PERMISSION_FLAG -> StringKey.PRIVACY_ITEM_PERMISSION_FLAG
     StorageItem.FIRMWARE_LIBRARY -> StringKey.PRIVACY_ITEM_FIRMWARE_LIBRARY
     StorageItem.DEVICE_EVENTS -> StringKey.PRIVACY_ITEM_EVENTS
+    StorageItem.DEVICE_METRICS -> StringKey.PRIVACY_ITEM_METRICS
 }
 
 internal fun platformDisplayName(): String = when (currentStoragePlatform()) {

@@ -133,6 +133,43 @@ jobs:
             composeApp/build/reports/**
           if-no-files-found: ignore
 
+  ios-app-build:
+    name: iOS 完整 App 构建（模拟器）
+    runs-on: macos-14
+    timeout-minutes: 45
+    # 失败即红：完整 App 构建不允许静默变绿。
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+      - name: 链接 iOS 模拟器 Framework
+        run: ./gradlew :composeApp:linkDebugFrameworkIosSimulatorArm64 --stacktrace 2>&1 | tee ios-app-framework.log
+      - name: xcodebuild build（iphonesimulator）
+        run: |
+          xcodebuild build \
+            -project iosApp/iosApp.xcodeproj \
+            -scheme iosApp \
+            -sdk iphonesimulator \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee ios-app-build.log
+      - name: 上传日志（失败时）
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-ios-app
+          path: |
+            ios-app-framework.log
+            ios-app-build.log
+            composeApp/build/reports/**
+          if-no-files-found: ignore
+
   android-instrumented:
     name: Android 运行时验签（instrumented）
     runs-on: ubuntu-latest
