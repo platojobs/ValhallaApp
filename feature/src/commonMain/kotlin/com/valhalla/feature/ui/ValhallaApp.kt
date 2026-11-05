@@ -71,6 +71,7 @@ import com.valhalla.core.profile.DeviceProfileRepository
 import com.valhalla.core.profile.OtaOutcome
 import com.valhalla.feature.error.ErrorReporter
 import com.valhalla.feature.error.LocalErrorReporter
+import com.valhalla.feature.error.installUncaughtExceptionBridge
 import com.valhalla.feature.error.launchSafely
 import com.valhalla.core.protocol.CommandType
 import com.valhalla.core.protocol.message.OtaAbortReason
@@ -190,7 +191,9 @@ fun ValhallaApp() {
     var preferences by remember { mutableStateOf(AppPreferenceStore.load(settingsStore)) }
     val language = resolveLanguage(preferences.language, Locale.current.language)
     val strings = remember(language) { StringResolver(language) }
-    val errorReporter = remember { ErrorReporter() }
+    val errorReporter = remember {
+        ErrorReporter().also { installUncaughtExceptionBridge(it) }
+    }
 
     CompositionLocalProvider(
         LocalStrings provides strings,

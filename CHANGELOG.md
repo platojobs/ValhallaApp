@@ -2,6 +2,39 @@
 
 本文件记录 ValhallaApp 的版本演进，按「阶段完成即提交 + 打 annotated tag」的节奏维护。
 
+## v2.2.0 - 跨端运行时验签与公钥注入
+
+### 新增
+
+- **跨端运行时验签**：ECDSA 向量抽为 `EcdsaTestVectors` 单一来源，JVM、Android
+  instrumented（真实 `java.security.Signature`）与 iOS 模拟器（真实
+  `SecKeyVerifySignature`）执行同一批 OpenSSL 向量；Android 测试同时覆盖篡改摘要/签名、
+  证书/DER 注入、DER↔raw 与 P-384 拒绝。
+- **CI 增加两个失败即红的 job**：`android-instrumented`（ubuntu + KVM + AVD API 30）
+  与 `ios-runtime-tests`（macos-14 运行 `:core:iosSimulatorArm64Test`），未使用
+  `continue-on-error`。
+- **构建期公钥注入**：`VALHALLA_FIRMWARE_PUBKEY`（环境变量）优先于
+  `valhalla.firmwarePublicKey`（Gradle property），生成 `firmware/signing-key.pem`
+  （Android assets / JVM classpath / iOS 资源）与编译期常量 `BuildInjectedFirmwareKey`；
+  未注入保持 `WARN`，非法公钥失败关闭；关于页展示当前是否已配置。
+- **未捕获异常桥接**：Android/JVM `Thread.setDefaultUncaughtExceptionHandler`、
+  iOS `NSSetUncaughtExceptionHandler` 接入 `ErrorReporter`，仅本地记录并脱敏投递。
+- **脱敏性能护栏**：1 MB 混合敏感文本过滤耗时上限测试（本机 208ms，上限 5s）。
+
+### 测试
+
+- 跨端向量来源单一化后，JVM 493 → 501 项；新增 `FirmwareKeyInjectionTest`（优先级）、
+  `FirmwarePrecheckFactoryJvmTest`（注入成功/未注入 `WARN`/非法公钥失败关闭/证书等价）
+  与 `SensitiveTextRedactionPerformanceTest`；
+- iOS 模拟器运行时 `:core:iosSimulatorArm64Test` 300 项通过（含 6 项 ECDSA 运行时用例）；
+- Android instrumented 7 项 ECDSA 运行时用例。
+
+### 文档
+
+- 新增 [release-notes/v2.2.0.md](docs/release-notes/v2.2.0.md)，更新 architecture / firmware /
+  delivery / README / 文档索引；
+- 明确标注：仓库不含生产密钥；未接真实远端 SDK；真机渲染、朗读、OTA 与崩溃演练未验证。
+
 ## v2.1.0 - 生产验签与无障碍
 
 ### 新增

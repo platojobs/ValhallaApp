@@ -477,6 +477,15 @@ CompositionLocalProvider(LocalStrings) → 全部 Composable 页面
    字段级脱敏（`SensitiveTextRedaction`），关闭时投递剩余批次并调用 `close`。
    默认装配 `NoopRemoteErrorReporter`，**未接任何真实远端 SDK**；接入只需实现
    `RemoteErrorReporter` 并在入口构造调度器，无需改动业务代码。
+5. **未捕获异常桥接（v2.2.0）**：`installUncaughtExceptionBridge(ErrorReporter)` 在根界面
+   安装一次；Android/JVM 使用 `Thread.setDefaultUncaughtExceptionHandler`，iOS 使用
+   `NSSetUncaughtExceptionHandler`。桥接只记录并脱敏投递，随后调用原处理器，保持系统
+   崩溃流程；iOS 仅覆盖 Objective-C 异常，Kotlin/Native 未捕获异常不走该回调。
+6. **跨端验签测试（v2.2.0）**：共享向量 `EcdsaTestVectors` 位于 `core` commonMain，
+   JVM 测试读取同一对象；Android instrumented（`core/src/androidInstrumentedTest`）
+   在真实 Android 运行时执行 `java.security.Signature`；iOS 模拟器
+   （`:core:iosSimulatorArm64Test`）执行 `SecKeyVerifySignature`。CI 两个 job 失败即红，
+   不使用 `continue-on-error`，避免「推断了但没跑」的静默通过。
 
 ### 9.3 状态机收敛清单
 

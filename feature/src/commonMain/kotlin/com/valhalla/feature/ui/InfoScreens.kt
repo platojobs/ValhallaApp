@@ -27,6 +27,7 @@ import com.valhalla.data.settings.StorageInventory
 import com.valhalla.feature.i18n.AppLanguageMode
 import com.valhalla.feature.i18n.LocalStrings
 import com.valhalla.feature.i18n.ResolvedLanguage
+import com.valhalla.feature.firmware.rememberFirmwareSigningKeyPem
 import com.valhalla.feature.i18n.StringKey
 import com.valhalla.feature.theme.DesignTokens
 import com.valhalla.feature.theme.ThemeMode
@@ -142,6 +143,7 @@ fun SettingsScreen(
 @Composable
 fun AboutScreen(onBack: () -> Unit) {
     val strings = LocalStrings.current
+    val firmwareKeyConfigured = rememberFirmwareSigningKeyPem()?.isNotBlank() == true
     InfoScreen(title = strings.t(StringKey.ABOUT_TITLE), onBack = onBack) {
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(
@@ -155,6 +157,15 @@ fun AboutScreen(onBack: () -> Unit) {
                 Text(strings.t(StringKey.ABOUT_VERSION, "version" to AppBuildInfo.VERSION_NAME, "code" to AppBuildInfo.VERSION_CODE.toString()))
                 Text(strings.t(StringKey.ABOUT_BUILD, "channel" to AppBuildInfo.BUILD_CHANNEL))
                 Text(strings.t(StringKey.ABOUT_PLATFORM, "platform" to platformDisplayName()))
+                Text(
+                    strings.t(
+                        if (firmwareKeyConfigured) {
+                            StringKey.ABOUT_FIRMWARE_KEY_CONFIGURED
+                        } else {
+                            StringKey.ABOUT_FIRMWARE_KEY_MISSING
+                        },
+                    ),
+                )
             }
         }
         Text(

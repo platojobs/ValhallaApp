@@ -75,13 +75,17 @@
 - 生产装配：`FirmwarePrecheckFactory.production(pem)` 返回
   `EcdsaP256FirmwareVerifier` + `REQUIRE`；公钥配置存在但无法解析时使用
   全部拒绝的验签器并保持 `REQUIRE`（失败关闭），不会静默放行未签名固件。
-- **公钥注入方式**（仓库不内置任何生产密钥）：
-  - Android：`assets/firmware/signing-key.pem`
-  - iOS：app bundle `firmware/signing-key.pem`
-  - JVM：classpath `firmware/signing-key.pem`
-  - 文件内容支持 `-----BEGIN PUBLIC KEY-----`（SPKI）或
-    `-----BEGIN CERTIFICATE-----`（X.509）；私钥 PEM 会被明确拒绝。
-  - 未注入时预检器无验签器、策略为 `WARN`（开发/联调默认），文档与交付清单均标注此状态。
+- **构建期公钥注入**（v2.2.0，仓库不内置任何生产密钥）：
+  - 优先级：环境变量 `VALHALLA_FIRMWARE_PUBKEY` > Gradle property
+    `valhalla.firmwarePublicKey` > 缺省；
+  - `generateFirmwareKey` 生成 `firmware/signing-key.pem`：
+    Android assets、JVM classpath、iOS 资源目录（iOS 另有编译期常量兜底）；
+  - 内容支持 `-----BEGIN PUBLIC KEY-----`（SPKI）或 `-----BEGIN CERTIFICATE-----`
+    （X.509）；私钥 PEM 会被明确拒绝；
+  - 未注入时策略为 `WARN`（开发/联调默认），关于页显示「未配置」；
+  - 注入但解析失败时仍为失败关闭（拒绝全部固件）。
+- **跨端运行时验证（v2.2.0）**：`EcdsaTestVectors` 为唯一向量来源；
+  Android instrumented 与 iOS 模拟器测试真实执行各自平台加密库，不再是「仅编译链接」的推断。
 - `HmacSha256TestVerifier` 保留给测试与模拟器，生产装配不再引用。
 - 未知算法编号 → `SignatureAlgorithmUnsupported`；签名段长度不符/被截断 →
   `SignatureSectionInvalid`。
@@ -200,7 +204,9 @@ FirmwarePrechecker(
 ```
 
 应用装配使用 `FirmwarePrecheckFactory.production(rememberFirmwareSigningKeyPem())`：
-注入公钥后为 ECDSA + `REQUIRE`；未注入时为 `WARN`，并在交付文档中标注为「生产密钥未配置」。
+注入公钥后为 ECDSA + `REQUIRE`；未注入时为 `WARN`，关于页显示「未配置验签公钥」。
+`rememberFirmwareSigningKeyPem()` 的平台读取顺序为：构建期生成的资源/classpath →
+`BuildInjectedFirmwareKey` 常量；两者都缺失返回 null。
 测试/模拟器仍可显式使用 `HmacSha256TestVerifier`。
 
 ## 4. 断点持久化

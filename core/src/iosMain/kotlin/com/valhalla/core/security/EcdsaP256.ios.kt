@@ -62,11 +62,45 @@ private class AppleEcdsaPublicKey(private val key: SecKeyRef) : PlatformEcdsaKey
 
 internal actual fun platformLoadEcdsaKeyFromSpki(der: ByteArray): PlatformEcdsaKey {
     val point = EcdsaPublicKeyEncoding.extractP256PointFromSpki(der)
-        ?: throw EcdsaKeyException(
-            EcdsaFailureCode.PUBLIC_KEY_PARSE,
+    if (point == null) {
+        // 合法但非 P-256 的 EC 公钥（如 P-384/P-521）应归类为「不支持」而非「解析失败」，
+        // 与 JVM/Android 的 KeyFactory + 曲线校验保持同一失败语义。
+        val code = if (der.containsAny(NON_P256_CURVE_OIDS)) {
+            EcdsaFailureCode.PUBLIC_KEY_UNSUPPORTED
+        } else {
+            EcdsaFailureCode.PUBLIC_KEY_PARSE
+        }
+        throw EcdsaKeyException(
+            code,
             "SPKI 中未找到 P-256 公钥点（需 65 字节 04||X||Y）",
         )
+    }
     return loadKey(point, "SPKI 公钥")
+}
+
+private val NON_P256_CURVE_OIDS = listOf(
+    // 1.3.132.0.34 = secp384r1
+    byteArrayOf(0x06, 0x05, 0x2B, 0x81.toByte(), 0x04, 0x00, 0x22),
+    // 1.3.132.0.35 = secp521r1
+    byteArrayOf(0x06, 0x05, 0x2B, 0x81.toByte(), 0x04, 0x00, 0x23),
+)
+
+private fun ByteArray.containsAny(patterns: List<ByteArray>): Boolean =
+    patterns.any { pattern -> containsSubArray(pattern) }
+
+private fun ByteArray.containsSubArray(pattern: ByteArray): Boolean {
+    if (pattern.isEmpty() || pattern.size > size) return false
+    for (start in 0..(size - pattern.size)) {
+        var matched = true
+        for (offset in pattern.indices) {
+            if (this[start + offset] != pattern[offset]) {
+                matched = false
+                break
+            }
+        }
+        if (matched) return true
+    }
+    return false
 }
 
 internal actual fun platformLoadEcdsaKeyFromCertificate(der: ByteArray): PlatformEcdsaKey {

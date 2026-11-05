@@ -7,6 +7,80 @@ plugins {
     alias(libs.plugins.compose.compiler)
 }
 
+/**
+ * 构建期固件验签公钥注入。
+ *
+ * 优先级：环境变量 `VALHALLA_FIRMWARE_PUBKEY` > Gradle property
+ * `valhalla.firmwarePublicKey` > 缺省（不注入）。
+ *
+ * 注入后同时生成：
+ * - `firmware/signing-key.pem` 资源（Android assets / JVM classpath / iOS test resources）；
+ * - `BuildInjectedFirmwareKey` 常量（iOS 静态 framework 不打包资源时的兜底）。
+ *
+ * 仓库不包含任何真实公钥或私钥；未注入时生成空常量，运行时回退到 v2.1.0 的 `WARN` 策略。
+ */
+val firmwareKeyEnv = providers.environmentVariable("VALHALLA_FIRMWARE_PUBKEY")
+val firmwareKeyProperty = providers.gradleProperty("valhalla.firmwarePublicKey")
+val firmwareKeyOutputDir = layout.buildDirectory.dir("generated/firmware")
+val firmwareKeyResourcesDir = firmwareKeyOutputDir.map { it.dir("resources") }
+val firmwareKeyKotlinDir = firmwareKeyOutputDir.map { it.dir("kotlin") }
+
+val generateFirmwareKey by tasks.registering {
+    inputs.property("firmwareKeyFromEnvironment", firmwareKeyEnv.orElse(""))
+    inputs.property("firmwareKeyFromGradleProperty", firmwareKeyProperty.orElse(""))
+    outputs.dir(firmwareKeyOutputDir)
+
+    doLast {
+        val outputDir = firmwareKeyOutputDir.get().asFile
+        outputDir.deleteRecursively()
+
+        val envValue = firmwareKeyEnv.orNull?.takeIf { it.isNotBlank() }
+        val propertyValue = firmwareKeyProperty.orNull?.takeIf { it.isNotBlank() }
+        val selected = envValue ?: propertyValue
+        val source = when {
+            envValue != null -> "environment"
+            propertyValue != null -> "gradle-property"
+            else -> "none"
+        }
+
+        val normalized = selected
+            ?.replace("\\n", "\n")
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+
+        val resourcesDir = outputDir.resolve("resources/firmware").apply { mkdirs() }
+        val kotlinDir = outputDir.resolve("kotlin/com/valhalla/feature/firmware").apply { mkdirs() }
+
+        if (normalized != null) {
+            resourcesDir.resolve("signing-key.pem").writeText(normalized + "\n")
+        }
+
+        val escaped = normalized
+            ?.replace("\\", "\\\\")
+            ?.replace("\"", "\\\"")
+            ?.replace("\r", "")
+            ?.replace("\n", "\\n")
+            .orEmpty()
+
+        kotlinDir.resolve("BuildInjectedFirmwareKey.kt").writeText(
+            """
+            package com.valhalla.feature.firmware
+
+            /**
+             * 由 Gradle 任务 `generateFirmwareKey` 生成，请勿手改。
+             * 来源：$source；空字符串表示构建期未注入公钥。
+             */
+            internal object BuildInjectedFirmwareKey {
+                const val PEM: String = "$escaped"
+            }
+
+            """.trimIndent(),
+        )
+
+        logger.lifecycle("Firmware signing key injection: source=$source, present=${normalized != null}")
+    }
+}
+
 kotlin {
     androidTarget {
         compilerOptions {
@@ -24,6 +98,10 @@ kotlin {
     iosSimulatorArm64()
 
     sourceSets {
+        getByName("commonMain").kotlin.srcDir(firmwareKeyKotlinDir)
+        getByName("jvmMain").resources.srcDir(firmwareKeyResourcesDir)
+        getByName("iosArm64Main").resources.srcDir(firmwareKeyResourcesDir)
+        getByName("iosSimulatorArm64Main").resources.srcDir(firmwareKeyResourcesDir)
         commonMain.dependencies {
             implementation(project(":core"))
             implementation(project(":data"))
@@ -50,6 +128,8 @@ android {
     namespace = "com.valhalla.feature"
     compileSdk = libs.versions.androidCompileSdk.get().toInt()
 
+    sourceSets.getByName("main").assets.srcDir(firmwareKeyResourcesDir)
+
     defaultConfig {
         minSdk = libs.versions.androidMinSdk.get().toInt()
     }
@@ -58,4 +138,14 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+}
+
+tasks.matching { it.name.startsWith("compile") && it.name.contains("Kotlin") }.configureEach {
+    dependsOn(generateFirmwareKey)
+}
+tasks.matching {
+    it.name.endsWith("ProcessResources") ||
+        (it.name.startsWith("merge") && it.name.endsWith("Assets"))
+}.configureEach {
+    dependsOn(generateFirmwareKey)
 }

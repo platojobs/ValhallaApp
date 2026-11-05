@@ -4,6 +4,7 @@ package com.valhalla.core.security
 
 import com.valhalla.core.firmware.EcdsaP256FirmwareVerifier
 import com.valhalla.core.protocol.Hex
+import com.valhalla.core.security.testdata.EcdsaTestVectors
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
@@ -12,59 +13,24 @@ import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 /**
- * ECDSA-P256 验签与格式对齐测试。
+ * ECDSA-P256 验签与格式对齐测试（JVM 分支）。
  *
- * 测试向量由 **OpenSSL 3** 独立生成（`openssl pkeyutl -sign -in digest.bin`），
- * 摘要为原始 32 字节 SHA-256，签名格式为 DER/X9.62：
- *
- * - 公钥/cert 仅用于测试，不得进入生产包；
- * - 同一组向量在 JVM（`NONEwithECDSA`）、Android（`java.security`）、
- *   iOS（`SecKeyVerifySignature(...DigestX962SHA256)`）上应得到一致结果；
- *   本环境实际执行的是 JVM 分支，其余两支只完成编译与链接。
+ * 测试向量统一来自 [EcdsaTestVectors]：同一份常量同时供 Android instrumented 与
+ * iOS 模拟器运行时测试使用，保证三端不是各写一套数据。
  */
 class EcdsaP256VerifierTest {
 
-    private val publicKeyPem = """
-        -----BEGIN PUBLIC KEY-----
-        MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEWXWes/sli2RbqBvrh8XJjxoqEG9U
-        hImkFXqNjdLEQwzeHuLAidPNy1Qtt895nkOTUppNHfii/mVVw4GY/C/CnQ==
-        -----END PUBLIC KEY-----
-    """.trimIndent()
+    private val publicKeyPem = EcdsaTestVectors.PUBLIC_KEY_PEM
+    private val certificatePem = EcdsaTestVectors.CERTIFICATE_PEM
+    private val p384PublicKeyPem = EcdsaTestVectors.P384_PUBLIC_KEY_PEM
 
-    private val certificatePem = """
-        -----BEGIN CERTIFICATE-----
-        MIIBhTCCASygAwIBAgIUf18XfofjsddqGFeocSu3BvMsS68wCgYIKoZIzj0EAwIw
-        KTEnMCUGA1UEAwweVmFsaGFsbGEgVGVzdCBGaXJtd2FyZSBTaWduaW5nMB4XDTI2
-        MTEwNTAwMDgxOVoXDTM2MTEwMjAwMDgxOVowKTEnMCUGA1UEAwweVmFsaGFsbGEg
-        VGVzdCBGaXJtd2FyZSBTaWduaW5nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE
-        WXWes/sli2RbqBvrh8XJjxoqEG9UhImkFXqNjdLEQwzeHuLAidPNy1Qtt895nkOT
-        UppNHfii/mVVw4GY/C/CnaMyMDAwHQYDVR0OBBYEFPKs26S8VUoO7VNmI5BWQrin
-        cxnFMA8GA1UdEwEB/wQFMAMBAf8wCgYIKoZIzj0EAwIDRwAwRAIgUpjFyE+zTmjT
-        wCBoSPDYnb4lODfKsz30eawxuO7jUy0CIBaoeqJf/qngqH+gtV1T8OmDEKBh7Cv5
-        v67LEY7NgKAb
-        -----END CERTIFICATE-----
-    """.trimIndent()
+    private val message1 = EcdsaTestVectors.VECTOR_1.message
+    private val digest1 = EcdsaTestVectors.VECTOR_1.digestHex
+    private val signature1 = EcdsaTestVectors.VECTOR_1.signatureHex
 
-    /** P-384 公钥，用于验证曲线白名单。 */
-    private val p384PublicKeyPem = """
-        -----BEGIN PUBLIC KEY-----
-        MHYwEAYHKoZIzj0CAQYFK4EEACIDYgAE0TxUcY1BxR/7nzjbv26JVxjb5nPPRs4t
-        NXokZKPA/PbXWWcOQbPk+6674QnrOKP4qVYc2e7L+CVGfdJdsshZrbIsOAdZLLrf
-        NGSlxxCLSZoNHM+3OzGrnaWfRjulGPqM
-        -----END PUBLIC KEY-----
-    """.trimIndent()
-
-    private val message1 = "valhalla-ecdsa-test-vector-1"
-    private val digest1 = "aa0b3dcd03296f9e6b2073455f1721eb39534746a8a627abce2f2a99a5ef2e5d"
-    private val signature1 =
-        "30450221008a6af213d443e3b16549b1b497eaee97dd7226e1fc52ee65311e392bfb234b87" +
-            "022027178caeef2d510c5e786e6315ce35b5608b28313f9516b70c29ab38e377299e"
-
-    private val message2 = "valhalla-ecdsa-test-vector-2"
-    private val digest2 = "5338e9a61e427a555b8bb212b4afb49c027918a286282d8787fb590144f223a6"
-    private val signature2 =
-        "3045022100876d2333e7c3831bec73aa54ce83251bb410632e93573d2950ace168a1707494" +
-            "02203d48b85f4e98b0e49c07f133b8fe924cd6322d3e90b0e23735d2954527d7d3b8"
+    private val message2 = EcdsaTestVectors.VECTOR_2.message
+    private val digest2 = EcdsaTestVectors.VECTOR_2.digestHex
+    private val signature2 = EcdsaTestVectors.VECTOR_2.signatureHex
 
     @Test
     fun `测试向量摘要确实来自 SHA-256`() {
@@ -185,15 +151,7 @@ class EcdsaP256VerifierTest {
     @Test
     fun `私钥 PEM 被拒绝加载`() {
         val error = assertFailsWith<EcdsaKeyException> {
-            EcdsaP256Verifier.fromPem(
-                """
-                -----BEGIN PRIVATE KEY-----
-                MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgBmjv6/k/KKZBIaO2
-                RPq2xxLHrtH9I+kvhUN6owM73oahRANCAARZdZ6z+yWLZFuoG+uHxcmPGioQb1SE
-                iaQVeo2N0sRDDN4e4sCJ083LVC23z3meQ5NSmk0d+KL+ZVXDgZj8L8Kd
-                -----END PRIVATE KEY-----
-                """.trimIndent(),
-            )
+            EcdsaP256Verifier.fromPem(EcdsaTestVectors.PRIVATE_KEY_PEM)
         }
         assertEquals(EcdsaFailureCode.PUBLIC_KEY_PARSE, error.code)
     }
@@ -235,12 +193,7 @@ class EcdsaP256VerifierTest {
         )
     }
 
-    private fun certificateDer(): ByteArray = pemBodyToDer(certificatePem)
+    private fun certificateDer(): ByteArray = EcdsaTestVectors.certificateDer()
 
-    private fun pemBodyToDer(pem: String): ByteArray {
-        val body = pem.lines()
-            .filterNot { it.startsWith("-----") || it.isBlank() }
-            .joinToString(separator = "")
-        return kotlin.io.encoding.Base64.decode(body)
-    }
+    private fun pemBodyToDer(pem: String): ByteArray = EcdsaTestVectors.pemBodyToDer(pem)
 }

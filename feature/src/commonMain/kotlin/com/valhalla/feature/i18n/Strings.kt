@@ -711,6 +711,14 @@ object AppStrings {
             "Build: Kotlin Multiplatform · Compose Multiplatform · {platform}",
         ),
         StringKey.ABOUT_PLATFORM to StringsEntry("运行平台：{platform}", "Platform: {platform}"),
+        StringKey.ABOUT_FIRMWARE_KEY_CONFIGURED to StringsEntry(
+            "固件验签公钥：已配置",
+            "Firmware signing key: configured",
+        ),
+        StringKey.ABOUT_FIRMWARE_KEY_MISSING to StringsEntry(
+            "固件验签公钥：未配置（固件升级仅告警，不阻断）",
+            "Firmware signing key: not configured (updates warn only)",
+        ),
         StringKey.ABOUT_LICENSE_TITLE to StringsEntry("开源许可", "Open-source licenses"),
         StringKey.ABOUT_LICENSE_BODY to StringsEntry(
             "本应用使用 Kotlin、Kotlinx Coroutines、Compose Multiplatform（Apache License 2.0）以及平台蓝牙框架。完整许可见各依赖仓库的 LICENSE 文件。",
