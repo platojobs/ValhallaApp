@@ -387,6 +387,10 @@ object AppStrings {
             "升级已中止：{reason}（已发送 {sent}/{total} 字节）",
             "Update aborted: {reason} ({sent}/{total} bytes sent)",
         ),
+        StringKey.OTA_PAUSED_SAFE_POINT to StringsEntry(
+            "队列已暂停，当前设备停在安全点（已发送 {sent}/{total} 字节），断点已保留。",
+            "Queue paused at a safe point ({sent}/{total} bytes sent); the checkpoint is kept.",
+        ),
         StringKey.OTA_FAILED to StringsEntry(
             "升级失败：{reason}。请按原因处理后重试。",
             "Update failed: {reason}. Resolve the cause and retry.",
@@ -1777,6 +1781,226 @@ object AppStrings {
             "条目：{names}",
             "Entries: {names}",
         ),
+
+        // ---- 批量操作（v2.9.0） ----
+        StringKey.BATCH_TITLE to StringsEntry("批量操作", "Batch operations"),
+        StringKey.BATCH_HINT to StringsEntry(
+            "串行执行，避免蓝牙并发冲突；单台失败只标记该台并继续下一台。",
+            "Runs serially to avoid Bluetooth contention; a failed device is marked and the batch continues.",
+        ),
+        StringKey.BATCH_TARGETS to StringsEntry("选择设备", "Select devices"),
+        StringKey.BATCH_KIND_HEALTH to StringsEntry("批量体检", "Batch health check"),
+        StringKey.BATCH_KIND_PRESET to StringsEntry("批量应用预设", "Apply preset in batch"),
+        StringKey.BATCH_PRESET_LABEL to StringsEntry("配置预设", "Configuration preset"),
+        StringKey.BATCH_PRESET_EMPTY to StringsEntry(
+            "暂无预设，请先在设备页保存一个预设。",
+            "No presets yet. Save one from a device page first.",
+        ),
+        StringKey.BATCH_START to StringsEntry("开始执行", "Start"),
+        StringKey.BATCH_NO_TARGET to StringsEntry(
+            "请至少选择一台设备。",
+            "Select at least one device.",
+        ),
+        StringKey.BATCH_RUNNING to StringsEntry("批量执行中…", "Running…"),
+        StringKey.BATCH_CANCEL_REMAINING to StringsEntry("取消剩余", "Cancel remaining"),
+        StringKey.BATCH_CANCEL_REQUESTED to StringsEntry(
+            "已请求取消剩余任务，当前设备完成后停止。",
+            "Remaining items will be cancelled after the current device finishes.",
+        ),
+        StringKey.BATCH_LOCK_NOTE to StringsEntry(
+            "执行期间会锁定参与设备的配置、参数、OTA 与快捷操作；未参与设备不受影响。",
+            "Participating devices are locked against config, parameter, OTA and quick-action writes; other devices are unaffected.",
+        ),
+        StringKey.BATCH_LOCKED_HINT to StringsEntry(
+            "批量任务执行中，该设备的写操作已锁定。",
+            "A batch task is running; writes to this device are locked.",
+        ),
+        StringKey.BATCH_STATUS_QUEUED to StringsEntry("排队中", "Queued"),
+        StringKey.BATCH_STATUS_RUNNING to StringsEntry("执行中", "Running"),
+        StringKey.BATCH_STATUS_SUCCEEDED to StringsEntry("成功", "Succeeded"),
+        StringKey.BATCH_STATUS_SKIPPED to StringsEntry("跳过", "Skipped"),
+        StringKey.BATCH_STATUS_FAILURE to StringsEntry("失败", "Failed"),
+        StringKey.BATCH_STATUS_CANCELLED to StringsEntry("已取消", "Cancelled"),
+        StringKey.BATCH_STATUS_REMOVED to StringsEntry("已移除", "Removed"),
+        StringKey.BATCH_SUMMARY_TITLE to StringsEntry("批量结果", "Batch result"),
+        StringKey.BATCH_SUMMARY_COUNTS to StringsEntry(
+            "共 {total} 台：成功 {succeeded}，跳过 {skipped}，失败 {failed}，取消 {cancelled}，移除 {removed}",
+            "{total} devices: {succeeded} succeeded, {skipped} skipped, {failed} failed, {cancelled} cancelled, {removed} removed",
+        ),
+        StringKey.BATCH_STEP_STARTED to StringsEntry("开始", "Started"),
+        StringKey.BATCH_STEP_HEALTH to StringsEntry("体检", "Health check"),
+        StringKey.BATCH_STEP_HEALTH_OK to StringsEntry("体检完成", "Health check complete"),
+        StringKey.BATCH_STEP_PRESET to StringsEntry(
+            "应用预设「{name}」",
+            "Apply preset \"{name}\"",
+        ),
+        StringKey.BATCH_STEP_PRESET_WRITTEN to StringsEntry(
+            "写入 {written} 项，跳过 {skipped} 项，失败 {failed} 项",
+            "{written} written, {skipped} skipped, {failed} failed",
+        ),
+        StringKey.BATCH_REASON_DEVICE_LOCKED to StringsEntry(
+            "设备正被其它操作占用，已跳过",
+            "Device is busy with another operation; skipped",
+        ),
+        StringKey.BATCH_REASON_DISCONNECTED to StringsEntry(
+            "设备已断开，已移出队列",
+            "Device disconnected and was removed from the queue",
+        ),
+        StringKey.BATCH_REASON_DISCONNECTED_AFTER to StringsEntry(
+            "步骤完成后断开，已移出队列",
+            "Disconnected after the step and was removed from the queue",
+        ),
+        StringKey.BATCH_REASON_CANCELLED_REMAINING to StringsEntry(
+            "已取消剩余任务",
+            "Remaining tasks cancelled",
+        ),
+        StringKey.BATCH_REASON_JOB_CANCELLED to StringsEntry("任务被取消", "Task cancelled"),
+        StringKey.BATCH_REASON_EXECUTION_ERROR to StringsEntry("执行出错", "Execution error"),
+        StringKey.BATCH_REASON_NO_PRESET to StringsEntry("未选择预设", "No preset selected"),
+        StringKey.BATCH_COPY to StringsEntry("复制汇总", "Copy summary"),
+        StringKey.BATCH_COPIED to StringsEntry("已复制汇总", "Summary copied"),
+        StringKey.BATCH_SAVE to StringsEntry("保存汇总", "Save summary"),
+        StringKey.BATCH_SAVED to StringsEntry("已保存：{name}", "Saved: {name}"),
+        StringKey.BATCH_SAVE_CANCELLED to StringsEntry("已取消保存", "Save cancelled"),
+        StringKey.BATCH_SAVE_FAILED to StringsEntry(
+            "保存失败：{detail}。请重试，或改用复制。",
+            "Save failed: {detail}. Retry, or use copy instead.",
+        ),
+        StringKey.BATCH_SAVE_UNAVAILABLE to StringsEntry(
+            "当前平台不支持保存文件",
+            "Saving files is unavailable on this platform",
+        ),
+
+        // ---- 固件库增强（v2.9.0） ----
+        StringKey.LIB_IMPORT to StringsEntry("导入固件", "Import firmware"),
+        StringKey.LIB_IMPORTING to StringsEntry("正在导入…", "Importing…"),
+        StringKey.LIB_IMPORT_SUCCESS to StringsEntry("已导入：{name}", "Imported: {name}"),
+        StringKey.LIB_IMPORT_DUPLICATE to StringsEntry(
+            "已存在同一固件：{name}",
+            "The same firmware already exists: {name}",
+        ),
+        StringKey.LIB_IMPORT_REJECTED to StringsEntry(
+            "拒绝导入（{code}）：{detail}",
+            "Import rejected ({code}): {detail}",
+        ),
+        StringKey.LIB_IMPORT_CANCELLED to StringsEntry("已取消导入", "Import cancelled"),
+        StringKey.LIB_IMPORT_NOTE to StringsEntry(
+            "导入会解析头部并复核 CRC；签名与型号/版本预检仍在使用前完整执行。",
+            "Import parses the header and verifies CRC; signature, model and version prechecks still run in full before use.",
+        ),
+        StringKey.LIB_FILTER_MODEL to StringsEntry("型号筛选：{model}", "Model filter: {model}"),
+        StringKey.LIB_FILTER_MODEL_ALL to StringsEntry("全部型号", "All models"),
+        StringKey.LIB_FILTER_VERSION to StringsEntry("版本筛选", "Version filter"),
+        StringKey.LIB_SORT_LABEL to StringsEntry("排序", "Sort"),
+        StringKey.LIB_SORT_RECENT to StringsEntry("最近使用", "Recent"),
+        StringKey.LIB_SORT_VERSION to StringsEntry("按版本", "By version"),
+        StringKey.LIB_RENAME to StringsEntry("别名", "Alias"),
+        StringKey.LIB_RENAME_TITLE to StringsEntry("重命名别名", "Rename alias"),
+        StringKey.LIB_RENAME_HINT to StringsEntry(
+            "留空恢复原始文件名",
+            "Leave empty to use the original file name",
+        ),
+        StringKey.LIB_APPLICABLE to StringsEntry("适用", "Applicable"),
+        StringKey.LIB_INAPPLICABLE to StringsEntry("不适用", "Not applicable"),
+        StringKey.LIB_REASON_MODEL_UNKNOWN to StringsEntry("设备型号未知", "Device model unknown"),
+        StringKey.LIB_REASON_MODEL_MISMATCH to StringsEntry("型号不匹配", "Model mismatch"),
+        StringKey.LIB_REASON_VERSION_UNKNOWN to StringsEntry(
+            "设备版本未知",
+            "Device version unknown",
+        ),
+        StringKey.LIB_REASON_VERSION_UNPARSEABLE to StringsEntry(
+            "固件版本无法解析",
+            "Firmware version cannot be parsed",
+        ),
+        StringKey.LIB_REASON_VERSION_ROLLBACK to StringsEntry(
+            "版本低于当前",
+            "Lower than the current version",
+        ),
+        StringKey.LIB_SELECT_LATEST to StringsEntry(
+            "选中最新的适用包",
+            "Select latest applicable",
+        ),
+        StringKey.LIB_NO_APPLICABLE to StringsEntry(
+            "没有适用该设备的固件包",
+            "No applicable package for this device",
+        ),
+        StringKey.LIB_UNAVAILABLE to StringsEntry(
+            "引用不可用：{reason}",
+            "Reference unavailable: {reason}",
+        ),
+        StringKey.LIB_UNAVAILABLE_ACTION to StringsEntry("重新选择文件", "Re-select file"),
+        StringKey.LIB_SELECTED to StringsEntry("已选择：{name}", "Selected: {name}"),
+
+        // ---- OTA 队列（v2.9.0） ----
+        StringKey.QUEUE_TITLE to StringsEntry("OTA 队列", "OTA queue"),
+        StringKey.QUEUE_HINT to StringsEntry(
+            "多台设备逐台串行升级；队列只在内存中，App 退出后中断。",
+            "Upgrades devices one after another; the queue lives only in memory and stops when the app exits.",
+        ),
+        StringKey.QUEUE_TARGETS to StringsEntry("选择设备", "Select devices"),
+        StringKey.QUEUE_FIRMWARE to StringsEntry("固件包", "Firmware package"),
+        StringKey.QUEUE_FIRMWARE_EMPTY to StringsEntry(
+            "固件库为空，请先在 OTA 页导入固件。",
+            "The firmware library is empty. Import firmware from the OTA page first.",
+        ),
+        StringKey.QUEUE_ENQUEUE to StringsEntry("加入队列", "Add to queue"),
+        StringKey.QUEUE_START to StringsEntry("开始队列", "Start queue"),
+        StringKey.QUEUE_PAUSE to StringsEntry("暂停队列", "Pause queue"),
+        StringKey.QUEUE_RESUME to StringsEntry("继续队列", "Resume queue"),
+        StringKey.QUEUE_CANCEL_CURRENT to StringsEntry("取消当前", "Cancel current"),
+        StringKey.QUEUE_SKIP_FAILED_DEVICES to StringsEntry("跳过失败设备", "Skip failed devices"),
+        StringKey.QUEUE_REMOVE to StringsEntry("移除", "Remove"),
+        StringKey.QUEUE_EMPTY to StringsEntry(
+            "队列为空，请选择设备与固件包后加入。",
+            "The queue is empty. Select devices and a firmware package to add them.",
+        ),
+        StringKey.QUEUE_STATUS_QUEUED to StringsEntry("排队中", "Queued"),
+        StringKey.QUEUE_STATUS_RUNNING to StringsEntry("升级中", "Upgrading"),
+        StringKey.QUEUE_STATUS_PAUSED to StringsEntry("已暂停", "Paused"),
+        StringKey.QUEUE_STATUS_SUCCEEDED to StringsEntry("成功", "Succeeded"),
+        StringKey.QUEUE_STATUS_FAILURE to StringsEntry("失败", "Failed"),
+        StringKey.QUEUE_STATUS_SKIPPED to StringsEntry("已跳过", "Skipped"),
+        StringKey.QUEUE_STATUS_ABORTED to StringsEntry("已取消", "Aborted"),
+        StringKey.QUEUE_STATUS_REMOVED to StringsEntry("已移除", "Removed"),
+        StringKey.QUEUE_STAGE_PRECHECK to StringsEntry("预检", "Precheck"),
+        StringKey.QUEUE_STAGE_TRANSFER to StringsEntry("传输", "Transfer"),
+        StringKey.QUEUE_STAGE_VERIFY to StringsEntry("校验", "Verify"),
+        StringKey.QUEUE_STAGE_DONE to StringsEntry("完成", "Done"),
+        StringKey.QUEUE_SUMMARY_TITLE to StringsEntry("队列汇总", "Queue summary"),
+        StringKey.QUEUE_SUMMARY_COUNTS to StringsEntry(
+            "共 {total} 台：成功 {succeeded}，失败 {failed}，跳过 {skipped}，取消 {aborted}，移除 {removed}，待执行 {pending}",
+            "{total} devices: {succeeded} succeeded, {failed} failed, {skipped} skipped, {aborted} aborted, {removed} removed, {pending} pending",
+        ),
+        StringKey.QUEUE_CHECKPOINT_RETAINED to StringsEntry(
+            "保留断点：{count} 台",
+            "Checkpoints kept: {count}",
+        ),
+        StringKey.QUEUE_MEMORY_ONLY to StringsEntry(
+            "队列状态只在内存与必要断点中保存，不提供后台续跑；退出 App 会中断队列。",
+            "Queue state is kept only in memory and checkpoints; there is no background continuation, and exiting the app stops the queue.",
+        ),
+        StringKey.QUEUE_PAUSE_REQUESTED to StringsEntry(
+            "已请求暂停，当前设备会在分片边界停在安全点。",
+            "Pause requested; the current device stops at a safe point between chunks.",
+        ),
+        StringKey.QUEUE_PAUSED_SAFE_POINT to StringsEntry(
+            "已在安全点暂停，可继续或取消当前。",
+            "Paused at a safe point; resume or cancel the current device.",
+        ),
+        StringKey.QUEUE_DUPLICATE to StringsEntry(
+            "该设备已在队列中。",
+            "This device is already queued.",
+        ),
+        StringKey.QUEUE_DEVICE_MISSING to StringsEntry(
+            "设备连接已不存在",
+            "The device connection no longer exists",
+        ),
+        StringKey.QUEUE_DEVICE_DISCONNECTED to StringsEntry(
+            "设备已断开",
+            "Device disconnected",
+        ),
+        StringKey.QUEUE_PROGRESS to StringsEntry("{stage} {percent}%", "{stage} {percent}%"),
+        StringKey.QUEUE_CURRENT to StringsEntry("当前：{device}", "Current: {device}"),
     )
 
     /** 查表；缺失 key 直接抛出，避免静默显示空文案。 */

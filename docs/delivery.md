@@ -211,3 +211,15 @@ xcodebuild -project iosApp/iosApp.xcodeproj -scheme iosApp \
 - 通知只在 App 存活期间送出，不注册后台任务或远程推送；权限被拒后降级为应用内横幅；
 - 诊断包只写白名单条目，构建完成前不触碰文件系统，取消或失败不留半成品；
 - 明确排除令牌、密钥、凭据、断点文件、固件二进制与未脱敏原文。
+
+## 11. 批量、固件库与 OTA 队列（v2.9.0）
+
+| 能力 | 实现位置 | 自动化验证 |
+| --- | --- | --- |
+| 批量串行、失败隔离、取消剩余、锁范围、汇总 | `core/batch/BatchOperation.kt` + `feature/batch/BatchOperationController.kt` + 批量页 | `BatchOperationTest`、`BatchOperationControllerTest` |
+| 固件库去重、损坏拒绝、别名、筛选、适用性与最新适用包 | `core/firmware/FirmwareLibrary.kt` + `core/firmware/FirmwareApplicability.kt` + `feature/firmware/FirmwareLibraryImporter.kt` | `FirmwareLibraryManagementTest`、`FirmwareLibraryImporterTest` |
+| OTA 队列状态机、暂停安全点、取消当前、跳过失败、断点保留 | `core/ota/OtaQueue.kt` + `feature/ota/OtaQueueController.kt` + 队列页 | `OtaQueueTest`、`OtaQueueControllerTest` |
+
+- 批量与队列都只在 App 前台串行执行，不提供后台批量或跨进程续跑；
+- 队列暂停只在分片边界生效，断点复用沿用既有四重门控；
+- 固件库条目只存元数据与文件引用，使用前仍完整执行 CRC 与签名预检。

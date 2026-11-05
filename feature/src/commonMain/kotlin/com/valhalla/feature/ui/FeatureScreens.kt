@@ -97,6 +97,7 @@ internal fun PresetSection(
     config: ConfigEditorController,
     deviceId: String,
     events: DeviceEventTimeline,
+    writeLocked: Boolean = false,
 ) {
     val strings = LocalStrings.current
     val format = remember(strings.language) { LocaleFormat(strings.language) }
@@ -125,6 +126,13 @@ internal fun PresetSection(
         if (currentValues.isEmpty()) {
             Text(strings.t(StringKey.PRESET_NOT_LOADED), style = MaterialTheme.typography.bodySmall)
         }
+        if (writeLocked) {
+            Text(
+                strings.t(StringKey.BATCH_LOCKED_HINT),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.secondary,
+            )
+        }
         if (items.isEmpty()) {
             Text(strings.t(StringKey.PRESET_EMPTY), style = MaterialTheme.typography.bodySmall)
         }
@@ -145,7 +153,7 @@ internal fun PresetSection(
                         horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs),
                     ) {
                         TextButton(
-                            enabled = currentValues.isNotEmpty(),
+                            enabled = currentValues.isNotEmpty() && !writeLocked,
                             onClick = {
                                 val diffs = ConfigPresetDiffer.diff(
                                     preset,

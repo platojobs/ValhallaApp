@@ -36,6 +36,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.geometry.Offset
@@ -70,6 +71,7 @@ import com.valhalla.core.security.HmacAuthSigner
 import com.valhalla.core.command.ConcurrentCommandDispatcher
 import com.valhalla.core.command.PacketRecordingFrameLink
 import com.valhalla.core.config.DeviceConfigTarget
+import com.valhalla.core.config.ConfigPresetDiffer
 import com.valhalla.core.automation.AutomationRuleRepository
 import com.valhalla.core.automation.AutomationTrigger
 import com.valhalla.core.config.ConfigPresetRepository
@@ -98,9 +100,31 @@ import com.valhalla.feature.health.DeviceHealthCheckController
 import com.valhalla.feature.health.HealthCheckItemType
 import com.valhalla.feature.health.HealthCheckReportFormatter
 import com.valhalla.feature.health.HealthCheckResult
+import com.valhalla.core.batch.BatchItemStatus
+import com.valhalla.core.batch.BatchOperationKind
+import com.valhalla.core.batch.DeviceOperationLocks
+import com.valhalla.core.ota.OtaQueueItem
+import com.valhalla.core.ota.OtaQueueStage
+import com.valhalla.core.ota.OtaQueueTarget
+import com.valhalla.core.firmware.FirmwareApplicabilityEvaluator
+import com.valhalla.core.firmware.FirmwareApplicabilityReason
+import com.valhalla.core.firmware.FirmwareLibraryFilter
+import com.valhalla.core.firmware.FirmwareLibraryImportResult
+import com.valhalla.feature.batch.BatchDeviceOutcome
+import com.valhalla.feature.batch.BatchOperationController
+import com.valhalla.feature.firmware.FirmwareImportOutcome
+import com.valhalla.feature.firmware.FirmwareLibraryImporter
+import com.valhalla.feature.firmware.FirmwarePicker
 import com.valhalla.feature.health.HealthCheckState
 import com.valhalla.feature.health.HealthCheckStatus
 import com.valhalla.feature.health.labelKey
+import com.valhalla.feature.ota.OtaQueueController
+import com.valhalla.feature.ota.OtaQueueExecutionResult
+import com.valhalla.feature.ota.OtaQueueExecutor
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.collect
 import com.valhalla.core.logging.parseLocalDateTimeMillis
 import com.valhalla.core.logging.validateByteLimitKb
 import com.valhalla.core.logging.validateEntryLimit
@@ -282,6 +306,8 @@ private sealed interface Route {
     data object Automation : Route
     data object Stats : Route
     data object Backup : Route
+    data object Batch : Route
+    data object OtaQueue : Route
 }
 
 /**
@@ -434,6 +460,31 @@ private fun ValhallaContent(
     }
     var sessions by remember { mutableStateOf<Map<String, DeviceSession>>(emptyMap()) }
     val deviceState by deviceManager.state.collectAsState()
+
+    // v2.9.0：批量与 OTA 队列都在进程内串行执行，共享同一把设备写锁。
+    val deviceLocks = remember { DeviceOperationLocks() }
+    val lockedIds by deviceLocks.locked.collectAsState()
+    val sessionsRef = rememberUpdatedState(sessions)
+    val batchController = remember {
+        BatchOperationController(deviceLocks) { deviceId ->
+            sessionsRef.value[deviceId]?.connection?.connected?.value == true
+        }
+    }
+    val queuePicker = rememberFirmwarePicker()
+    val queueSigningKeyPem = rememberFirmwareSigningKeyPem()
+    val stringsRef = rememberUpdatedState(strings)
+    val queueController = remember {
+        OtaQueueController(
+            scope = scope,
+            executor = SessionOtaQueueExecutor(
+                sessions = { sessionsRef.value },
+                library = firmwareLibrary,
+                picker = queuePicker,
+                signingKeyPem = queueSigningKeyPem,
+                renderReason = { message -> stringsRef.value.render(message) },
+            ),
+        )
+    }
 
     val permissionState by permissionController.state.collectAsState()
     val adapterState by bleClient.adapterState.collectAsState()
@@ -792,6 +843,8 @@ private fun ValhallaContent(
                     route = Route.Scan
                 }
             },
+            onOpenBatch = { route = Route.Batch },
+            onOpenQueue = { route = Route.OtaQueue },
             onBack = { route = Route.Scan },
         )
 
@@ -831,6 +884,112 @@ private fun ValhallaContent(
             rules = automationRepository,
             onReloadPersisted = onReloadPersisted,
             onBack = { route = Route.Settings },
+        )
+
+        Route.Batch -> BatchScreen(
+            devices = deviceState.devices.map { BatchDeviceOption(it.deviceId, it.displayName) },
+            presets = presetRepository.list(),
+            controller = batchController,
+            onBack = { route = Route.Devices },
+            execute = execute@{ kind, preset, target, step ->
+                val session = sessions[target.deviceId]
+                    ?: return@execute BatchDeviceOutcome(
+                        status = BatchItemStatus.REMOVED,
+                        reason = "batch.disconnected",
+                    )
+                if (!session.connection.connected.value) {
+                    return@execute BatchDeviceOutcome(
+                        status = BatchItemStatus.REMOVED,
+                        reason = "batch.disconnected",
+                    )
+                }
+                when (kind) {
+                    BatchOperationKind.HEALTH_CHECK -> {
+                        step("batch.health")
+                        val healthCheck = DeviceHealthCheckController(
+                            dispatcher = session.dispatcher,
+                            isLinkAlive = { session.connection.connected.value },
+                            otaHistoryProvider = {
+                                session.profileRepository
+                                    .get(session.connection.deviceId)
+                                    ?.otaHistory
+                                    .orEmpty()
+                            },
+                            knownUptimeSeconds = {
+                                session.detail.state.value.uptimeSeconds ?: 0L
+                            },
+                        )
+                        val result = healthCheck.run()
+                            ?: return@execute BatchDeviceOutcome(
+                                status = BatchItemStatus.FAILED,
+                                reason = "batch.execution_error",
+                            )
+                        if (result.abortedByLinkLoss) {
+                            BatchDeviceOutcome(
+                                status = BatchItemStatus.REMOVED,
+                                reason = "batch.disconnected",
+                            )
+                        } else {
+                            BatchDeviceOutcome(
+                                status = BatchItemStatus.SUCCEEDED,
+                                step = "batch.health",
+                                detail = "ok=${result.okCount} abnormal=${result.abnormalCount} " +
+                                    "skipped=${result.skippedCount} failed=${result.failedCount}",
+                            )
+                        }
+                    }
+
+                    BatchOperationKind.APPLY_PRESET -> {
+                        val chosen = preset
+                            ?: return@execute BatchDeviceOutcome(
+                                status = BatchItemStatus.FAILED,
+                                reason = "batch.no_preset",
+                            )
+                        step("batch.preset")
+                        val detail = session.detail.state.value
+                        session.config.updateTarget(
+                            DeviceConfigTarget(
+                                firmwareVersion = detail.firmware,
+                                model = detail.deviceInfo?.model,
+                                vendor = detail.deviceInfo?.vendor,
+                            ),
+                        )
+                        session.config.load()
+                        val current = session.config.state.value.visibleFields
+                            .filter { it.loaded && it.editable }
+                            .associate { it.spec.key to it.text }
+                        val diffs = ConfigPresetDiffer.diff(
+                            chosen,
+                            session.config.state.value.target,
+                            current,
+                        )
+                        val report = ConfigPresetApplier(session.dispatcher).apply(diffs)
+                        val detailText = "written=${report.writtenCount} " +
+                            "already=${report.alreadyCount} skipped=${report.skippedCount} " +
+                            "failed=${report.failedCount}"
+                        if (report.failedCount > 0) {
+                            BatchDeviceOutcome(
+                                status = BatchItemStatus.FAILED,
+                                step = "batch.preset",
+                                detail = detailText,
+                            )
+                        } else {
+                            BatchDeviceOutcome(
+                                status = BatchItemStatus.SUCCEEDED,
+                                step = "batch.preset",
+                                detail = detailText,
+                            )
+                        }
+                    }
+                }
+            },
+        )
+
+        Route.OtaQueue -> OtaQueueScreen(
+            devices = deviceState.devices.map { BatchDeviceOption(it.deviceId, it.displayName) },
+            firmwareRecords = firmwareLibrary.list(FirmwareLibrarySort.RECENT),
+            controller = queueController,
+            onBack = { route = Route.Devices },
         )
 
         Route.About -> AboutScreen(onBack = { route = Route.Settings })
@@ -916,6 +1075,7 @@ private fun ValhallaContent(
                     onOpenOta = { route = Route.Ota(current.deviceId) },
                     onOpenLogs = { route = Route.Logs(current.deviceId) },
                     onOpenDiagnostics = { route = Route.Diagnostic(current.deviceId) },
+                    writeLocked = current.deviceId in lockedIds,
                 )
             }
         }
@@ -934,6 +1094,7 @@ private fun ValhallaContent(
                     onNotificationFallback = { notificationBanner = it },
                     onBack = { route = Route.Detail(current.deviceId) },
                     onOtaSucceeded = { triggerAutomation(AutomationTrigger.OTA_SUCCESS, session) },
+                    writeLocked = current.deviceId in lockedIds,
                 )
             }
         }
@@ -1247,6 +1408,8 @@ private fun DevicesScreen(
     onSwitch: (String) -> Unit,
     onDisconnect: (String) -> Unit,
     onDisconnectAll: () -> Unit,
+    onOpenBatch: () -> Unit,
+    onOpenQueue: () -> Unit,
     onBack: () -> Unit,
 ) {
     val strings = LocalStrings.current
@@ -1290,6 +1453,17 @@ private fun DevicesScreen(
         }
 
         if (state.devices.isNotEmpty()) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm),
+            ) {
+                Button(onClick = onOpenBatch, modifier = Modifier.weight(1f)) {
+                    Text(strings.t(StringKey.BATCH_TITLE))
+                }
+                OutlinedButton(onClick = onOpenQueue, modifier = Modifier.weight(1f)) {
+                    Text(strings.t(StringKey.QUEUE_TITLE))
+                }
+            }
             OutlinedButton(onClick = onDisconnectAll, modifier = Modifier.fillMaxWidth()) {
                 Text(strings.t(StringKey.DEVICES_DISCONNECT_ALL))
             }
@@ -1709,6 +1883,7 @@ private fun DetailScreen(
     onOpenOta: () -> Unit,
     onOpenLogs: () -> Unit,
     onOpenDiagnostics: () -> Unit,
+    writeLocked: Boolean,
 ) {
     val strings = LocalStrings.current
     val format = remember(strings.language) { LocaleFormat(strings.language) }
@@ -2260,7 +2435,11 @@ private fun DetailScreen(
 
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm)) {
-                    OutlinedButton(onClick = onOpenOta, modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(
+                        onClick = onOpenOta,
+                        enabled = !writeLocked,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
                         Text(strings.t(StringKey.ENTER_OTA))
                     }
                     OutlinedButton(onClick = onOpenLogs, modifier = Modifier.fillMaxWidth()) {
@@ -2268,6 +2447,13 @@ private fun DetailScreen(
                     }
                     OutlinedButton(onClick = onOpenDiagnostics, modifier = Modifier.fillMaxWidth()) {
                         Text(strings.t(StringKey.DIAG_ENTRY))
+                    }
+                    if (writeLocked) {
+                        Text(
+                            strings.t(StringKey.BATCH_LOCKED_HINT),
+                            color = status.warning,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
                     }
                 }
             }
@@ -2277,6 +2463,7 @@ private fun DetailScreen(
                     controller = controller,
                     quickAction = state.quickAction,
                     connected = connected,
+                    writeLocked = writeLocked,
                 )
             }
 
@@ -2417,6 +2604,7 @@ private fun DetailScreen(
                             config = session.config,
                             deviceId = session.device.deviceId,
                             events = session.events,
+                            writeLocked = writeLocked,
                         )
                     }
                 }
@@ -2426,6 +2614,7 @@ private fun DetailScreen(
                 ConfigSection(
                     controller = session.config,
                     state = configState,
+                    writeLocked = writeLocked,
                     onRefreshDevice = { scope.launchSafely(errorReporter, "refresh-info") { controller.refreshInfo() } },
                     onSaved = { ok ->
                         session.events.record(
@@ -2446,6 +2635,7 @@ private fun DetailScreen(
                     controller = session.param,
                     state = paramState,
                     connected = connected,
+                    writeLocked = writeLocked,
                     onSaved = { ok ->
                         session.events.record(
                             deviceId = state.deviceId,
@@ -2480,6 +2670,7 @@ private fun QuickActionSection(
     controller: DeviceDetailController,
     quickAction: QuickActionState,
     connected: Boolean,
+    writeLocked: Boolean,
 ) {
     val strings = LocalStrings.current
     val scope = rememberCoroutineScope()
@@ -2489,7 +2680,7 @@ private fun QuickActionSection(
     var delayText by remember { mutableStateOf("0") }
     var confirmToken by remember { mutableStateOf("") }
     val busy = quickAction.busy
-    val enabled = connected && !busy
+    val enabled = connected && !busy && !writeLocked
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
@@ -2497,6 +2688,13 @@ private fun QuickActionSection(
             verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm),
         ) {
             Text(strings.t(StringKey.QUICK_ACTIONS_TITLE), style = MaterialTheme.typography.titleMedium)
+            if (writeLocked) {
+                Text(
+                    strings.t(StringKey.BATCH_LOCKED_HINT),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.secondary,
+                )
+            }
             Row(
                 horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm),
                 modifier = Modifier.horizontalScroll(rememberScrollState()),
@@ -2786,6 +2984,7 @@ private fun OtaHistoryRow(
 private fun ConfigSection(
     controller: ConfigEditorController,
     state: ConfigEditorState,
+    writeLocked: Boolean,
     onRefreshDevice: () -> Unit,
     onSaved: (Boolean) -> Unit = {},
 ) {
@@ -2821,6 +3020,13 @@ private fun ConfigSection(
                 strings.t(StringKey.CONFIG_HINT),
                 style = MaterialTheme.typography.bodySmall,
             )
+            if (writeLocked) {
+                Text(
+                    strings.t(StringKey.BATCH_LOCKED_HINT),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.secondary,
+                )
+            }
             state.capabilityNoticeKey?.let { noticeKey ->
                 val notice = if (noticeKey == StringKey.CONFIG_HIDDEN_UNKNOWN_TARGET) {
                     strings.t(noticeKey, "count" to state.hiddenFields.size.toString())
@@ -2862,6 +3068,9 @@ private fun ConfigSection(
                     savingAny = state.saving,
                     onTextChange = { controller.updateText(field.spec.key, it) },
                     onSave = {
+                        if (writeLocked) {
+                            return@ConfigFieldRow
+                        }
                         scope.launchSafely(errorReporter, "config-save") {
                             val ok = controller.save(field.spec.key)
                             onSaved(ok)
@@ -2956,6 +3165,7 @@ private fun ParamSection(
     controller: ParamEditorController,
     state: ParamEditorState,
     connected: Boolean,
+    writeLocked: Boolean,
     onSaved: (Boolean) -> Unit = {},
 ) {
     val strings = LocalStrings.current
@@ -2988,6 +3198,13 @@ private fun ParamSection(
                 }
             }
             Text(strings.t(StringKey.PARAM_HINT), style = MaterialTheme.typography.bodySmall)
+            if (writeLocked) {
+                Text(
+                    strings.t(StringKey.BATCH_LOCKED_HINT),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.secondary,
+                )
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm)) {
                 Text(
                     strings.t(StringKey.PARAM_FIRMWARE_UNCONFIRMED),
@@ -3004,6 +3221,9 @@ private fun ParamSection(
                     connected = connected,
                     onTextChange = { controller.updateText(field.spec.id, it) },
                     onSave = {
+                        if (writeLocked) {
+                            return@ParamFieldRow
+                        }
                         scope.launchSafely(errorReporter, "param-save") {
                             val ok = controller.save(field.spec.id)
                             onSaved(ok)
@@ -4442,6 +4662,7 @@ private fun OtaScreen(
     onNotificationFallback: (NotificationEvent) -> Unit,
     onBack: () -> Unit,
     onOtaSucceeded: () -> Unit,
+    writeLocked: Boolean,
 ) {
     val strings = LocalStrings.current
     val format = remember(strings.language) { LocaleFormat(strings.language) }
@@ -4455,6 +4676,13 @@ private fun OtaScreen(
     var libraryVersion by remember { mutableStateOf(0) }
     var libraryBusyId by remember { mutableStateOf<String?>(null) }
     var libraryMessage by remember { mutableStateOf<String?>(null) }
+    var libraryModelFilter by remember { mutableStateOf("") }
+    var libraryVersionQuery by remember { mutableStateOf("") }
+    var librarySort by remember { mutableStateOf(FirmwareLibrarySort.RECENT) }
+    var libraryRenameId by remember { mutableStateOf<String?>(null) }
+    var libraryRenameText by remember { mutableStateOf("") }
+    var libraryImporting by remember { mutableStateOf(false) }
+    val libraryImporter = remember(picker, library) { FirmwareLibraryImporter(picker, library) }
     val selection = remember(picker, session.checkpointStore, signingKeyPem) {
         FirmwareSelectionController(
             picker = picker,
@@ -4473,6 +4701,7 @@ private fun OtaScreen(
         wizardStep = when (state) {
             is OtaState.Preparing, is OtaState.Transferring, is OtaState.Verifying -> OtaWizardFlow.onRunStarted()
             is OtaState.Succeeded, is OtaState.Failed, is OtaState.Aborted -> OtaWizardFlow.onTerminal()
+            is OtaState.Paused -> wizardStep
             OtaState.Idle -> wizardStep
         }
     }
@@ -4695,9 +4924,33 @@ private fun OtaScreen(
         libraryMessage?.let { message ->
             Text(message, color = status.warning, style = MaterialTheme.typography.bodySmall)
         }
-        val libraryRecords = remember(libraryVersion, library) {
-            library.list(FirmwareLibrarySort.RECENT)
+        var libraryAvailability by remember { mutableStateOf<Map<String, FirmwareReuseCheck>>(emptyMap()) }
+        val libraryFilter = remember(libraryModelFilter, libraryVersionQuery) {
+            FirmwareLibraryFilter(
+                model = libraryModelFilter.takeIf { it.isNotBlank() },
+                versionQuery = libraryVersionQuery.takeIf { it.isNotBlank() },
+            )
         }
+        val libraryRecords = remember(libraryVersion, library, libraryFilter, librarySort) {
+            library.list(libraryFilter, librarySort)
+        }
+        LaunchedEffect(libraryVersion, libraryFilter, librarySort) {
+            val checks = mutableMapOf<String, FirmwareReuseCheck>()
+            libraryRecords.take(LIBRARY_VISIBLE_LIMIT).forEach { record ->
+                val check = runCatching { reuse.check(record) }.getOrNull() ?: return@forEach
+                checks[record.id] = check
+            }
+            libraryAvailability = checks
+        }
+        val currentModel = detailState.deviceInfo?.model
+        val currentFirmwareVersion = FirmwareApplicabilityEvaluator.parseVersion(
+            detailState.firmwareVersion.orEmpty(),
+        )
+        val latestApplicable = FirmwareApplicabilityEvaluator.latestApplicable(
+            libraryRecords,
+            currentModel,
+            currentFirmwareVersion,
+        )
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(
                 modifier = Modifier.padding(DesignTokens.Spacing.md),
@@ -4708,10 +4961,143 @@ private fun OtaScreen(
                     strings.t(StringKey.OTA_LIBRARY_NOTE),
                     style = MaterialTheme.typography.bodySmall,
                 )
+                Text(
+                    strings.t(StringKey.LIB_IMPORT_NOTE),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm)) {
+                    Button(
+                        enabled = !libraryImporting && !running,
+                        onClick = {
+                            scope.launchSafely(errorReporter, "firmware-library-import") {
+                                libraryImporting = true
+                                libraryMessage = when (val outcome = libraryImporter.importOne()) {
+                                    is FirmwareImportOutcome.Imported -> {
+                                        libraryVersion++
+                                        strings.t(StringKey.LIB_IMPORT_SUCCESS, "name" to outcome.recordName)
+                                    }
+
+                                    is FirmwareImportOutcome.Duplicate -> {
+                                        libraryVersion++
+                                        strings.t(StringKey.LIB_IMPORT_DUPLICATE, "name" to outcome.recordName)
+                                    }
+
+                                    is FirmwareImportOutcome.Rejected -> strings.t(
+                                        StringKey.LIB_IMPORT_REJECTED,
+                                        "code" to outcome.code,
+                                        "detail" to (outcome.detail ?: strings.t(StringKey.UNKNOWN)),
+                                    )
+
+                                    FirmwareImportOutcome.Cancelled ->
+                                        strings.t(StringKey.LIB_IMPORT_CANCELLED)
+                                }
+                                libraryImporting = false
+                            }
+                        },
+                    ) {
+                        Text(
+                            if (libraryImporting) {
+                                strings.t(StringKey.LIB_IMPORTING)
+                            } else {
+                                strings.t(StringKey.LIB_IMPORT)
+                            },
+                        )
+                    }
+                    Button(
+                        enabled = latestApplicable != null && !running && libraryBusyId == null,
+                        onClick = {
+                            val record = latestApplicable ?: return@Button
+                            scope.launchSafely(errorReporter, "firmware-library-latest") {
+                                libraryBusyId = record.id
+                                val opened = selection.openFromLibrary(
+                                    sourcePath = record.sourcePath,
+                                    currentVersion = detailState.firmware,
+                                    currentModel = currentModel,
+                                )
+                                libraryBusyId = null
+                                libraryMessage = if (opened) {
+                                    strings.t(StringKey.LIB_SELECTED, "name" to record.displayName)
+                                } else {
+                                    strings.t(StringKey.OTA_LIBRARY_USE_FAILED, "detail" to "open failed")
+                                }
+                            }
+                        },
+                    ) { Text(strings.t(StringKey.LIB_SELECT_LATEST)) }
+                }
+                if (latestApplicable == null && libraryRecords.isNotEmpty()) {
+                    Text(
+                        strings.t(StringKey.LIB_NO_APPLICABLE),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    OutlinedTextField(
+                        value = libraryModelFilter,
+                        onValueChange = { libraryModelFilter = it },
+                        label = { Text(strings.t(StringKey.LIB_FILTER_MODEL_ALL)) },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                    OutlinedTextField(
+                        value = libraryVersionQuery,
+                        onValueChange = { libraryVersionQuery = it },
+                        label = { Text(strings.t(StringKey.LIB_FILTER_VERSION)) },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm)) {
+                    FilterChip(
+                        selected = librarySort == FirmwareLibrarySort.RECENT,
+                        onClick = { librarySort = FirmwareLibrarySort.RECENT },
+                        label = { Text(strings.t(StringKey.LIB_SORT_RECENT)) },
+                    )
+                    FilterChip(
+                        selected = librarySort == FirmwareLibrarySort.VERSION,
+                        onClick = { librarySort = FirmwareLibrarySort.VERSION },
+                        label = { Text(strings.t(StringKey.LIB_SORT_VERSION)) },
+                    )
+                }
                 if (libraryRecords.isEmpty()) {
                     Text(strings.t(StringKey.OTA_LIBRARY_EMPTY), style = MaterialTheme.typography.bodySmall)
                 } else {
                     libraryRecords.take(LIBRARY_VISIBLE_LIMIT).forEach { record ->
+                        val availability = libraryAvailability[record.id]
+                        val unavailableText = when (availability) {
+                            is FirmwareReuseCheck.Missing -> strings.t(
+                                StringKey.OTA_LIBRARY_MISSING,
+                                "reason" to strings.t(
+                                    when (availability.reason) {
+                                        FirmwareReuseReason.ACCESS_DENIED ->
+                                            StringKey.OTA_LIBRARY_MISSING_ACCESS
+
+                                        FirmwareReuseReason.READ_FAILED ->
+                                            StringKey.OTA_LIBRARY_MISSING_READ
+                                    },
+                                ),
+                            )
+
+                            is FirmwareReuseCheck.CrcMismatch -> strings.t(
+                                StringKey.OTA_LIBRARY_CRC_MISMATCH,
+                                "expected" to hex32(availability.expectedCrc32),
+                                "actual" to (availability.actualCrc32?.let(::hex32) ?: "-"),
+                            )
+
+                            FirmwareReuseCheck.NotFound ->
+                                strings.t(StringKey.OTA_LIBRARY_USE_FAILED, "detail" to "not found")
+
+                            else -> null
+                        }
+                        val applicability = FirmwareApplicabilityEvaluator.evaluate(
+                            record,
+                            currentModel,
+                            currentFirmwareVersion,
+                        )
                         Column(verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xxs)) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -4720,7 +5106,7 @@ private fun OtaScreen(
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        record.fileName,
+                                        record.displayName,
                                         style = MaterialTheme.typography.bodyMedium,
                                     )
                                     Text(
@@ -4728,6 +5114,32 @@ private fun OtaScreen(
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
+                                    Text(
+                                        if (applicability.applicable) {
+                                            strings.t(StringKey.LIB_APPLICABLE)
+                                        } else {
+                                            val reasonKey = applicability.reason.labelKey()
+                                            if (reasonKey == null) {
+                                                strings.t(StringKey.LIB_INAPPLICABLE)
+                                            } else {
+                                                strings.t(StringKey.LIB_INAPPLICABLE) + " · " +
+                                                    strings.t(reasonKey)
+                                            }
+                                        },
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (applicability.applicable) {
+                                            MaterialTheme.colorScheme.primary
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                        },
+                                    )
+                                    unavailableText?.let {
+                                        Text(
+                                            strings.t(StringKey.LIB_UNAVAILABLE, "reason" to it),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = status.error,
+                                        )
+                                    }
                                     record.lastDeviceId?.let { device ->
                                         Text(
                                             strings.t(
@@ -4767,7 +5179,7 @@ private fun OtaScreen(
                                                     val opened = selection.openFromLibrary(
                                                         sourcePath = record.sourcePath,
                                                         currentVersion = detailState.firmware,
-                                                        currentModel = detailState.deviceInfo?.model,
+                                                        currentModel = currentModel,
                                                     )
                                                     if (opened) {
                                                         strings.t(StringKey.OTA_LIBRARY_AVAILABLE)
@@ -4833,6 +5245,14 @@ private fun OtaScreen(
                                 }
                                 TextButton(
                                     onClick = {
+                                        libraryRenameId = record.id
+                                        libraryRenameText = record.alias.orEmpty()
+                                    },
+                                ) {
+                                    Text(strings.t(StringKey.LIB_RENAME))
+                                }
+                                TextButton(
+                                    onClick = {
                                         library.delete(record.id)
                                         libraryVersion++
                                     },
@@ -4840,11 +5260,47 @@ private fun OtaScreen(
                                     Text(strings.t(StringKey.OTA_LIBRARY_DELETE))
                                 }
                             }
+                            unavailableText?.let {
+                                TextButton(onClick = {
+                                    scope.launchSafely(errorReporter, "firmware-library-reselect") {
+                                        selection.pickAndPrecheck(
+                                            currentVersion = detailState.firmware,
+                                            currentModel = currentModel,
+                                        )
+                                    }
+                                }) { Text(strings.t(StringKey.LIB_UNAVAILABLE_ACTION)) }
+                            }
                         }
                     }
                 }
             }
         }
+        }
+        libraryRenameId?.let { id ->
+            AlertDialog(
+                onDismissRequest = { libraryRenameId = null },
+                title = { Text(strings.t(StringKey.LIB_RENAME_TITLE)) },
+                text = {
+                    OutlinedTextField(
+                        value = libraryRenameText,
+                        onValueChange = { libraryRenameText = it },
+                        label = { Text(strings.t(StringKey.LIB_RENAME_HINT)) },
+                        singleLine = true,
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        library.rename(id, libraryRenameText)
+                        libraryVersion++
+                        libraryRenameId = null
+                    }) { Text(strings.t(StringKey.SAVE)) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { libraryRenameId = null }) {
+                        Text(strings.t(StringKey.CANCEL))
+                    }
+                },
+            )
         }
 
         if (wizardStep == OtaWizardStep.PRECHECK) {
@@ -5112,6 +5568,15 @@ private fun OtaScreen(
                 color = status.success,
             )
 
+            is OtaState.Paused -> Text(
+                strings.t(
+                    StringKey.OTA_PAUSED_SAFE_POINT,
+                    "sent" to format.number(current.sentBytes),
+                    "total" to format.number(current.totalBytes),
+                ),
+                color = status.warning,
+            )
+
             is OtaState.Aborted -> Text(
                 strings.t(
                     StringKey.OTA_ABORTED,
@@ -5262,7 +5727,7 @@ private fun OtaScreen(
                                 }
                             }
                         },
-                        enabled = !running && selectionState.readyForOta,
+                        enabled = !running && selectionState.readyForOta && !writeLocked,
                         modifier = Modifier.weight(1f),
                     ) {
                         Text(strings.t(StringKey.OTA_START_FRESH))
@@ -5453,4 +5918,117 @@ private fun OtaStage.label(strings: StringResolver): String = when (this) {
     OtaStage.VERIFYING -> strings.t(StringKey.OTA_STAGE_VERIFYING)
     OtaStage.APPLYING -> strings.t(StringKey.OTA_STAGE_APPLYING)
     OtaStage.COMPLETED -> strings.t(StringKey.OTA_STAGE_COMPLETED)
+}
+
+/**
+ * OTA 队列执行器：逐台打开固件库引用，走完整预检后再用既有 OTA 控制器升级。
+ *
+ * 暂停/取消信号只在分片边界生效（由 OtaController 的 queue signal 实现），
+ * 不会在半片状态停机；失败断点仍由既有四重门控复用。
+ */
+private class SessionOtaQueueExecutor(
+    private val sessions: () -> Map<String, DeviceSession>,
+    private val library: FirmwareLibraryRepository,
+    private val picker: FirmwarePicker,
+    private val signingKeyPem: String?,
+    private val renderReason: (UiMessage) -> String,
+) : OtaQueueExecutor {
+
+    override suspend fun execute(
+        item: OtaQueueItem,
+        progress: (OtaQueueStage, Float) -> Unit,
+        pauseRequested: () -> Boolean,
+        cancelRequested: () -> Boolean,
+    ): OtaQueueExecutionResult {
+        val session = sessions()[item.target.deviceId]
+            ?: return OtaQueueExecutionResult.Skipped("queue.device_missing")
+        if (!session.connection.connected.value) {
+            return OtaQueueExecutionResult.Skipped("queue.device_disconnected")
+        }
+        val record = library.get(item.target.firmwareId)
+            ?: return OtaQueueExecutionResult.Failed("firmware.library.unavailable", false)
+        val selection = FirmwareSelectionController(
+            picker = picker,
+            checkpointStore = session.checkpointStore,
+            prechecker = FirmwarePrecheckFactory.production(signingKeyPem),
+        )
+        return try {
+            progress(OtaQueueStage.PRECHECK, 0f)
+            val detail = session.detail.state.value
+            val opened = selection.openFromLibrary(
+                sourcePath = record.sourcePath,
+                currentVersion = detail.firmware,
+                currentModel = detail.deviceInfo?.model,
+            )
+            if (!opened) {
+                val code = selection.state.value.errorCode ?: "firmware.precheck_failed"
+                return OtaQueueExecutionResult.Failed(code, false)
+            }
+            val firmware = selection.firmware
+                ?: return OtaQueueExecutionResult.Failed("firmware.precheck_failed", false)
+            val resume = selection.resumePointForCurrentFirmware()
+            progress(OtaQueueStage.PRECHECK, 1f)
+            session.ota.configureQueueSignals(pauseRequested, cancelRequested)
+            val result = coroutineScope {
+                val observer = launch {
+                    session.ota.state.collect { state ->
+                        when (state) {
+                            is OtaState.Preparing -> progress(OtaQueueStage.PRECHECK, 1f)
+                            is OtaState.Transferring ->
+                                progress(OtaQueueStage.TRANSFER, state.progress)
+
+                            is OtaState.Verifying -> progress(OtaQueueStage.VERIFY, 0.99f)
+                            is OtaState.Succeeded -> progress(OtaQueueStage.DONE, 1f)
+                            else -> Unit
+                        }
+                    }
+                }
+                try {
+                    session.ota.startPackage(
+                        firmware = firmware,
+                        resumeFrom = resume,
+                        knownCrc16 = selection.state.value.computedCrc16,
+                    )
+                } finally {
+                    observer.cancel()
+                }
+            }
+            when (result) {
+                is OtaState.Succeeded -> {
+                    selection.clearResume()
+                    progress(OtaQueueStage.DONE, 1f)
+                    OtaQueueExecutionResult.Succeeded
+                }
+
+                is OtaState.Paused -> OtaQueueExecutionResult.Paused(
+                    progress = result.progress,
+                    checkpointRetained = result.checkpointSaved,
+                )
+
+                is OtaState.Aborted -> OtaQueueExecutionResult.Aborted(
+                    reason = result.reason,
+                    checkpointRetained = selection.resumePointForCurrentFirmware() != null,
+                )
+
+                is OtaState.Failed -> OtaQueueExecutionResult.Failed(
+                    reason = renderReason(result.reason),
+                    checkpointRetained = result.resumePoint != null,
+                )
+
+                else -> OtaQueueExecutionResult.Failed("ota.unexpected_state", false)
+            }
+        } finally {
+            session.ota.clearQueueSignals()
+            selection.close()
+        }
+    }
+}
+
+private fun FirmwareApplicabilityReason.labelKey(): StringKey? = when (this) {
+    FirmwareApplicabilityReason.NONE -> null
+    FirmwareApplicabilityReason.MODEL_UNKNOWN -> StringKey.LIB_REASON_MODEL_UNKNOWN
+    FirmwareApplicabilityReason.MODEL_MISMATCH -> StringKey.LIB_REASON_MODEL_MISMATCH
+    FirmwareApplicabilityReason.VERSION_UNKNOWN -> StringKey.LIB_REASON_VERSION_UNKNOWN
+    FirmwareApplicabilityReason.VERSION_UNPARSEABLE -> StringKey.LIB_REASON_VERSION_UNPARSEABLE
+    FirmwareApplicabilityReason.VERSION_ROLLBACK -> StringKey.LIB_REASON_VERSION_ROLLBACK
 }

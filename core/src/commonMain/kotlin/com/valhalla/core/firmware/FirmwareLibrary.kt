@@ -1,6 +1,7 @@
 package com.valhalla.core.firmware
 
 import com.valhalla.core.logging.SensitiveTextRedaction
+import com.valhalla.core.protocol.message.FirmwareVersion
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
 
@@ -40,6 +41,7 @@ data class FirmwareLibraryRecord(
     val lastDeviceId: String? = null,
     val lastOutcome: FirmwareLibraryOutcome? = null,
     val favorite: Boolean = false,
+    val alias: String? = null,
 ) {
 
     init {
@@ -52,6 +54,9 @@ data class FirmwareLibraryRecord(
     }
 
     val id: String get() = "$crc32-$totalBytes-$version"
+
+    /** 列表展示名：优先用户别名，其次原始文件名。 */
+    val displayName: String get() = alias?.takeIf { it.isNotBlank() } ?: fileName
 
     /** 是否与一次新的选择相同（同一固件不同路径也视为同一条目）。 */
     fun matches(candidate: FirmwareLibraryRecord): Boolean = id == candidate.id
@@ -87,17 +92,19 @@ class InMemoryFirmwareLibraryStore(private var raw: String? = null) : FirmwareLi
  * 与 `DeviceProfileCodec` 同一思路：小数据量、整表读写、无需序列化库，commonMain 可单测。
  * 格式：
  * ```
- * v1
- * F|id|fileName|version|channel|models|totalBytes|crc32|addedAt|lastUsed|lastDevice|outcome|favorite|path
+ * v2
+ * F|id|fileName|version|channel|models|totalBytes|crc32|addedAt|lastUsed|lastDevice|outcome|favorite|alias|path
  * ```
- * 字段百分号转义；空字符串表示 null。结构损坏或版本不匹配时安全回退为空列表。
+ * `v1` 旧格式（无 alias 字段）仍可读取；未知版本安全回退为空列表。
  */
 object FirmwareLibraryCodec {
 
-    private const val VERSION = "v1"
+    private const val VERSION = "v2"
+    private const val LEGACY_VERSION = "v1"
     private const val RECORD = "F"
     private const val SEPARATOR = '|'
-    private const val PARTS = 14
+    private const val PARTS_V1 = 14
+    private const val PARTS_V2 = 15
     private const val HEX_DIGITS = "0123456789ABCDEF"
 
     fun encode(records: List<FirmwareLibraryRecord>): String = buildString {
@@ -131,6 +138,8 @@ object FirmwareLibraryCodec {
             append(SEPARATOR)
             append(if (record.favorite) "1" else "0")
             append(SEPARATOR)
+            append(escape(record.alias?.let { redactInline(it) }))
+            append(SEPARATOR)
             // 路径/URI 是重新打开固件的唯一引用，必须原样保留；不缓存二进制本体。
             append(escape(record.sourcePath))
             append('\n')
@@ -140,18 +149,23 @@ object FirmwareLibraryCodec {
     fun decode(raw: String?): List<FirmwareLibraryRecord> {
         if (raw.isNullOrBlank()) return emptyList()
         val lines = raw.split('\n')
-        if (lines.firstOrNull()?.trim() != VERSION) return emptyList()
+        val version = lines.firstOrNull()?.trim()
+        val expectedParts = when (version) {
+            VERSION -> PARTS_V2
+            LEGACY_VERSION -> PARTS_V1
+            else -> return emptyList()
+        }
         val result = mutableListOf<FirmwareLibraryRecord>()
         lines.drop(1).forEach { line ->
             if (line.isBlank()) return@forEach
             val parts = line.split(SEPARATOR)
-            if (parts.size != PARTS || parts[0] != RECORD) return@forEach
-            parse(parts)?.let(result::add)
+            if (parts.size != expectedParts || parts[0] != RECORD) return@forEach
+            parse(parts, legacy = version == LEGACY_VERSION)?.let(result::add)
         }
         return result
     }
 
-    private fun parse(parts: List<String>): FirmwareLibraryRecord? {
+    private fun parse(parts: List<String>, legacy: Boolean): FirmwareLibraryRecord? {
         val fileName = unescape(parts[2]) ?: return null
         val version = unescape(parts[3]) ?: return null
         val totalBytes = parts[6].toLongOrNull() ?: return null
@@ -168,7 +182,9 @@ object FirmwareLibraryCodec {
             "1" -> true
             else -> return null
         }
-        val sourcePath = unescape(parts[13]) ?: return null
+        val alias = if (legacy) null else unescape(parts[13])
+        val pathIndex = if (legacy) 13 else 14
+        val sourcePath = unescape(parts[pathIndex]) ?: return null
         val models = unescape(parts[5])?.split(',')?.filter { it.isNotBlank() }.orEmpty()
         return runCatching {
             FirmwareLibraryRecord(
@@ -184,6 +200,7 @@ object FirmwareLibraryCodec {
                 lastDeviceId = unescape(parts[10]),
                 lastOutcome = outcome,
                 favorite = favorite,
+                alias = alias,
             )
         }.getOrNull()
     }
@@ -268,6 +285,34 @@ sealed interface FirmwareReuseCheck {
     data object NotFound : FirmwareReuseCheck
 }
 
+/** 固件库筛选条件；各条件之间为「且」关系。 */
+data class FirmwareLibraryFilter(
+    val model: String? = null,
+    val versionQuery: String? = null,
+    val favoriteOnly: Boolean = false,
+)
+
+/** 一次入库候选；由调用方解析文件头后提供，库本身不读文件。 */
+data class FirmwareLibraryImportCandidate(
+    val fileName: String,
+    val version: String,
+    val channel: String,
+    val modelWhitelist: List<String>,
+    val totalBytes: Long,
+    val crc32: Long,
+    val sourcePath: String,
+)
+
+/** 入库结果：新增、已存在（按 CRC32+总长+版本归并）或拒绝。 */
+sealed interface FirmwareLibraryImportResult {
+
+    data class Imported(val record: FirmwareLibraryRecord) : FirmwareLibraryImportResult
+
+    data class Duplicate(val existing: FirmwareLibraryRecord) : FirmwareLibraryImportResult
+
+    data class Rejected(val code: String, val detail: String) : FirmwareLibraryImportResult
+}
+
 /**
  * 固件库：本地归档 + 跨设备复用。
  *
@@ -307,6 +352,74 @@ class FirmwareLibraryRepository(
     }
 
     fun get(id: String): FirmwareLibraryRecord? = all().firstOrNull { it.id == id }
+
+    /** 按型号、版本关键字与常用标记筛选后再排序。 */
+    fun list(
+        filter: FirmwareLibraryFilter,
+        sort: FirmwareLibrarySort = FirmwareLibrarySort.RECENT,
+    ): List<FirmwareLibraryRecord> {
+        return list(sort).filter { record ->
+            val model = filter.model?.trim().orEmpty()
+            val versionQuery = filter.versionQuery?.trim().orEmpty()
+            (model.isEmpty() || record.supportsModel(model)) &&
+                (versionQuery.isEmpty() || record.version.contains(versionQuery, ignoreCase = true)) &&
+                (!filter.favoriteOnly || record.favorite)
+        }
+    }
+
+    /**
+     * 解析完文件头后入库。
+     *
+     * 身份仍是 CRC-32 + 总长 + 版本：同一内容重复导入返回 [FirmwareLibraryImportResult.Duplicate]，
+     * 不产生重复条目；结构/CRC 错误应在调用方解析阶段拒绝，库只接受可信候选。
+     */
+    fun import(candidate: FirmwareLibraryImportCandidate): FirmwareLibraryImportResult {
+        val existing = all().firstOrNull {
+            it.crc32 == candidate.crc32 &&
+                it.totalBytes == candidate.totalBytes &&
+                it.version == candidate.version
+        }
+        if (existing != null) {
+            return FirmwareLibraryImportResult.Duplicate(existing)
+        }
+        val record = runCatching {
+            FirmwareLibraryRecord(
+                fileName = candidate.fileName,
+                version = candidate.version,
+                channel = candidate.channel,
+                modelWhitelist = candidate.modelWhitelist,
+                totalBytes = candidate.totalBytes,
+                crc32 = candidate.crc32,
+                addedAtEpochMillis = clockMillis(),
+                sourcePath = candidate.sourcePath,
+            )
+        }.getOrElse { error ->
+            return FirmwareLibraryImportResult.Rejected(
+                code = "LIBRARY_INVALID_METADATA",
+                detail = error.message.orEmpty(),
+            )
+        }
+        replace(record)
+        persist()
+        return FirmwareLibraryImportResult.Imported(record)
+    }
+
+    /** 设置别名；空白别名表示恢复显示原始文件名。 */
+    fun rename(id: String, alias: String?): Boolean {
+        val records = all()
+        val index = records.indexOfFirst { it.id == id }
+        if (index < 0) return false
+        records[index] = records[index].copy(alias = alias?.trim()?.takeIf { it.isNotEmpty() })
+        persist()
+        return true
+    }
+
+    /** 按设备当前型号/版本选出最新的适用包；不做文件读取，完整预检仍在升级前执行。 */
+    fun latestApplicable(
+        model: String?,
+        currentVersion: FirmwareVersion?,
+    ): FirmwareLibraryRecord? =
+        FirmwareApplicabilityEvaluator.latestApplicable(all(), model, currentVersion)
 
     /** 新增或按身份归并一条记录；重复条目会刷新路径与元信息，但保留常用标记。 */
     fun record(record: FirmwareLibraryRecord): FirmwareLibraryRecord {

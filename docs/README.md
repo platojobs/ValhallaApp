@@ -8,6 +8,7 @@ ValhallaApp 的文档按「先看怎么交付、再看怎么实现」的顺序�
 | 文档 | 说明 |
 | --- | --- |
 | [delivery.md](delivery.md) | 交付物清单、模块说明、构建命令、产物路径、CI 入口、可交付 vs 未完成对照 |
+| [release-notes/v2.9.0.md](release-notes/v2.9.0.md) | v2.9.0 批量操作、本地固件库与 OTA 队列 |
 | [release-notes/v2.8.0.md](release-notes/v2.8.0.md) | v2.8.0 实时信号、本地通知与诊断包 |
 | [release-notes/v2.7.0.md](release-notes/v2.7.0.md) | v2.7.0 配置预设、自动化规则、使用统计与偏好备份 |
 | [release-notes/v2.6.0.md](release-notes/v2.6.0.md) | v2.6.0 设备体检、固件升级向导与设备仪表盘 |
@@ -15,7 +16,7 @@ ValhallaApp 的文档按「先看怎么交付、再看怎么实现」的顺序�
 | [release-notes/v2.3.0.md](release-notes/v2.3.0.md) | v2.3.0 多设备管理、扫描增强、快捷操作与 OTA 历史 |
 | [release-notes/v2.0.0.md](release-notes/v2.0.0.md) | v2.0.0 版本要点、能力边界、已知限制、安装前提、真机验收清单 |
 | [environment-report.md](environment-report.md) | 本机工具链版本与实际构建/测试记录 |
-| [../CHANGELOG.md](../CHANGELOG.md) | v0.0.1 → v2.8.0 全量版本演进 |
+| [../CHANGELOG.md](../CHANGELOG.md) | v0.0.1 → v2.9.0 全量版本演进 |
 
 ## 架构与协议
 

@@ -90,6 +90,21 @@ sealed interface OtaState {
         val rebootRequired: Boolean = false,
     ) : OtaState
 
+    /**
+     * 队列暂停：在分片边界停在安全点，断点已落盘，可通过 [OtaController.resume] 继续。
+     * 与 [Aborted] 不同，暂停不会清除断点。
+     */
+    data class Paused(
+        val sentBytes: Int,
+        val totalBytes: Int,
+        val crc16: Int,
+        val sessionId: Long? = null,
+        val checkpointSaved: Boolean = true,
+    ) : OtaState {
+        val progress: Float
+            get() = if (totalBytes == 0) 0f else sentBytes.toFloat() / totalBytes
+    }
+
     /** 用户主动中止或流程被取消。 */
     data class Aborted(
         val reason: String,
@@ -144,7 +159,28 @@ class OtaController(
     private val clockMillis: () -> Long = { Clock.System.now().toEpochMilliseconds() },
     /** 进度收集协程异常的结构化记录出口；生产环境由界面层注入。 */
     private val errorReporter: ErrorReporter? = null,
+    /** 队列暂停信号：在每个分片完成后检查，true 时停在安全点并保留断点。 */
+    private val pauseSignal: () -> Boolean = { false },
+    /** 队列取消当前信号：与 [abort] 等价，但由队列外部触发。 */
+    private val cancelSignal: () -> Boolean = { false },
 ) {
+
+    private var pauseSignalProvider: () -> Boolean = pauseSignal
+    private var cancelSignalProvider: () -> Boolean = cancelSignal
+
+    /** 队列执行前注入本次运行的暂停/取消信号；执行结束应调用 [clearQueueSignals]。 */
+    fun configureQueueSignals(
+        pauseSignal: () -> Boolean,
+        cancelSignal: () -> Boolean,
+    ) {
+        pauseSignalProvider = pauseSignal
+        cancelSignalProvider = cancelSignal
+    }
+
+    fun clearQueueSignals() {
+        pauseSignalProvider = { false }
+        cancelSignalProvider = { false }
+    }
 
     init {
         require(chunkSize in 1..1024) { "chunkSize 需在 1..1024 之间" }
@@ -250,7 +286,8 @@ class OtaController(
         val current = mutableState.value
         if (current !is OtaState.Preparing &&
             current !is OtaState.Transferring &&
-            current !is OtaState.Verifying
+            current !is OtaState.Verifying &&
+            current !is OtaState.Paused
         ) {
             return current
         }
@@ -405,6 +442,14 @@ class OtaController(
                     saveCheckpoint(sessionId, sent, total, crc16, crc32, version)
                     lastCheckpointBytes = sent
                 }
+
+                // 队列暂停/取消只在分片边界生效，避免把设备停在半片状态。
+                if (cancelSignalProvider()) {
+                    throw OtaAbortedException(OtaAbortReason.USER_CANCELLED)
+                }
+                if (pauseSignalProvider()) {
+                    throw OtaPausedException(sent)
+                }
             }
 
             checkAborted()
@@ -456,6 +501,34 @@ class OtaController(
                 sentBytes = sent,
                 totalBytes = total,
                 detail = aborted.reason.name,
+            )
+            return state
+        } catch (paused: OtaPausedException) {
+            val resumePoint = persistInterruptedCheckpoint(
+                sessionId = sessionId,
+                sentBytes = paused.sentBytes,
+                totalBytes = total,
+                crc16 = crc16,
+                crc32 = crc32,
+                version = version,
+                previous = resumeFrom,
+            )
+            lastResumePoint = resumePoint
+            val state = OtaState.Paused(
+                sentBytes = paused.sentBytes,
+                totalBytes = total,
+                crc16 = crc16,
+                sessionId = sessionId,
+                checkpointSaved = resumePoint != null,
+            )
+            mutableState.value = state
+            recordOtaHistory(
+                version = version,
+                startedAt = startedAt,
+                outcome = OtaOutcome.ABORTED,
+                sentBytes = paused.sentBytes,
+                totalBytes = total,
+                detail = "queue.paused",
             )
             return state
         } catch (error: Throwable) {
@@ -570,8 +643,9 @@ class OtaController(
     }
 
     private suspend fun checkAborted() {
-        val reason = abortMutex.withLock { abortReason } ?: return
-        throw OtaAbortedException(reason)
+        val reason = abortMutex.withLock { abortReason }
+        if (reason != null) throw OtaAbortedException(reason)
+        if (cancelSignalProvider()) throw OtaAbortedException(OtaAbortReason.USER_CANCELLED)
     }
 
     private fun ensureLinkAlive() {
@@ -874,6 +948,9 @@ class OtaController(
 
     private class OtaAbortedException(val reason: OtaAbortReason) : Exception("OTA 已中止：${reason.name}")
 
+    /** 队列暂停信号在分片边界触发，携带已确认的字节数用于落盘断点。 */
+    private class OtaPausedException(val sentBytes: Int) : Exception("OTA 队列暂停")
+
     /** 一次 START_OTA 的结果；[fallbackReason] 非空表示续传被拒后回退为从头开始。 */
     private data class StartSession(
         val response: StartOtaResponse,
@@ -893,6 +970,7 @@ class OtaController(
         is OtaState.Preparing -> 0
         is OtaState.Transferring -> sentBytes
         is OtaState.Verifying -> totalBytes
+        is OtaState.Paused -> sentBytes
         else -> 0
     }
 
@@ -900,6 +978,7 @@ class OtaController(
         is OtaState.Preparing -> totalBytes
         is OtaState.Transferring -> totalBytes
         is OtaState.Verifying -> totalBytes
+        is OtaState.Paused -> totalBytes
         else -> 0
     }
 
