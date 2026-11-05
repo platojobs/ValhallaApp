@@ -12,12 +12,18 @@ import com.valhalla.core.protocol.message.BatteryResponse
 import com.valhalla.core.protocol.message.ConfigResponse
 import com.valhalla.core.protocol.message.DeviceInfoResponse
 import com.valhalla.core.protocol.message.DeviceStatus
+import com.valhalla.core.protocol.message.FactoryResetRequest
+import com.valhalla.core.protocol.message.FactoryResetResponse
 import com.valhalla.core.protocol.message.FirmwareVersion
 import com.valhalla.core.protocol.message.FirmwareVersionResponse
 import com.valhalla.core.protocol.message.GetBatteryRequest
 import com.valhalla.core.protocol.message.GetConfigRequest
 import com.valhalla.core.protocol.message.GetDeviceInfoRequest
 import com.valhalla.core.protocol.message.GetFirmwareVersionRequest
+import com.valhalla.core.protocol.message.HeartbeatRequest
+import com.valhalla.core.protocol.message.HeartbeatResponse
+import com.valhalla.core.protocol.message.RebootRequest
+import com.valhalla.core.protocol.message.RebootResponse
 import com.valhalla.core.protocol.message.SetConfigRequest
 import com.valhalla.core.protocol.message.SetConfigResponse
 import com.valhalla.core.profile.DeviceProfileRepository
@@ -40,6 +46,41 @@ import kotlinx.coroutines.supervisorScope
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
 
+/** 详情页快捷操作的种类。 */
+enum class QuickActionType {
+    REBOOT,
+    FACTORY_RESET,
+    HEARTBEAT,
+}
+
+/**
+ * 快捷操作三态。
+ *
+ * - [Running] 期间禁止再次发起任何快捷操作，保证设备侧不会同时处理两条危险指令；
+ * - [Succeeded] 携带可回读结果：心跳的 uptime/电量，重启的延迟参数；
+ * - [Failed] 保留设备错误码与可展示文案，便于 UI 给出重试或处理建议。
+ */
+sealed interface QuickActionState {
+    data object Idle : QuickActionState
+
+    data class Running(val type: QuickActionType) : QuickActionState
+
+    data class Succeeded(
+        val type: QuickActionType,
+        val uptimeSeconds: Long? = null,
+        val batteryPercent: Int? = null,
+        val delayMillis: Int? = null,
+    ) : QuickActionState
+
+    data class Failed(
+        val type: QuickActionType,
+        val error: UiMessage,
+        val status: DeviceStatus? = null,
+    ) : QuickActionState
+
+    val busy: Boolean get() = this is Running
+}
+
 /** 设备详情页状态。 */
 data class DeviceDetailState(
     val deviceId: String,
@@ -54,6 +95,12 @@ data class DeviceDetailState(
     val logs: List<String> = emptyList(),
     val error: UiMessage? = null,
     val errorCode: DeviceStatus? = null,
+    /** 最近一次快捷操作的状态；不参与 info/config 错误展示。 */
+    val quickAction: QuickActionState = QuickActionState.Idle,
+    /** 心跳回读的设备运行时长（秒）。 */
+    val uptimeSeconds: Long? = null,
+    /** 信息/配置加载中，供界面展示骨架而不是空白。 */
+    val loading: Boolean = false,
 )
 
 /**
@@ -272,7 +319,7 @@ class DeviceDetailController(
      * 因此设备乱序回复也不会串包；单项失败不影响其它项，全部失败才报整体错误。
      */
     suspend fun refreshInfo() {
-        mutableState.value = mutableState.value.copy(error = null, errorCode = null)
+        mutableState.value = mutableState.value.copy(error = null, errorCode = null, loading = true)
 
         val (infoAttempt, firmwareAttempt, batteryAttempt) = supervisorScope {
             val info = async { attempt { dispatcher.execute(GetDeviceInfoRequest()) as DeviceInfoResponse } }
@@ -310,6 +357,7 @@ class DeviceDetailController(
                 null
             },
             errorCode = failures.firstOrNull()?.toFailureInfo()?.status,
+            loading = false,
         )
 
         if (info != null || firmware != null || battery != null) {
@@ -388,6 +436,90 @@ class DeviceDetailController(
             )
             false
         }
+    }
+
+    /**
+     * 快捷操作统一入口：同一时刻只允许一个在途操作。
+     *
+     * 失败时把设备错误码与文案写入 [DeviceDetailState.quickAction]，
+     * 不与信息/配置错误混用，避免一次失败覆盖其它区域的状态。
+     */
+    private suspend fun runQuickAction(
+        type: QuickActionType,
+        block: suspend () -> QuickActionState.Succeeded,
+    ): Boolean {
+        if (mutableState.value.quickAction.busy) return false
+        mutableState.value = mutableState.value.copy(quickAction = QuickActionState.Running(type))
+        return try {
+            val result = block()
+            mutableState.value = mutableState.value.copy(quickAction = result)
+            log(LogLevel.INFO, "快捷操作 ${type.name} 成功")
+            true
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (error: Throwable) {
+            val info = error.toFailureInfo()
+            mutableState.value = mutableState.value.copy(
+                quickAction = QuickActionState.Failed(
+                    type = type,
+                    error = UiMessage(
+                        StringKey.QUICK_ACTION_FAILED,
+                        nested = mapOf("detail" to info.ui),
+                    ),
+                    status = info.status,
+                ),
+            )
+            log(LogLevel.ERROR, "快捷操作 ${type.name} 失败：${info.message}")
+            false
+        }
+    }
+
+    /**
+     * 重启设备；[delayMillis] 为设备侧延迟（0..65535 毫秒）。
+     * 危险操作，调用方必须先做二次确认。
+     */
+    suspend fun reboot(delayMillis: Int = 0): Boolean = runQuickAction(QuickActionType.REBOOT) {
+        val response = dispatcher.execute(RebootRequest(delayMillis = delayMillis))
+        if (response !is RebootResponse) {
+            error("重启应答类型异常: ${response::class.simpleName}")
+        }
+        QuickActionState.Succeeded(QuickActionType.REBOOT, delayMillis = delayMillis)
+    }
+
+    /**
+     * 恢复出厂设置。
+     *
+     * [confirmToken] 的取值与语义以固件为准（当前协议仅定义为字符串）；
+     * 仓库内不臆造确认令牌，界面需明确标注「需固件确认」。
+     */
+    suspend fun factoryReset(confirmToken: String = ""): Boolean =
+        runQuickAction(QuickActionType.FACTORY_RESET) {
+            val response = dispatcher.execute(FactoryResetRequest(confirmToken))
+            if (response !is FactoryResetResponse) {
+                error("恢复出厂应答类型异常: ${response::class.simpleName}")
+            }
+            QuickActionState.Succeeded(QuickActionType.FACTORY_RESET)
+        }
+
+    /**
+     * 心跳探测：回读设备 uptime 与电量，并同步到详情状态。
+     * 请求中的 `uptimeSeconds` 为协议要求字段，客户端以已知回读值或 0 填充。
+     */
+    suspend fun heartbeat(): Boolean = runQuickAction(QuickActionType.HEARTBEAT) {
+        val knownUptime = mutableState.value.uptimeSeconds ?: 0L
+        val response = dispatcher.execute(HeartbeatRequest(knownUptime))
+        if (response !is HeartbeatResponse) {
+            error("心跳应答类型异常: ${response::class.simpleName}")
+        }
+        mutableState.value = mutableState.value.copy(
+            uptimeSeconds = response.uptimeSeconds,
+            batteryPercent = response.batteryPercent,
+        )
+        QuickActionState.Succeeded(
+            type = QuickActionType.HEARTBEAT,
+            uptimeSeconds = response.uptimeSeconds,
+            batteryPercent = response.batteryPercent,
+        )
     }
 
     /** 主动断开，状态回落 DISCONNECTED。 */

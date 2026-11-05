@@ -15,6 +15,34 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
 
+/** RSSI 分档：界面只展示强/中/弱，不直接暴露原始 dBm。 */
+enum class RssiBand {
+    STRONG,
+    MEDIUM,
+    WEAK,
+    ;
+
+    companion object {
+        /** 阈值约定：≥ -60 dBm 强，-75..-61 中，< -75 弱。 */
+        fun of(rssi: Int): RssiBand = when {
+            rssi >= STRONG_THRESHOLD -> STRONG
+            rssi >= MEDIUM_THRESHOLD -> MEDIUM
+            else -> WEAK
+        }
+
+        const val STRONG_THRESHOLD: Int = -60
+        const val MEDIUM_THRESHOLD: Int = -75
+    }
+}
+
+/** 扫描列表排序方式。 */
+enum class ScanSortMode {
+    SIGNAL,
+    NAME,
+    LAST_CONNECTED,
+    ;
+}
+
 /** 扫描页 UI 状态。 */
 data class ScanUiState(
     val scanning: Boolean = false,
@@ -22,6 +50,7 @@ data class ScanUiState(
     val error: UiMessage? = null,
     /** 扫描持续超过阈值仍无设备；与「无权限 / 蓝牙关闭」区分展示。 */
     val timedOut: Boolean = false,
+    val sortMode: ScanSortMode = ScanSortMode.SIGNAL,
 )
 
 /**
@@ -38,6 +67,8 @@ class ScanController(
     private val scope: CoroutineScope,
     private val scanTimeoutMillis: Long = DEFAULT_SCAN_TIMEOUT_MILLIS,
     private val onError: (Throwable) -> Unit = {},
+    /** 最近一次连接时间来源（通常来自 DeviceProfile）；用于「最近连接」排序。 */
+    private val lastConnectedAtProvider: (String) -> Long? = { null },
 ) {
 
     private val mutableState = MutableStateFlow(ScanUiState())
@@ -105,13 +136,41 @@ class ScanController(
         mutableState.value = mutableState.value.copy(devices = emptyList())
     }
 
+    /** 切换排序方式并立即重排当前列表（去重语义不变）。 */
+    fun setSortMode(mode: ScanSortMode) {
+        val current = mutableState.value
+        if (current.sortMode == mode) return
+        mutableState.value = current.copy(
+            sortMode = mode,
+            devices = sort(current.devices, mode),
+        )
+    }
+
     private fun upsert(device: BleDevice) {
         val existing = mutableState.value.devices
         val updated = existing.filterNot { it.deviceId == device.deviceId } + device
         mutableState.value = mutableState.value.copy(
-            devices = updated.sortedByDescending { it.rssi },
+            devices = sort(updated, mutableState.value.sortMode),
             error = null,
             timedOut = false,
+        )
+    }
+
+    private fun sort(devices: List<BleDevice>, mode: ScanSortMode): List<BleDevice> = when (mode) {
+        ScanSortMode.SIGNAL -> devices.sortedWith(
+            compareByDescending<BleDevice> { it.rssi }.thenBy { it.deviceId },
+        )
+
+        ScanSortMode.NAME -> devices.sortedWith(
+            compareBy<BleDevice> { it.name.isNullOrBlank() }
+                .thenBy { it.name?.lowercase().orEmpty() }
+                .thenBy { it.deviceId },
+        )
+
+        ScanSortMode.LAST_CONNECTED -> devices.sortedWith(
+            compareByDescending<BleDevice> {
+                lastConnectedAtProvider(it.deviceId) ?: Long.MIN_VALUE
+            }.thenByDescending { it.rssi }.thenBy { it.deviceId },
         )
     }
 

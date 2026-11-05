@@ -1,7 +1,7 @@
 # 交付说明
 
 本文汇总 ValhallaApp 的可交付内容、构建方式、产物路径与完成度对照。最新发布说明见
-[release-notes/v2.2.0.md](release-notes/v2.2.0.md)，历史版本见
+[release-notes/v2.3.0.md](release-notes/v2.3.0.md)，历史版本见
 [release-notes/v2.0.0.md](release-notes/v2.0.0.md)，全部文档入口见 [README.md](README.md)。
 
 ## 1. 交付物清单
@@ -108,9 +108,9 @@ xcodebuild -project iosApp/iosApp.xcodeproj -scheme iosApp \
 | [testing.md](testing.md) | 设备模拟器、场景矩阵、故障注入、端到端用例 |
 | [environment-report.md](environment-report.md) | 本机工具链与实际构建记录 |
 | [delivery.md](delivery.md) | 本文：交付物、构建命令、产物路径、完成度对照 |
-| [release-notes/v2.2.0.md](release-notes/v2.2.0.md) | v2.2.0 跨端运行时验签与公钥注入 |
+| [release-notes/v2.3.0.md](release-notes/v2.3.0.md) | v2.3.0 多设备管理、扫描增强、快捷操作与 OTA 历史 |
 | [release-notes/v2.0.0.md](release-notes/v2.0.0.md) | v2.0.0 发布说明与真机验收清单 |
-| [CHANGELOG.md](../CHANGELOG.md) | v0.0.1 → v2.2.0 版本演进 |
+| [CHANGELOG.md](../CHANGELOG.md) | v0.0.1 → v2.3.0 版本演进 |
 
 ## 6. 可交付状态与未完成项
 
@@ -133,6 +133,10 @@ xcodebuild -project iosApp/iosApp.xcodeproj -scheme iosApp \
 | 无障碍语义、字体缩放、RTL、状态色对比度 | 代码审查 + `StatusColorContrastTest`；真机朗读未验证 |
 | Android Debug/Release、iOS Framework 构建 | 本机 + CI 构建记录 |
 | 中英双语、主题、关于/帮助/隐私页 | 文案完整性与无硬编码中文测试；**渲染效果未验证** |
+| 多设备管理（槽位/切换/断开/容量拒绝） | `MultiDeviceManagerTest`；真实多设备并发未验证 |
+| 扫描增强（RSSI 分档、三种排序、去重） | `ScanEnhancementsTest`；真机弱信号阈值未校准 |
+| 详情页快捷操作三态（重启/恢复出厂/心跳） | `DeviceDetailControllerTest` 新增用例；固件应答未联调 |
+| OTA 历史完整列表与展开详情 | `DeviceProfileRepository` 测试 + 详情页 UI；真机升级场景未验证 |
 
 ### 仍依赖真机 / 签名 / 固件联调
 
@@ -147,7 +151,7 @@ xcodebuild -project iosApp/iosApp.xcodeproj -scheme iosApp \
 | 生产签名与正式分发 | 自备 keystore / 分发渠道 | 未配置，仓库不含 keystore |
 | 真实远端错误上报 SDK | 远端服务 | 接口与调度器就绪，默认空实现，未接入 |
 | 固件侧协议实现 | 设备固件团队 | 不在本仓库 |
-| 小时级长稳、弱信号、并发多设备 | 真机台架 | 未测量 |
+| 小时级长稳、弱信号、并发多设备 | 真机台架 | 未测量（多设备管理已在逻辑层覆盖，真实并发未验证） |
 | TalkBack / VoiceOver 实际朗读、200% 字体与横屏排版 | 真机 | 语义与滚动容器已就绪，朗读/排版未验证 |
 | 真实崩溃演练与遥测 SDK | 真机 / 远端服务 | 未捕获异常桥接已接入本地记录与脱敏投递，未做崩溃演练、未接 SDK |
 

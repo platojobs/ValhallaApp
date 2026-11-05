@@ -28,7 +28,8 @@ import kotlinx.coroutines.withTimeoutOrNull
  * 说明：鉴权状态（AUTHENTICATING/READY）由 feature 层在拿到会话后推进，本池只负责链路级状态。
  */
 class MultiDeviceConnectionPool(
-    maxConcurrentConnections: Int = 4,
+    /** 同时允许持有的链路上限；UI 需要展示「占用槽位/上限」，因此对外暴露。 */
+    val maxConcurrentConnections: Int = 4,
     val connectTimeoutMillis: Long = 15_000L,
     private val sessionFactory: (String) -> ConnectionSession,
 ) {

@@ -17,6 +17,12 @@ import com.valhalla.core.protocol.message.GetBatteryRequest
 import com.valhalla.core.protocol.message.GetConfigRequest
 import com.valhalla.core.protocol.message.GetDeviceInfoRequest
 import com.valhalla.core.protocol.message.GetFirmwareVersionRequest
+import com.valhalla.core.protocol.message.HeartbeatRequest
+import com.valhalla.core.protocol.message.HeartbeatResponse
+import com.valhalla.core.protocol.message.RebootRequest
+import com.valhalla.core.protocol.message.RebootResponse
+import com.valhalla.core.protocol.message.FactoryResetRequest
+import com.valhalla.core.protocol.message.FactoryResetResponse
 import com.valhalla.core.protocol.message.SetConfigRequest
 import com.valhalla.core.protocol.message.SetConfigResponse
 import com.valhalla.core.security.AuthSignatureMessage
@@ -30,6 +36,8 @@ import com.valhalla.feature.FakeFrameLink
 import com.valhalla.feature.i18n.StringKey
 import com.valhalla.feature.i18n.asChinese
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
@@ -374,5 +382,80 @@ class DeviceDetailControllerTest {
 
         assertNull(controller.loadPersistedToken())
         assertNull(store.load())
+    }
+
+    @Test
+    fun `重启成功进入 Succeeded 并保留延迟参数`() = runTest {
+        val link = FakeFrameLink { request ->
+            if (request is RebootRequest) RebootResponse(DeviceStatus.OK) else null
+        }
+        val controller = DeviceDetailController(ConcurrentCommandDispatcher(link, scope = backgroundScope), "dev-1")
+
+        assertTrue(controller.reboot(1_500))
+        val state = controller.state.value.quickAction
+        assertTrue(state is QuickActionState.Succeeded)
+        assertEquals(QuickActionType.REBOOT, state.type)
+        assertEquals(1_500, state.delayMillis)
+        assertTrue(link.requests.any { it is RebootRequest && it.delayMillis == 1_500 })
+    }
+
+    @Test
+    fun `心跳成功回读 uptime 与电量`() = runTest {
+        val link = FakeFrameLink { request ->
+            if (request is HeartbeatRequest) {
+                HeartbeatResponse(DeviceStatus.OK, uptimeSeconds = 3_600, batteryPercent = 42)
+            } else {
+                null
+            }
+        }
+        val controller = DeviceDetailController(ConcurrentCommandDispatcher(link, scope = backgroundScope), "dev-1")
+
+        assertTrue(controller.heartbeat())
+        assertEquals(3_600L, controller.state.value.uptimeSeconds)
+        assertEquals(42, controller.state.value.batteryPercent)
+        val state = controller.state.value.quickAction
+        assertTrue(state is QuickActionState.Succeeded)
+        assertEquals(QuickActionType.HEARTBEAT, state.type)
+        assertEquals(3_600L, state.uptimeSeconds)
+        assertEquals(42, state.batteryPercent)
+    }
+
+    @Test
+    fun `恢复出厂失败进入 Failed 并携带设备错误码`() = runTest {
+        val link = FakeFrameLink { request ->
+            if (request is FactoryResetRequest) {
+                ErrorResponse(CommandType.FACTORY_RESET, DeviceStatus.AUTH_FAILED, "需要管理员权限")
+            } else {
+                null
+            }
+        }
+        val controller = DeviceDetailController(ConcurrentCommandDispatcher(link, scope = backgroundScope), "dev-1")
+
+        assertFalse(controller.factoryReset("token"))
+        val state = controller.state.value.quickAction
+        assertTrue(state is QuickActionState.Failed)
+        assertEquals(QuickActionType.FACTORY_RESET, state.type)
+        assertEquals(DeviceStatus.AUTH_FAILED, state.status)
+        assertTrue(state.error.asChinese().contains("操作失败"))
+    }
+
+    @Test
+    fun `同一时刻只允许一个快捷操作在途`() = runTest {
+        val link = FakeFrameLink { request ->
+            if (request is RebootRequest) {
+                delay(50)
+                RebootResponse(DeviceStatus.OK)
+            } else {
+                null
+            }
+        }
+        val controller = DeviceDetailController(ConcurrentCommandDispatcher(link, scope = backgroundScope), "dev-1")
+
+        val first = launch { controller.reboot(0) }
+        testScheduler.runCurrent()
+        assertTrue(controller.state.value.quickAction is QuickActionState.Running)
+        assertFalse(controller.reboot(0))
+        first.join()
+        assertTrue(controller.state.value.quickAction is QuickActionState.Succeeded)
     }
 }

@@ -1,6 +1,8 @@
 package com.valhalla.feature.ui
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -12,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.FilterChip
@@ -69,6 +72,15 @@ import com.valhalla.core.logging.validateEntryLimit
 import com.valhalla.core.profile.DeviceProfile
 import com.valhalla.core.profile.DeviceProfileRepository
 import com.valhalla.core.profile.OtaOutcome
+import com.valhalla.core.profile.OtaHistoryRecord
+import com.valhalla.feature.device.ManagedDeviceInfo
+import com.valhalla.feature.device.MultiDeviceConnectResult
+import com.valhalla.feature.device.MultiDeviceManager
+import com.valhalla.feature.device.MultiDeviceState
+import com.valhalla.feature.detail.QuickActionState
+import com.valhalla.feature.detail.QuickActionType
+import com.valhalla.feature.scan.RssiBand
+import com.valhalla.feature.scan.ScanSortMode
 import com.valhalla.feature.error.ErrorReporter
 import com.valhalla.feature.error.LocalErrorReporter
 import com.valhalla.feature.error.installUncaughtExceptionBridge
@@ -171,13 +183,14 @@ private class ReconnectSession(
 
 private sealed interface Route {
     data object Scan : Route
+    data object Devices : Route
     data object Settings : Route
     data object About : Route
     data object Help : Route
     data object Privacy : Route
-    data class Detail(val session: DeviceSession) : Route
-    data class Ota(val session: DeviceSession) : Route
-    data class Logs(val session: DeviceSession) : Route
+    data class Detail(val deviceId: String) : Route
+    data class Ota(val deviceId: String) : Route
+    data class Logs(val deviceId: String) : Route
 }
 
 /**
@@ -225,15 +238,25 @@ private fun ValhallaContent(
     val permissionController = rememberBlePermissionController(bleClient)
     val scope = rememberCoroutineScope()
     val errorReporter = LocalErrorReporter.current
+    // 档案仓储跨连接共享，保证扫描/详情页看到同一份设备历史。
+    val profileRepository = remember { DeviceProfileRepository(createDeviceProfileStore()) }
     val scanController = remember {
         ScanController(
             bleClient = bleClient,
             scope = scope,
             onError = { error -> errorReporter.record("scan", error) },
+            lastConnectedAtProvider = { id ->
+                profileRepository.get(id)?.lastConnectedAtEpochMillis
+            },
         )
     }
-    // 档案仓储跨连接共享，保证扫描/详情页看到同一份设备历史。
-    val profileRepository = remember { DeviceProfileRepository(createDeviceProfileStore()) }
+
+    // 多设备管理：容量上限、槽位、当前操作设备与断开都经同一管理器。
+    val deviceManager = remember {
+        MultiDeviceManager(bleClient = bleClient, capacity = 4)
+    }
+    var sessions by remember { mutableStateOf<Map<String, DeviceSession>>(emptyMap()) }
+    val deviceState by deviceManager.state.collectAsState()
 
     val permissionState by permissionController.state.collectAsState()
     val adapterState by bleClient.adapterState.collectAsState()
@@ -327,7 +350,10 @@ private fun ValhallaContent(
                     runCatching { session.dispatcher.close() }
                 }
                 reconnect = null
-                route = Route.Detail(createSession(connection, device, packetLog))
+                val refreshed = createSession(connection, device, packetLog)
+                sessions = sessions + (device.deviceId to refreshed)
+                deviceManager.replaceConnection(device.deviceId, connection)
+                route = Route.Detail(device.deviceId)
             },
             onError = { error -> errorReporter.record("reconnect", error) },
         )
@@ -356,6 +382,8 @@ private fun ValhallaContent(
             availability = availability,
             connectingDeviceId = connectingDeviceId,
             errorMessage = errorMessage,
+            deviceCount = deviceState.occupied,
+            profileLookup = { id -> profileRepository.get(id) },
             onStart = {
                 if (!availability.allowsConnection()) {
                     errorMessage = availability.guidance()?.message
@@ -366,6 +394,8 @@ private fun ValhallaContent(
                 scanController.startScan()
             },
             onStop = { scanController.stopScan() },
+            onSortChange = { scanController.setSortMode(it) },
+            onOpenDevices = { route = Route.Devices },
             onSelect = select@{ device ->
                 if (!availability.allowsConnection()) {
                     errorMessage = availability.guidance()?.message
@@ -376,21 +406,43 @@ private fun ValhallaContent(
                     connectingDeviceId = device.deviceId
                     errorMessage = null
                     try {
-                        val connection = bleClient.connect(device.deviceId)
-                        scanController.stopScan()
-                        route = Route.Detail(createSession(connection, device, InMemoryPacketLog()))
+                        when (val result = deviceManager.connect(device)) {
+                            is MultiDeviceConnectResult.Connected -> {
+                                scanController.stopScan()
+                                sessions = sessions + (
+                                    device.deviceId to createSession(
+                                        result.device.connection,
+                                        device,
+                                        InMemoryPacketLog(),
+                                    )
+                                    )
+                                deviceManager.select(device.deviceId)
+                                route = Route.Detail(device.deviceId)
+                            }
+
+                            MultiDeviceConnectResult.AlreadyConnected -> {
+                                deviceManager.select(device.deviceId)
+                                route = Route.Detail(device.deviceId)
+                            }
+
+                            is MultiDeviceConnectResult.LimitReached -> {
+                                errorMessage = UiMessage(
+                                    StringKey.DEVICES_LIMIT_REACHED,
+                                    mapOf("capacity" to result.capacity.toString()),
+                                )
+                            }
+
+                            is MultiDeviceConnectResult.Failed -> {
+                                errorMessage = UiMessage(
+                                    StringKey.ERROR_PREFIX,
+                                    mapOf("detail" to result.message),
+                                )
+                            }
+
+                            MultiDeviceConnectResult.InProgress -> Unit
+                        }
                     } catch (cancellation: CancellationException) {
                         throw cancellation
-                    } catch (error: Throwable) {
-                        val info = classifyDisconnect(
-                            DisconnectSignals(
-                                timeout = error is BleTimeoutException,
-                                transportError = true,
-                                adapterState = adapterState,
-                                permissionState = permissionState,
-                            ),
-                        )
-                        errorMessage = info.message
                     } finally {
                         connectingDeviceId = null
                     }
@@ -398,6 +450,40 @@ private fun ValhallaContent(
             },
             onBleAction = { handleBleAction(it) },
             onOpenSettings = { route = Route.Settings },
+        )
+
+        Route.Devices -> DevicesScreen(
+            state = deviceState,
+            onSwitch = { id ->
+                deviceManager.select(id)
+                route = Route.Detail(id)
+            },
+            onDisconnect = { id ->
+                scope.launchSafely(errorReporter, "disconnect-device") {
+                    sessions[id]?.let { session ->
+                        runCatching { session.detail.disconnect() }
+                        runCatching { session.dispatcher.close() }
+                    }
+                    sessions = sessions - id
+                    deviceManager.disconnect(id)
+                    val currentRoute = route
+                    if (currentRoute is Route.Detail && currentRoute.deviceId == id) {
+                        route = Route.Scan
+                    }
+                }
+            },
+            onDisconnectAll = {
+                scope.launchSafely(errorReporter, "disconnect-all") {
+                    sessions.values.forEach { session ->
+                        runCatching { session.detail.disconnect() }
+                        runCatching { session.dispatcher.close() }
+                    }
+                    sessions = emptyMap()
+                    deviceManager.disconnectAll()
+                    route = Route.Scan
+                }
+            },
+            onBack = { route = Route.Scan },
         )
 
         Route.Settings -> SettingsScreen(
@@ -416,61 +502,88 @@ private fun ValhallaContent(
         Route.Privacy -> PrivacyScreen(onBack = { route = Route.Settings })
 
         is Route.Detail -> {
-            val connected by current.session.connection.connected.collectAsState()
-            val disconnectInfo = if (!connected) {
-                classifyDisconnect(
-                    DisconnectSignals(
-                        userRequested = current.session.userDisconnected,
-                        peerTerminated = !current.session.userDisconnected,
-                        adapterState = adapterState,
-                        permissionState = permissionState,
-                    ),
-                )
+            val session = sessions[current.deviceId]
+            if (session == null) {
+                LaunchedEffect(current.deviceId) { route = Route.Devices }
             } else {
-                null
+                val connected by session.connection.connected.collectAsState()
+                val disconnectInfo = if (!connected) {
+                    classifyDisconnect(
+                        DisconnectSignals(
+                            userRequested = session.userDisconnected,
+                            peerTerminated = !session.userDisconnected,
+                            adapterState = adapterState,
+                            permissionState = permissionState,
+                        ),
+                    )
+                } else {
+                    null
+                }
+                DetailScreen(
+                    session = session,
+                    connectedCount = deviceState.occupied,
+                    disconnectInfo = disconnectInfo,
+                    reconnectState = reconnect
+                        ?.takeIf { it.device.deviceId == session.device.deviceId }
+                        ?.controller
+                        ?.state
+                        ?.collectAsState()
+                        ?.value,
+                    onConnectionLost = {
+                        if (!session.userDisconnected) startReconnect(session)
+                    },
+                    onRetryReconnect = { startReconnect(session) },
+                    onCancelReconnect = {
+                        reconnect?.controller?.cancel()
+                        reconnect = null
+                    },
+                    onBleAction = { handleBleAction(it) },
+                    onOpenDevices = { route = Route.Devices },
+                    onBack = {
+                        session.userDisconnected = true
+                        reconnect?.controller?.cancel()
+                        reconnect = null
+                        scope.launchSafely(errorReporter, "disconnect-back") {
+                            session.detail.disconnect()
+                            session.dispatcher.close()
+                            sessions = sessions - current.deviceId
+                            deviceManager.disconnect(current.deviceId)
+                            route = if (deviceManager.state.value.occupied > 1) {
+                                Route.Devices
+                            } else {
+                                Route.Scan
+                            }
+                        }
+                    },
+                    onOpenOta = { route = Route.Ota(current.deviceId) },
+                    onOpenLogs = { route = Route.Logs(current.deviceId) },
+                )
             }
-            DetailScreen(
-                session = current.session,
-                disconnectInfo = disconnectInfo,
-                reconnectState = reconnect
-                    ?.takeIf { it.device.deviceId == current.session.device.deviceId }
-                    ?.controller
-                    ?.state
-                    ?.collectAsState()
-                    ?.value,
-                onConnectionLost = {
-                    if (!current.session.userDisconnected) startReconnect(current.session)
-                },
-                onRetryReconnect = { startReconnect(current.session) },
-                onCancelReconnect = {
-                    reconnect?.controller?.cancel()
-                    reconnect = null
-                },
-                onBleAction = { handleBleAction(it) },
-                onBack = {
-                    current.session.userDisconnected = true
-                    reconnect?.controller?.cancel()
-                    reconnect = null
-                    scope.launchSafely(errorReporter, "disconnect-back") {
-                        current.session.detail.disconnect()
-                        current.session.dispatcher.close()
-                        route = Route.Scan
-                    }
-                },
-                onOpenOta = { route = Route.Ota(current.session) },
-                onOpenLogs = { route = Route.Logs(current.session) },
-            )
         }
 
-        is Route.Ota -> OtaScreen(
-            session = current.session,
-            onBack = { route = Route.Detail(current.session) },
-        )
+        is Route.Ota -> {
+            val session = sessions[current.deviceId]
+            if (session == null) {
+                LaunchedEffect(current.deviceId) { route = Route.Devices }
+            } else {
+                OtaScreen(
+                    session = session,
+                    onBack = { route = Route.Detail(current.deviceId) },
+                )
+            }
+        }
 
-        is Route.Logs -> PacketLogScreen(
-            packetLog = current.session.packetLog,
-            onBack = { route = Route.Detail(current.session) },
-        )
+        is Route.Logs -> {
+            val session = sessions[current.deviceId]
+            if (session == null) {
+                LaunchedEffect(current.deviceId) { route = Route.Devices }
+            } else {
+                PacketLogScreen(
+                    packetLog = session.packetLog,
+                    onBack = { route = Route.Detail(current.deviceId) },
+                )
+            }
+        }
     }
 }
 
@@ -480,14 +593,20 @@ private fun ScanScreen(
     availability: BleAvailability,
     connectingDeviceId: String?,
     errorMessage: UiMessage?,
+    deviceCount: Int,
+    profileLookup: (String) -> DeviceProfile?,
     onStart: () -> Unit,
     onStop: () -> Unit,
+    onSortChange: (ScanSortMode) -> Unit,
+    onOpenDevices: () -> Unit,
     onSelect: (BleDevice) -> Unit,
     onBleAction: (BleGuidanceAction) -> Unit,
     onOpenSettings: () -> Unit,
 ) {
     val strings = LocalStrings.current
     val status = statusColors()
+    val format = remember(strings.language) { LocaleFormat(strings.language) }
+    val zoneOffsetMinutes = remember { currentTimeZoneOffsetMinutes(Clock.System.now().toEpochMilliseconds()) }
     val canScan = availability.allowsConnection()
     val guidance = availability.guidance()
     val emptyReason = classifyScanEmpty(
@@ -508,6 +627,9 @@ private fun ScanScreen(
                 style = MaterialTheme.typography.headlineSmall,
                 modifier = Modifier.weight(1f),
             )
+            TextButton(onClick = onOpenDevices) {
+                Text(strings.t(StringKey.DEVICES_ENTRY, "count" to deviceCount.toString()))
+            }
             TextButton(onClick = onOpenSettings) { Text(strings.t(StringKey.SETTINGS)) }
         }
         Text(
@@ -550,6 +672,32 @@ private fun ScanScreen(
             ) {
                 Text(strings.t(StringKey.STOP_SCAN))
             }
+        }
+
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm),
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                strings.t(StringKey.SCAN_SORT_LABEL),
+                style = MaterialTheme.typography.bodySmall,
+            )
+            FilterChip(
+                selected = state.sortMode == ScanSortMode.SIGNAL,
+                onClick = { onSortChange(ScanSortMode.SIGNAL) },
+                label = { Text(strings.t(StringKey.SCAN_SORT_SIGNAL)) },
+            )
+            FilterChip(
+                selected = state.sortMode == ScanSortMode.NAME,
+                onClick = { onSortChange(ScanSortMode.NAME) },
+                label = { Text(strings.t(StringKey.SCAN_SORT_NAME)) },
+            )
+            FilterChip(
+                selected = state.sortMode == ScanSortMode.LAST_CONNECTED,
+                onClick = { onSortChange(ScanSortMode.LAST_CONNECTED) },
+                label = { Text(strings.t(StringKey.SCAN_SORT_LAST_CONNECTED)) },
+            )
         }
 
         if (state.scanning) {
@@ -598,17 +746,22 @@ private fun ScanScreen(
             verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm),
         ) {
             items(state.devices, key = { it.deviceId }) { device ->
-                val itemDescription = strings.t(
-                    StringKey.DEVICE_RSSI,
-                    "id" to device.deviceId,
-                    "rssi" to device.rssi.toString(),
-                )
+                val band = RssiBand.of(device.rssi)
+                val bandLabel = rssiBandLabel(band, strings)
+                val profile = profileLookup(device.deviceId)
+                val itemDescription = buildString {
+                    append(device.name ?: strings.t(StringKey.UNNAMED_DEVICE))
+                    append(", ")
+                    append(bandLabel)
+                    if (profile != null) {
+                        append(", ")
+                        append(strings.t(StringKey.SCAN_PROFILE_MARK))
+                    }
+                }
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .semantics(mergeDescendants = true) {
-                            contentDescription = ((device.name ?: strings.t(StringKey.UNNAMED_DEVICE)) + ", " + itemDescription)
-                        }
+                        .semantics(mergeDescendants = true) { contentDescription = itemDescription }
                         .clickable(enabled = canScan) { onSelect(device) },
                 ) {
                     Column(modifier = Modifier.padding(DesignTokens.Spacing.md)) {
@@ -616,14 +769,27 @@ private fun ScanScreen(
                             device.name ?: strings.t(StringKey.UNNAMED_DEVICE),
                             style = MaterialTheme.typography.titleMedium,
                         )
-                        Text(
-                            strings.t(
-                                StringKey.DEVICE_RSSI,
-                                "id" to device.deviceId,
-                                "rssi" to device.rssi.toString(),
-                            ),
-                            style = MaterialTheme.typography.bodySmall,
-                        )
+                        Text(bandLabel, style = MaterialTheme.typography.bodySmall)
+                        if (profile != null) {
+                            Text(
+                                strings.t(StringKey.SCAN_PROFILE_MARK) + " · " +
+                                    strings.t(
+                                        StringKey.SCAN_LAST_CONNECTED,
+                                        "time" to format.absoluteTime(
+                                            profile.lastConnectedAtEpochMillis,
+                                            zoneOffsetMinutes,
+                                        ),
+                                    ),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        } else {
+                            Text(
+                                strings.t(StringKey.SCAN_NEVER_CONNECTED),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                 }
             }
@@ -636,6 +802,12 @@ private fun ScanScreen(
             )
         }
     }
+}
+
+private fun rssiBandLabel(band: RssiBand, strings: StringResolver): String = when (band) {
+    RssiBand.STRONG -> strings.t(StringKey.SCAN_RSSI_STRONG)
+    RssiBand.MEDIUM -> strings.t(StringKey.SCAN_RSSI_MEDIUM)
+    RssiBand.WEAK -> strings.t(StringKey.SCAN_RSSI_WEAK)
 }
 
 private fun emptyReasonText(reason: ScanEmptyReason, strings: StringResolver): String? = when (reason) {
@@ -651,6 +823,120 @@ private fun emptyReasonText(reason: ScanEmptyReason, strings: StringResolver): S
     ScanEmptyReason.UNSUPPORTED -> strings.t(StringKey.SCAN_EMPTY_UNSUPPORTED)
     ScanEmptyReason.UNKNOWN_AVAILABILITY -> strings.t(StringKey.SCAN_EMPTY_UNKNOWN)
     ScanEmptyReason.ERROR -> null
+}
+
+@Composable
+private fun DevicesScreen(
+    state: MultiDeviceState,
+    onSwitch: (String) -> Unit,
+    onDisconnect: (String) -> Unit,
+    onDisconnectAll: () -> Unit,
+    onBack: () -> Unit,
+) {
+    val strings = LocalStrings.current
+    val format = remember(strings.language) { LocaleFormat(strings.language) }
+    val zoneOffsetMinutes = remember { currentTimeZoneOffsetMinutes(Clock.System.now().toEpochMilliseconds()) }
+
+    Column(
+        modifier = Modifier.fillMaxSize().padding(DesignTokens.Spacing.lg),
+        verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.md),
+    ) {
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                strings.t(StringKey.DEVICES_TITLE),
+                style = MaterialTheme.typography.headlineSmall,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = onBack) { Text(strings.t(StringKey.BACK)) }
+        }
+
+        Text(strings.t(StringKey.DEVICES_LIMIT_POLICY), style = MaterialTheme.typography.bodySmall)
+
+        if (state.devices.isEmpty()) {
+            Text(strings.t(StringKey.DEVICES_EMPTY), style = MaterialTheme.typography.bodyMedium)
+        }
+
+        LazyColumn(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm),
+        ) {
+            items(state.devices, key = { it.deviceId }) { item ->
+                DeviceRow(
+                    item = item,
+                    capacity = state.capacity,
+                    active = item.deviceId == state.activeDeviceId,
+                    format = format,
+                    zoneOffsetMinutes = zoneOffsetMinutes,
+                    onSwitch = { onSwitch(item.deviceId) },
+                    onDisconnect = { onDisconnect(item.deviceId) },
+                )
+            }
+        }
+
+        if (state.devices.isNotEmpty()) {
+            OutlinedButton(onClick = onDisconnectAll, modifier = Modifier.fillMaxWidth()) {
+                Text(strings.t(StringKey.DEVICES_DISCONNECT_ALL))
+            }
+        }
+
+        OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) {
+            Text(strings.t(StringKey.DEVICES_BACK_TO_SCAN))
+        }
+    }
+}
+
+@Composable
+private fun DeviceRow(
+    item: ManagedDeviceInfo,
+    capacity: Int,
+    active: Boolean,
+    format: LocaleFormat,
+    zoneOffsetMinutes: Int,
+    onSwitch: () -> Unit,
+    onDisconnect: () -> Unit,
+) {
+    val strings = LocalStrings.current
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(DesignTokens.Spacing.md),
+            verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(item.displayName, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                if (active) {
+                    Text(
+                        strings.t(StringKey.DEVICES_ACTIVE),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+            Text(item.deviceId, style = MaterialTheme.typography.bodySmall)
+            Text(
+                strings.t(
+                    StringKey.DEVICES_SLOT,
+                    "slot" to item.slot.toString(),
+                    "capacity" to capacity.toString(),
+                ),
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Text(
+                strings.t(
+                    StringKey.DEVICES_CONNECTED_AT,
+                    "time" to format.absoluteTime(item.connectedAtMillis, zoneOffsetMinutes),
+                ),
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm)) {
+                OutlinedButton(onClick = onSwitch, enabled = !active) {
+                    Text(strings.t(StringKey.DEVICES_SWITCH))
+                }
+                TextButton(onClick = onDisconnect) {
+                    Text(strings.t(StringKey.DEVICES_DISCONNECT))
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -748,15 +1034,18 @@ private fun DisconnectBanner(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun DetailScreen(
     session: DeviceSession,
+    connectedCount: Int,
     disconnectInfo: DisconnectInfo?,
     reconnectState: ReconnectState?,
     onConnectionLost: () -> Unit,
     onRetryReconnect: () -> Unit,
     onCancelReconnect: () -> Unit,
     onBleAction: (BleGuidanceAction) -> Unit,
+    onOpenDevices: () -> Unit,
     onBack: () -> Unit,
     onOpenOta: () -> Unit,
     onOpenLogs: () -> Unit,
@@ -770,6 +1059,7 @@ private fun DetailScreen(
     val connected by session.connection.connected.collectAsState()
     val scope = rememberCoroutineScope()
     val errorReporter = LocalErrorReporter.current
+    val clipboard = LocalClipboardManager.current
     val profile = session.profileRepository.get(state.deviceId)
     val zoneOffsetMinutes = remember { currentTimeZoneOffsetMinutes(Clock.System.now().toEpochMilliseconds()) }
     var authMode by remember { mutableStateOf(AuthMode.TOKEN) }
@@ -805,12 +1095,15 @@ private fun DetailScreen(
         modifier = Modifier.fillMaxSize().padding(DesignTokens.Spacing.lg),
         verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.md),
     ) {
-        Row(modifier = Modifier.fillMaxWidth()) {
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(
                 strings.t(StringKey.DETAIL_TITLE),
                 style = MaterialTheme.typography.headlineSmall,
                 modifier = Modifier.weight(1f),
             )
+            TextButton(onClick = onOpenDevices) {
+                Text(strings.t(StringKey.DEVICES_ENTRY, "count" to connectedCount.toString()))
+            }
             TextButton(onClick = onBack) { Text(strings.t(StringKey.BACK)) }
         }
 
@@ -831,7 +1124,21 @@ private fun DetailScreen(
         ) {
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs)) {
-                    Text(state.deviceId, style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        state.deviceId,
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.combinedClickable(
+                            onClick = {},
+                            onLongClick = {
+                                clipboard.setText(AnnotatedString(state.deviceId))
+                            },
+                        ),
+                    )
+                    Text(
+                        strings.t(StringKey.LONG_PRESS_TO_COPY),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                     Text(strings.t(StringKey.STATE_LABEL, "state" to state.deviceState.toString()))
                     Text(
                         strings.t(
@@ -929,6 +1236,15 @@ private fun DetailScreen(
                 }
             }
 
+            if (state.loading) {
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm)) {
+                        Text(strings.t(StringKey.LOADING_DETAIL), style = MaterialTheme.typography.bodySmall)
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    }
+                }
+            }
+
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm)) {
                     OutlinedButton(onClick = onOpenOta, modifier = Modifier.fillMaxWidth()) {
@@ -940,16 +1256,29 @@ private fun DetailScreen(
                 }
             }
 
+            item {
+                QuickActionSection(
+                    controller = controller,
+                    quickAction = state.quickAction,
+                    connected = connected,
+                )
+            }
+
             state.error?.let { message ->
                 item {
                     Column(verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs)) {
                         Text(
                             strings.render(message),
                             color = status.error,
-                            modifier = Modifier.semantics {
-                                liveRegion = LiveRegionMode.Polite
-                                contentDescription = strings.render(message)
-                            },
+                            modifier = Modifier
+                                .combinedClickable(
+                                    onClick = {},
+                                    onLongClick = { clipboard.setText(AnnotatedString(strings.render(message))) },
+                                )
+                                .semantics {
+                                    liveRegion = LiveRegionMode.Polite
+                                    contentDescription = strings.render(message)
+                                },
                         )
                         state.errorCode?.let { code ->
                             Text(
@@ -961,7 +1290,36 @@ private fun DetailScreen(
                                 style = MaterialTheme.typography.bodySmall,
                             )
                         }
+                        Row(horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm)) {
+                            OutlinedButton(
+                                onClick = {
+                                    scope.launchSafely(errorReporter, "retry-info") { controller.refreshInfo() }
+                                },
+                            ) {
+                                Text(strings.t(StringKey.ACTION_RETRY))
+                            }
+                            TextButton(
+                                onClick = { clipboard.setText(AnnotatedString(strings.render(message))) },
+                            ) {
+                                Text(strings.t(StringKey.LONG_PRESS_TO_COPY))
+                            }
+                        }
                     }
+                }
+            }
+
+            (state.quickAction as? QuickActionState.Failed)?.let { failure ->
+                item {
+                    Text(
+                        strings.render(failure.error),
+                        color = status.error,
+                        modifier = Modifier.combinedClickable(
+                            onClick = {},
+                            onLongClick = {
+                                clipboard.setText(AnnotatedString(strings.render(failure.error)))
+                            },
+                        ),
+                    )
                 }
             }
 
@@ -991,6 +1349,169 @@ private fun DetailScreen(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun QuickActionSection(
+    controller: DeviceDetailController,
+    quickAction: QuickActionState,
+    connected: Boolean,
+) {
+    val strings = LocalStrings.current
+    val scope = rememberCoroutineScope()
+    val errorReporter = LocalErrorReporter.current
+    var showRebootDialog by remember { mutableStateOf(false) }
+    var showFactoryDialog by remember { mutableStateOf(false) }
+    var delayText by remember { mutableStateOf("0") }
+    var confirmToken by remember { mutableStateOf("") }
+    val busy = quickAction.busy
+    val enabled = connected && !busy
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(DesignTokens.Spacing.md),
+            verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm),
+        ) {
+            Text(strings.t(StringKey.QUICK_ACTIONS_TITLE), style = MaterialTheme.typography.titleMedium)
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm),
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+            ) {
+                OutlinedButton(onClick = { showRebootDialog = true }, enabled = enabled) {
+                    Text(strings.t(StringKey.QUICK_REBOOT))
+                }
+                OutlinedButton(onClick = { showFactoryDialog = true }, enabled = enabled) {
+                    Text(strings.t(StringKey.QUICK_FACTORY_RESET))
+                }
+                Button(
+                    enabled = enabled,
+                    onClick = {
+                        scope.launchSafely(errorReporter, "quick-heartbeat") {
+                            controller.heartbeat()
+                        }
+                    },
+                ) {
+                    Text(strings.t(StringKey.QUICK_HEARTBEAT))
+                }
+            }
+
+            when (quickAction) {
+                QuickActionState.Idle -> Unit
+                is QuickActionState.Running -> {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    Text(strings.t(StringKey.QUICK_RUNNING), style = MaterialTheme.typography.bodySmall)
+                }
+
+                is QuickActionState.Succeeded -> when (quickAction.type) {
+                    QuickActionType.REBOOT -> Text(
+                        strings.t(
+                            StringKey.QUICK_REBOOT_SUCCESS,
+                            "delay" to (quickAction.delayMillis ?: 0).toString(),
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+
+                    QuickActionType.FACTORY_RESET -> Text(
+                        strings.t(StringKey.QUICK_FACTORY_SUCCESS),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+
+                    QuickActionType.HEARTBEAT -> Text(
+                        strings.t(
+                            StringKey.QUICK_HEARTBEAT_SUCCESS,
+                            "uptime" to "${quickAction.uptimeSeconds ?: 0}s",
+                            "percent" to (quickAction.batteryPercent?.toString()
+                                ?: strings.t(StringKey.UNKNOWN)),
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+
+                is QuickActionState.Failed -> Unit // 失败文案统一在页面错误区展示，支持长按复制。
+            }
+        }
+    }
+
+    if (showRebootDialog) {
+        AlertDialog(
+            onDismissRequest = { showRebootDialog = false },
+            title = { Text(strings.t(StringKey.QUICK_REBOOT_CONFIRM_TITLE)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm)) {
+                    Text(strings.t(StringKey.QUICK_REBOOT_CONFIRM_MESSAGE))
+                    OutlinedTextField(
+                        value = delayText,
+                        onValueChange = { value ->
+                            if (value.all { it.isDigit() } && value.length <= 5) delayText = value
+                        },
+                        label = { Text(strings.t(StringKey.QUICK_REBOOT_DELAY_LABEL)) },
+                        singleLine = true,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showRebootDialog = false
+                        val delay = delayText.toIntOrNull()?.coerceIn(0, 65_535) ?: 0
+                        scope.launchSafely(errorReporter, "quick-reboot") {
+                            controller.reboot(delay)
+                        }
+                    },
+                ) { Text(strings.t(StringKey.CONFIRM)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRebootDialog = false }) {
+                    Text(strings.t(StringKey.CANCEL))
+                }
+            },
+        )
+    }
+
+    if (showFactoryDialog) {
+        AlertDialog(
+            onDismissRequest = { showFactoryDialog = false },
+            title = { Text(strings.t(StringKey.QUICK_FACTORY_CONFIRM_TITLE)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm)) {
+                    Text(strings.t(StringKey.QUICK_FACTORY_CONFIRM_MESSAGE))
+                    Text(
+                        strings.t(StringKey.QUICK_FACTORY_IRREVERSIBLE),
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Text(
+                        strings.t(StringKey.QUICK_FIRMWARE_CONFIRM),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    OutlinedTextField(
+                        value = confirmToken,
+                        onValueChange = { confirmToken = it },
+                        label = { Text(strings.t(StringKey.QUICK_CONFIRM_TOKEN_LABEL)) },
+                        singleLine = true,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showFactoryDialog = false
+                        scope.launchSafely(errorReporter, "quick-factory-reset") {
+                            controller.factoryReset(confirmToken)
+                        }
+                    },
+                ) { Text(strings.t(StringKey.CONFIRM)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showFactoryDialog = false }) {
+                    Text(strings.t(StringKey.CANCEL))
+                }
+            },
+        )
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ProfileCard(
     profile: DeviceProfile,
@@ -999,6 +1520,7 @@ private fun ProfileCard(
 ) {
     val strings = LocalStrings.current
     val status = statusColors()
+    var expandedIndex by remember(profile.deviceId) { mutableStateOf<Int?>(null) }
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(DesignTokens.Spacing.md),
@@ -1023,39 +1545,115 @@ private fun ProfileCard(
                 ),
                 style = MaterialTheme.typography.bodySmall,
             )
-            profile.lastOtaRecord?.let { record ->
+            Text(strings.t(StringKey.OTA_HISTORY_TITLE), style = MaterialTheme.typography.titleSmall)
+            if (profile.otaHistory.isEmpty()) {
                 Text(
-                    strings.t(
-                        StringKey.PROFILE_LAST_OTA,
-                        "outcome" to record.outcome.label(strings),
-                    ),
+                    strings.t(StringKey.OTA_HISTORY_EMPTY),
                     style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            } else {
                 Text(
-                    strings.t(
-                        StringKey.PROFILE_OTA_RECORD,
-                        "outcome" to record.outcome.label(strings),
-                        "version" to record.firmwareVersion,
-                        "duration" to format.number(record.durationMillis),
-                    ),
-                    style = MaterialTheme.typography.bodySmall,
+                    strings.t(StringKey.OTA_HISTORY_PRIVACY),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                record.errorCode?.let {
-                    Text(
-                        strings.t(StringKey.ERROR_CODE_LABEL, "code" to it),
-                        color = status.error,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-                record.detail?.let {
-                    Text(
-                        strings.t(StringKey.TECHNICAL_DETAIL, "detail" to it),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+            }
+            profile.otaHistory.forEachIndexed { index, record ->
+                OtaHistoryRow(
+                    record = record,
+                    expanded = expandedIndex == index,
+                    onToggle = { expandedIndex = if (expandedIndex == index) null else index },
+                    format = format,
+                    zoneOffsetMinutes = zoneOffsetMinutes,
+                    status = status,
+                )
             }
         }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun OtaHistoryRow(
+    record: OtaHistoryRecord,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    format: LocaleFormat,
+    zoneOffsetMinutes: Int,
+    status: DesignTokens.StatusColors,
+) {
+    val strings = LocalStrings.current
+    val failed = record.outcome == OtaOutcome.FAILED
+    val outcomeColor = if (failed) status.error else MaterialTheme.colorScheme.onSurface
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(onClick = onToggle, onLongClick = {})
+            .padding(vertical = DesignTokens.Spacing.xs),
+        verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                record.firmwareVersion,
+                style = MaterialTheme.typography.bodyMedium,
+                color = outcomeColor,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                record.outcome.label(strings),
+                style = MaterialTheme.typography.labelMedium,
+                color = outcomeColor,
+            )
+        }
+        Text(
+            strings.t(
+                StringKey.OTA_HISTORY_TIME,
+                "time" to format.absoluteTime(record.finishedAtEpochMillis, zoneOffsetMinutes),
+            ),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (expanded) {
+            Text(
+                strings.t(
+                    StringKey.PROFILE_OTA_RECORD,
+                    "outcome" to record.outcome.label(strings),
+                    "version" to record.firmwareVersion,
+                    "duration" to format.number(record.durationMillis),
+                ),
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Text(
+                strings.t(
+                    StringKey.OTA_HISTORY_BYTES,
+                    "sent" to record.sentBytes.toString(),
+                    "total" to record.totalBytes.toString(),
+                ),
+                style = MaterialTheme.typography.bodySmall,
+            )
+            record.errorCode?.let {
+                Text(
+                    strings.t(StringKey.ERROR_CODE_LABEL, "code" to it),
+                    color = status.error,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            record.detail?.let {
+                Text(
+                    strings.t(StringKey.TECHNICAL_DETAIL, "detail" to it),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        Text(
+            strings.t(
+                if (expanded) StringKey.OTA_HISTORY_COLLAPSE else StringKey.OTA_HISTORY_EXPAND,
+            ),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.primary,
+        )
     }
 }
 

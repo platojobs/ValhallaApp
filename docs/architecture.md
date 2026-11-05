@@ -487,6 +487,18 @@ CompositionLocalProvider(LocalStrings) → 全部 Composable 页面
    （`:core:iosSimulatorArm64Test`）执行 `SecKeyVerifySignature`。CI 两个 job 失败即红，
    不使用 `continue-on-error`，避免「推断了但没跑」的静默通过。
 
+7. **多设备管理（v2.3.0）**：`MultiDeviceManager` 在 `MultiDeviceConnectionPool` 之上维护
+   槽位、容量前置拒绝与当前操作设备；容量满时直接返回 `LimitReached`，不进入排队。
+   每个设备持有独立 `DeviceSession`（调度器/日志/档案），切换只改变 UI 目标；
+   自动重连通过 `replaceConnection` 替换底层链路，避免旧连接残留。
+
+8. **快捷操作（v2.3.0）**：`DeviceDetailController` 新增 `QuickActionState` 三态与
+   `reboot`/`factoryReset`/`heartbeat`；同一时刻只允许一个在途操作，
+   失败保留设备错误码。`confirmToken` 语义标注为需固件确认。
+
+9. **OTA 历史与交互（v2.3.0）**：详情页展示 `DeviceProfile.otaHistory` 全部记录并可展开；
+   扫描页增加 RSSI 分档与三种排序；错误区提供重试动作，deviceId/错误详情支持长按复制。
+
 ### 9.3 状态机收敛清单
 
 | 状态机 | 已修复的不收敛路径 | 终态 |

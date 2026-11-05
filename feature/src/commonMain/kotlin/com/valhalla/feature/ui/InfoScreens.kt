@@ -188,6 +188,8 @@ fun HelpScreen(onBack: () -> Unit) {
         StringKey.HELP_Q_CONNECT to StringKey.HELP_A_CONNECT,
         StringKey.HELP_Q_OTA to StringKey.HELP_A_OTA,
         StringKey.HELP_Q_LOGS to StringKey.HELP_A_LOGS,
+        StringKey.HELP_Q_DEVICES to StringKey.HELP_A_DEVICES,
+        StringKey.HELP_Q_QUICK to StringKey.HELP_A_QUICK,
     )
     InfoScreen(title = strings.t(StringKey.HELP_TITLE), onBack = onBack) {
         faq.forEach { (question, answer) ->

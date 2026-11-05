@@ -18,6 +18,7 @@ object AppStrings {
         StringKey.APP_NAME to StringsEntry("Valhalla", "Valhalla"),
         StringKey.BACK to StringsEntry("返回", "Back"),
         StringKey.CANCEL to StringsEntry("取消", "Cancel"),
+        StringKey.CONFIRM to StringsEntry("确认", "Confirm"),
         StringKey.RETRY to StringsEntry("重试", "Retry"),
         StringKey.REFRESH to StringsEntry("刷新", "Refresh"),
         StringKey.UNKNOWN to StringsEntry("未知", "Unknown"),
@@ -750,6 +751,16 @@ object AppStrings {
             "报文日志只保存在内存中（默认 500 条，滚动淘汰），不会自动落盘或上传。可在设备详情页进入「报文日志」，按命令、错误、时间范围与关键字筛选，再选择保存文件或系统分享。应用退出后内存日志会清空，需要留存请及时导出。",
             "Packet logs live in memory only (500 entries by default, oldest evicted) and are never written to disk or uploaded automatically. Open Packet logs from device details, filter by command, error, time range, and keyword, then save a file or share it. In-memory logs are cleared when the app exits, so export them before leaving.",
         ),
+        StringKey.HELP_Q_DEVICES to StringsEntry("最多可以连接几台设备？", "How many devices can I connect?"),
+        StringKey.HELP_A_DEVICES to StringsEntry(
+            "默认最多同时连接 4 台。达到上限会直接提示，需要先断开一台；切换后详情、配置与 OTA 只作用于当前设备。",
+            "Up to 4 devices can be connected at once. At the limit you must disconnect one first; switching only changes which device details, configuration, and OTA apply to.",
+        ),
+        StringKey.HELP_Q_QUICK to StringsEntry("快捷操作会立即生效吗？", "Do quick actions take effect immediately?"),
+        StringKey.HELP_A_QUICK to StringsEntry(
+            "重启与恢复出厂都需要二次确认，恢复出厂不可撤销；心跳只读取运行时长与电量。恢复出厂的确认令牌语义需固件确认。",
+            "Reboot and factory reset require confirmation, and factory reset cannot be undone; heartbeat only reads uptime and battery. Confirm-token semantics must be confirmed with the firmware.",
+        ),
 
         // ---- 隐私 ----
         StringKey.PRIVACY_TITLE to StringsEntry("隐私说明", "Privacy"),
@@ -798,6 +809,105 @@ object AppStrings {
             "当前运行在测试宿主：所有数据仅存在于内存。",
             "Running on the test host: all data exists in memory only.",
         ),
+
+        // ---- 多设备管理（v2.3.0） ----
+        StringKey.DEVICES_TITLE to StringsEntry("已连接设备", "Connected devices"),
+        StringKey.DEVICES_ENTRY to StringsEntry("已连接设备（{count}）", "Connected devices ({count})"),
+        StringKey.DEVICES_EMPTY to StringsEntry(
+            "当前没有已连接设备，请返回扫描页连接。",
+            "No connected devices. Return to the scan page to connect.",
+        ),
+        StringKey.DEVICES_SLOT to StringsEntry("槽位 {slot}/{capacity}", "Slot {slot}/{capacity}"),
+        StringKey.DEVICES_CONNECTED_AT to StringsEntry("连接于 {time}", "Connected at {time}"),
+        StringKey.DEVICES_ACTIVE to StringsEntry("当前操作", "Active"),
+        StringKey.DEVICES_SWITCH to StringsEntry("切换", "Switch"),
+        StringKey.DEVICES_DISCONNECT to StringsEntry("断开", "Disconnect"),
+        StringKey.DEVICES_DISCONNECT_ALL to StringsEntry("全部断开", "Disconnect all"),
+        StringKey.DEVICES_LIMIT_REACHED to StringsEntry(
+            "已达连接上限（{capacity} 台），请先断开一台再连接新设备。",
+            "Connection limit reached ({capacity}). Disconnect one device before connecting another.",
+        ),
+        StringKey.DEVICES_LIMIT_POLICY to StringsEntry(
+            "达到上限时直接拒绝新连接，不会静默排队，也不会自动断开已有设备。",
+            "At the limit, new connections are rejected rather than silently queued, and existing devices are never dropped automatically.",
+        ),
+        StringKey.DEVICES_BACK_TO_SCAN to StringsEntry("返回扫描", "Back to scan"),
+
+        // ---- 扫描增强（v2.3.0） ----
+        StringKey.SCAN_SORT_LABEL to StringsEntry("排序", "Sort"),
+        StringKey.SCAN_SORT_SIGNAL to StringsEntry("信号强度", "Signal"),
+        StringKey.SCAN_SORT_NAME to StringsEntry("名称", "Name"),
+        StringKey.SCAN_SORT_LAST_CONNECTED to StringsEntry("最近连接", "Last connected"),
+        StringKey.SCAN_RSSI_STRONG to StringsEntry("信号强", "Strong signal"),
+        StringKey.SCAN_RSSI_MEDIUM to StringsEntry("信号中", "Medium signal"),
+        StringKey.SCAN_RSSI_WEAK to StringsEntry("信号弱", "Weak signal"),
+        StringKey.SCAN_PROFILE_MARK to StringsEntry("已建档", "Saved"),
+        StringKey.SCAN_LAST_CONNECTED to StringsEntry("最近连接 {time}", "Last connected {time}"),
+        StringKey.SCAN_NEVER_CONNECTED to StringsEntry("尚未连接过", "Never connected"),
+
+        // ---- 快捷操作（v2.3.0） ----
+        StringKey.QUICK_ACTIONS_TITLE to StringsEntry("快捷操作", "Quick actions"),
+        StringKey.QUICK_REBOOT to StringsEntry("重启设备", "Reboot device"),
+        StringKey.QUICK_FACTORY_RESET to StringsEntry("恢复出厂设置", "Factory reset"),
+        StringKey.QUICK_HEARTBEAT to StringsEntry("心跳探测", "Heartbeat"),
+        StringKey.QUICK_ACTION_FAILED to StringsEntry(
+            "操作失败：{detail}。请重试或重新连接设备。",
+            "Action failed: {detail}. Please retry or reconnect the device.",
+        ),
+        StringKey.QUICK_RUNNING to StringsEntry("操作进行中…", "Action in progress…"),
+        StringKey.QUICK_REBOOT_CONFIRM_TITLE to StringsEntry("确认重启", "Confirm reboot"),
+        StringKey.QUICK_REBOOT_CONFIRM_MESSAGE to StringsEntry(
+            "设备将重启并短暂断开连接，期间无法执行其它操作。",
+            "The device will reboot and disconnect briefly; other actions are unavailable during this time.",
+        ),
+        StringKey.QUICK_REBOOT_DELAY_LABEL to StringsEntry("延迟（毫秒）", "Delay (ms)"),
+        StringKey.QUICK_FACTORY_CONFIRM_TITLE to StringsEntry("确认恢复出厂", "Confirm factory reset"),
+        StringKey.QUICK_FACTORY_CONFIRM_MESSAGE to StringsEntry(
+            "设备将清除全部配置与用户数据。",
+            "The device will erase all configuration and user data.",
+        ),
+        StringKey.QUICK_FACTORY_IRREVERSIBLE to StringsEntry(
+            "此操作不可撤销，请确认已完成必要备份。",
+            "This action cannot be undone. Make sure any required backup is complete.",
+        ),
+        StringKey.QUICK_FIRMWARE_CONFIRM to StringsEntry(
+            "确认令牌语义需固件确认；当前协议只约定为字符串字段。",
+            "The confirm-token semantics must be confirmed with the firmware; the protocol only defines it as a string.",
+        ),
+        StringKey.QUICK_CONFIRM_TOKEN_LABEL to StringsEntry("确认令牌（可选）", "Confirm token (optional)"),
+        StringKey.QUICK_REBOOT_SUCCESS to StringsEntry(
+            "重启指令已被设备接受（延迟 {delay} ms）。",
+            "Reboot accepted by the device (delay {delay} ms).",
+        ),
+        StringKey.QUICK_FACTORY_SUCCESS to StringsEntry(
+            "恢复出厂指令已被设备接受。",
+            "Factory reset accepted by the device.",
+        ),
+        StringKey.QUICK_HEARTBEAT_SUCCESS to StringsEntry(
+            "心跳正常：运行 {uptime}，电量 {percent}%。",
+            "Heartbeat OK: uptime {uptime}, battery {percent}%.",
+        ),
+
+        // ---- OTA 历史（v2.3.0） ----
+        StringKey.OTA_HISTORY_TITLE to StringsEntry("OTA 历史", "OTA history"),
+        StringKey.OTA_HISTORY_EMPTY to StringsEntry(
+            "尚未产生 OTA 记录。完成一次升级后会在此显示。",
+            "No OTA records yet. Records appear here after an update.",
+        ),
+        StringKey.OTA_HISTORY_PRIVACY to StringsEntry(
+            "仅保存在本机，不上传；最多保留最近 10 条。",
+            "Stored locally only, never uploaded; the latest 10 records are kept.",
+        ),
+        StringKey.OTA_HISTORY_EXPAND to StringsEntry("展开详情", "Expand details"),
+        StringKey.OTA_HISTORY_COLLAPSE to StringsEntry("收起详情", "Collapse details"),
+        StringKey.OTA_HISTORY_BYTES to StringsEntry("已发送 {sent}/{total} 字节", "Sent {sent}/{total} bytes"),
+        StringKey.OTA_HISTORY_TIME to StringsEntry("时间 {time}", "Time {time}"),
+
+        // ---- 交互细节（v2.3.0） ----
+        StringKey.ACTION_RETRY to StringsEntry("重试", "Retry"),
+        StringKey.COPIED to StringsEntry("已复制", "Copied"),
+        StringKey.LOADING_DETAIL to StringsEntry("正在读取设备信息…", "Loading device info…"),
+        StringKey.LONG_PRESS_TO_COPY to StringsEntry("长按可复制", "Long press to copy"),
     )
 
     /** 查表；缺失 key 直接抛出，避免静默显示空文案。 */
