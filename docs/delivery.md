@@ -1,7 +1,7 @@
 # 交付说明
 
 本文汇总 ValhallaApp 的可交付内容、构建方式、产物路径与完成度对照。最新发布说明见
-[release-notes/v2.3.0.md](release-notes/v2.3.0.md)，历史版本见
+[release-notes/v2.4.0.md](release-notes/v2.4.0.md)，历史版本见
 [release-notes/v2.0.0.md](release-notes/v2.0.0.md)，全部文档入口见 [README.md](README.md)。
 
 ## 1. 交付物清单
@@ -15,14 +15,14 @@
 | iOS 产物 | 模拟器 Debug Framework | `composeApp/build/bin/iosSimulatorArm64/debugFramework/ValhallaApp.framework` |
 | Xcode 工程 | SwiftUI 壳、蓝牙权限声明、Framework 集成 | `iosApp/iosApp.xcodeproj` |
 | 测试与测试桩 | JVM 单元/端到端测试、设备模拟器 | `*/src/*Test`、`protocol-testkit/` |
-| CI | 版本校验、JVM 测试、Android 打包、iOS Framework 四档 | `.github/workflows/ci.yml` |
+| CI | 版本校验、JVM 测试、Android 打包、iOS Framework、Android instrumented、iOS 运行时验签 | `.github/workflows/ci.yml` |
 | 文档 | 架构、协议、固件、存储、导出、隐私、权限、产品、安全、测试、交付 | `docs/` |
 
 ### 模块说明
 
 ```
 composeApp  App 壳：Android Application / iOS Framework 与平台入口、签名与 R8
-feature     特性层：扫描、详情、配置、OTA、日志导出、i18n、主题、错误边界、Compose UI
+feature     特性层：扫描、详情、配置、参数、诊断、OTA、日志导出、引导、i18n、主题、错误边界、Compose UI
 data        BLE 抽象与平台实现（Android GATT / iOS CoreBluetooth）、连接池
 core        协议帧、CRC、消息编解码、指令调度、状态机、日志与脱敏（纯 Kotlin）
 protocol-testkit  设备侧 FrameLink 模拟器（仅测试依赖，不进入产物）
@@ -90,6 +90,8 @@ xcodebuild -project iosApp/iosApp.xcodeproj -scheme iosApp \
 | `jvm-tests` | ubuntu-latest | core / data / feature 三模块 `jvmTest`（矩阵并行） |
 | `android` | macos-14 | 安装 SDK → `assembleDebug` → `assembleRelease` + `verifyReleaseArtifact` → 上传 APK |
 | `ios` | macos-14 | `linkDebugFrameworkIosSimulatorArm64` |
+| `android-instrumented` | ubuntu-latest | KVM + AVD 运行 `:core:connectedDebugAndroidTest`（ECDSA 运行时验签） |
+| `ios-runtime-tests` | macos-14 | 运行 `:core:iosSimulatorArm64Test`（Kotlin/Native 运行时验签） |
 
 ## 5. 文档索引
 
@@ -108,9 +110,10 @@ xcodebuild -project iosApp/iosApp.xcodeproj -scheme iosApp \
 | [testing.md](testing.md) | 设备模拟器、场景矩阵、故障注入、端到端用例 |
 | [environment-report.md](environment-report.md) | 本机工具链与实际构建记录 |
 | [delivery.md](delivery.md) | 本文：交付物、构建命令、产物路径、完成度对照 |
+| [release-notes/v2.4.0.md](release-notes/v2.4.0.md) | v2.4.0 参数面板、连接质量、引导与设置扩展 |
 | [release-notes/v2.3.0.md](release-notes/v2.3.0.md) | v2.3.0 多设备管理、扫描增强、快捷操作与 OTA 历史 |
 | [release-notes/v2.0.0.md](release-notes/v2.0.0.md) | v2.0.0 发布说明与真机验收清单 |
-| [CHANGELOG.md](../CHANGELOG.md) | v0.0.1 → v2.3.0 版本演进 |
+| [CHANGELOG.md](../CHANGELOG.md) | v0.0.1 → v2.4.0 版本演进 |
 
 ## 6. 可交付状态与未完成项
 
@@ -137,6 +140,10 @@ xcodebuild -project iosApp/iosApp.xcodeproj -scheme iosApp \
 | 扫描增强（RSSI 分档、三种排序、去重） | `ScanEnhancementsTest`；真机弱信号阈值未校准 |
 | 详情页快捷操作三态（重启/恢复出厂/心跳） | `DeviceDetailControllerTest` 新增用例；固件应答未联调 |
 | OTA 历史完整列表与展开详情 | `DeviceProfileRepository` 测试 + 详情页 UI；真机升级场景未验证 |
+| 参数面板（本地校验 / 单在途 / 错误码） | `ParamCatalogTest` + `ParamEditorControllerTest`；设备侧参数表仍需固件确认 |
+| 连接质量看板（只用真实日志） | `ConnectionQualityStatsTest`（正常/超时/乱序/重传/无样本/错误码聚合） |
+| 首次引导与偏好扩展 | `OnboardingControllerTest` + `AppSettingsTest`；真机引导渲染未验证 |
+| 关于页构建信息与依赖许可 | `:core:generateAppInfo` 生成 + `VersionConsistencyTest` 许可清单断言 |
 
 ### 仍依赖真机 / 签名 / 固件联调
 
@@ -146,6 +153,8 @@ xcodebuild -project iosApp/iosApp.xcodeproj -scheme iosApp \
 | 生产固件公钥交付 | 固件团队 / 密钥管理 | 构建期注入通道已实现（`VALHALLA_FIRMWARE_PUBKEY` / `-Pvalhalla.firmwarePublicKey`），仓库**未内置密钥**；未注入时策略为 `WARN` |
 | 真实 BLE 连接/断连时序、弱信号重连 | 真机 + 设备固件 | 未验证 |
 | 真实 OTA（含断点续传、设备重启） | 真机 + 可升级固件 | 未验证（仅模拟器端到端） |
+| 参数表与固件确认 | 固件团队 | 当前为协议约定值，界面已标注「需固件确认」；真实读写未联调 |
+| 连接质量统计在真机长会话的表现 | 真机 | 统计逻辑已单测，长会话性能与真实分布未验证 |
 | Keystore / Keychain 令牌读写与卸载行为 | 真机 | 未验证 |
 | 系统保存/分享面板与三方应用读取导出文件 | 真机 | 未验证 |
 | 生产签名与正式分发 | 自备 keystore / 分发渠道 | 未配置，仓库不含 keystore |

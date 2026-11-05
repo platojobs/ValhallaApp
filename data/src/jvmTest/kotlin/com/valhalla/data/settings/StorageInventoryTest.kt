@@ -28,20 +28,15 @@ class StorageInventoryTest {
     fun `偏好键与偏好存储常量一致`() {
         val android = StorageInventory.forPlatform(StoragePlatform.ANDROID)
             .first { it.item == StorageItem.APP_SETTINGS }
-        assertEquals(
-            listOf(SettingsKeys.LANGUAGE, SettingsKeys.THEME),
-            android.keys,
-        )
+        assertEquals(SettingsKeys.ALL, android.keys)
 
         val ios = StorageInventory.forPlatform(StoragePlatform.IOS)
             .first { it.item == StorageItem.APP_SETTINGS }
         assertEquals(
-            listOf(
-                StorageKeys.IOS_SETTINGS_PREFIX + SettingsKeys.LANGUAGE,
-                StorageKeys.IOS_SETTINGS_PREFIX + SettingsKeys.THEME,
-            ),
+            SettingsKeys.ALL.map { StorageKeys.IOS_SETTINGS_PREFIX + it },
             ios.keys,
         )
+        assertEquals(9, SettingsKeys.ALL.size)
     }
 
     @Test

@@ -8,17 +8,25 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.valhalla.core.AppBuildInfo
+import com.valhalla.core.AppDependencyInfo
+import com.valhalla.core.logging.PacketLogExportOptions
 import com.valhalla.data.settings.StorageItem
 import com.valhalla.data.settings.StorageLocation
 import com.valhalla.data.settings.StoragePlatform
@@ -29,6 +37,7 @@ import com.valhalla.feature.i18n.LocalStrings
 import com.valhalla.feature.i18n.ResolvedLanguage
 import com.valhalla.feature.firmware.rememberFirmwareSigningKeyPem
 import com.valhalla.feature.i18n.StringKey
+import com.valhalla.feature.settings.AppSettings
 import com.valhalla.feature.theme.DesignTokens
 import com.valhalla.feature.theme.ThemeMode
 
@@ -83,12 +92,15 @@ private fun ChoiceRow(
 fun SettingsScreen(
     language: AppLanguageMode,
     theme: ThemeMode,
+    settings: AppSettings,
     onLanguageChange: (AppLanguageMode) -> Unit,
     onThemeChange: (ThemeMode) -> Unit,
+    onSettingsChange: (AppSettings) -> Unit,
     onBack: () -> Unit,
     onAbout: () -> Unit,
     onHelp: () -> Unit,
     onPrivacy: () -> Unit,
+    onOnboardingReview: () -> Unit,
 ) {
     val strings = LocalStrings.current
     InfoScreen(title = strings.t(StringKey.SETTINGS_TITLE), onBack = onBack) {
@@ -126,7 +138,11 @@ fun SettingsScreen(
                 )
             },
         )
+        SettingsValuesSection(settings = settings, onSettingsChange = onSettingsChange)
         Column(verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs)) {
+            OutlinedButton(onClick = onOnboardingReview, modifier = Modifier.fillMaxWidth()) {
+                Text(strings.t(StringKey.ONBOARDING_REVIEW_ENTRY))
+            }
             OutlinedButton(onClick = onAbout, modifier = Modifier.fillMaxWidth()) {
                 Text(strings.t(StringKey.ABOUT_ENTRY))
             }
@@ -138,6 +154,179 @@ fun SettingsScreen(
             }
         }
     }
+}
+
+/**
+ * 运行参数设置区：六个数字字段共用一次「应用」。
+ *
+ * 非法输入就地提示且不写入；应用成功后由调用方持久化并刷新 [settings]。
+ */
+@Composable
+private fun SettingsValuesSection(
+    settings: AppSettings,
+    onSettingsChange: (AppSettings) -> Unit,
+) {
+    val strings = LocalStrings.current
+    var attempts by remember(settings) { mutableStateOf(settings.reconnectMaxAttempts.toString()) }
+    var delay by remember(settings) { mutableStateOf(settings.reconnectMaxDelaySeconds.toString()) }
+    var capacity by remember(settings) { mutableStateOf(settings.logCapacity.toString()) }
+    var entries by remember(settings) { mutableStateOf(settings.exportEntries.toString()) }
+    var bytes by remember(settings) { mutableStateOf(settings.exportBytesKb.toString()) }
+    var hex by remember(settings) { mutableStateOf(settings.exportHexChars.toString()) }
+    var status by remember(settings) { mutableStateOf<StringKey?>(null) }
+
+    val attemptsValue = parseSettingInt(
+        attempts,
+        AppSettings.MIN_RECONNECT_ATTEMPTS,
+        AppSettings.MAX_RECONNECT_ATTEMPTS,
+    )
+    val delayValue = parseSettingInt(
+        delay,
+        AppSettings.MIN_RECONNECT_MAX_DELAY_SECONDS,
+        AppSettings.MAX_RECONNECT_MAX_DELAY_SECONDS,
+    )
+    val capacityValue = parseSettingInt(
+        capacity,
+        AppSettings.MIN_LOG_CAPACITY,
+        AppSettings.MAX_LOG_CAPACITY,
+    )
+    val entriesValue = parseSettingInt(
+        entries,
+        PacketLogExportOptions.MIN_ENTRIES,
+        PacketLogExportOptions.MAX_ENTRIES,
+    )
+    val bytesValue = parseSettingInt(
+        bytes,
+        AppSettings.MIN_EXPORT_BYTES_KB,
+        AppSettings.MAX_EXPORT_BYTES_KB,
+    )
+    val hexValue = parseSettingInt(
+        hex,
+        1,
+        PacketLogExportOptions.MAX_HEX_CHARS,
+    )
+    val allValid = listOf(attemptsValue, delayValue, capacityValue, entriesValue, bytesValue, hexValue)
+        .all { it != null }
+
+    SectionTitle(strings.t(StringKey.SETTINGS_RECONNECT_SECTION))
+    SettingNumberField(
+        label = strings.t(StringKey.SETTINGS_RECONNECT_ATTEMPTS),
+        value = attempts,
+        min = AppSettings.MIN_RECONNECT_ATTEMPTS,
+        max = AppSettings.MAX_RECONNECT_ATTEMPTS,
+        onValueChange = { attempts = it; status = null },
+    )
+    SettingNumberField(
+        label = strings.t(StringKey.SETTINGS_RECONNECT_DELAY),
+        value = delay,
+        min = AppSettings.MIN_RECONNECT_MAX_DELAY_SECONDS,
+        max = AppSettings.MAX_RECONNECT_MAX_DELAY_SECONDS,
+        onValueChange = { delay = it; status = null },
+    )
+    SectionTitle(strings.t(StringKey.SETTINGS_LOG_CAPACITY))
+    Text(
+        strings.t(StringKey.SETTINGS_LOG_CAPACITY_NOTE),
+        style = MaterialTheme.typography.bodySmall,
+    )
+    SettingNumberField(
+        label = strings.t(StringKey.SETTINGS_LOG_CAPACITY),
+        value = capacity,
+        min = AppSettings.MIN_LOG_CAPACITY,
+        max = AppSettings.MAX_LOG_CAPACITY,
+        onValueChange = { capacity = it; status = null },
+    )
+
+    SectionTitle(strings.t(StringKey.SETTINGS_EXPORT_SECTION))
+    Text(strings.t(StringKey.SETTINGS_EXPORT_NOTE), style = MaterialTheme.typography.bodySmall)
+    SettingNumberField(
+        label = strings.t(StringKey.SETTINGS_EXPORT_ENTRIES),
+        value = entries,
+        min = PacketLogExportOptions.MIN_ENTRIES,
+        max = PacketLogExportOptions.MAX_ENTRIES,
+        onValueChange = { entries = it; status = null },
+    )
+    SettingNumberField(
+        label = strings.t(StringKey.SETTINGS_EXPORT_BYTES),
+        value = bytes,
+        min = AppSettings.MIN_EXPORT_BYTES_KB,
+        max = AppSettings.MAX_EXPORT_BYTES_KB,
+        onValueChange = { bytes = it; status = null },
+    )
+    SettingNumberField(
+        label = strings.t(StringKey.SETTINGS_EXPORT_HEX),
+        value = hex,
+        min = 1,
+        max = PacketLogExportOptions.MAX_HEX_CHARS,
+        onValueChange = { hex = it; status = null },
+    )
+
+    Row(horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm)) {
+        Button(
+            enabled = allValid,
+            onClick = {
+                if (allValid) {
+                    onSettingsChange(
+                        AppSettings(
+                            reconnectMaxAttempts = attemptsValue!!,
+                            reconnectMaxDelaySeconds = delayValue!!,
+                            logCapacity = capacityValue!!,
+                            exportEntries = entriesValue!!,
+                            exportBytesKb = bytesValue!!,
+                            exportHexChars = hexValue!!,
+                        ),
+                    )
+                    status = StringKey.SETTINGS_APPLIED
+                }
+            },
+        ) { Text(strings.t(StringKey.SETTINGS_APPLY)) }
+        OutlinedButton(
+            onClick = {
+                attempts = AppSettings.DEFAULTS.reconnectMaxAttempts.toString()
+                delay = AppSettings.DEFAULTS.reconnectMaxDelaySeconds.toString()
+                capacity = AppSettings.DEFAULTS.logCapacity.toString()
+                entries = AppSettings.DEFAULTS.exportEntries.toString()
+                bytes = AppSettings.DEFAULTS.exportBytesKb.toString()
+                hex = AppSettings.DEFAULTS.exportHexChars.toString()
+                onSettingsChange(AppSettings.DEFAULTS)
+                status = StringKey.SETTINGS_RESET_DONE
+            },
+        ) { Text(strings.t(StringKey.SETTINGS_RESET_DEFAULTS)) }
+    }
+    status?.let { Text(strings.t(it), style = MaterialTheme.typography.bodySmall) }
+    Text(strings.t(StringKey.SETTINGS_RESTART_NOTE), style = MaterialTheme.typography.bodySmall)
+}
+
+/** 解析 1..max 的整数设置；非法返回 null。 */
+private fun parseSettingInt(text: String, min: Int, max: Int): Int? =
+    text.trim().toIntOrNull()?.takeIf { it in min..max }
+
+@Composable
+private fun SettingNumberField(
+    label: String,
+    value: String,
+    min: Int,
+    max: Int,
+    onValueChange: (String) -> Unit,
+) {
+    val strings = LocalStrings.current
+    val valid = parseSettingInt(value, min, max) != null
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        label = { Text(label) },
+        singleLine = true,
+        isError = !valid,
+        supportingText = {
+            Text(
+                if (valid) {
+                    strings.t(StringKey.SETTINGS_RANGE_HINT, "min" to min.toString(), "max" to max.toString())
+                } else {
+                    strings.t(StringKey.SETTINGS_INVALID_VALUE, "min" to min.toString(), "max" to max.toString())
+                },
+            )
+        },
+        modifier = Modifier.fillMaxWidth(),
+    )
 }
 
 @Composable
@@ -159,6 +348,14 @@ fun AboutScreen(onBack: () -> Unit) {
                 Text(strings.t(StringKey.ABOUT_PLATFORM, "platform" to platformDisplayName()))
                 Text(
                     strings.t(
+                        StringKey.ABOUT_COMMIT,
+                        "commit" to AppBuildInfo.BUILD_COMMIT.ifBlank {
+                            strings.t(StringKey.ABOUT_COMMIT_UNKNOWN)
+                        },
+                    ),
+                )
+                Text(
+                    strings.t(
                         if (firmwareKeyConfigured) {
                             StringKey.ABOUT_FIRMWARE_KEY_CONFIGURED
                         } else {
@@ -173,9 +370,25 @@ fun AboutScreen(onBack: () -> Unit) {
             style = MaterialTheme.typography.bodyMedium,
         )
         SectionTitle(strings.t(StringKey.ABOUT_LICENSE_TITLE))
+        if (AppDependencyInfo.entries.isEmpty()) {
+            Text(strings.t(StringKey.ABOUT_LICENSE_EMPTY), style = MaterialTheme.typography.bodyMedium)
+        } else {
+            AppDependencyInfo.entries.forEach { dependency ->
+                Text(
+                    strings.t(
+                        StringKey.ABOUT_LICENSE_LINE,
+                        "name" to dependency.name,
+                        "version" to dependency.version,
+                        "license" to dependency.license,
+                        "scope" to strings.t(dependencyScopeKey(dependency.scope)),
+                    ),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+        }
         Text(
             strings.t(StringKey.ABOUT_LICENSE_BODY),
-            style = MaterialTheme.typography.bodyMedium,
+            style = MaterialTheme.typography.bodySmall,
         )
     }
 }
@@ -190,6 +403,9 @@ fun HelpScreen(onBack: () -> Unit) {
         StringKey.HELP_Q_LOGS to StringKey.HELP_A_LOGS,
         StringKey.HELP_Q_DEVICES to StringKey.HELP_A_DEVICES,
         StringKey.HELP_Q_QUICK to StringKey.HELP_A_QUICK,
+        StringKey.HELP_Q_PARAM to StringKey.HELP_A_PARAM,
+        StringKey.HELP_Q_DIAG to StringKey.HELP_A_DIAG,
+        StringKey.HELP_Q_ONBOARDING to StringKey.HELP_A_ONBOARDING,
     )
     InfoScreen(title = strings.t(StringKey.HELP_TITLE), onBack = onBack) {
         faq.forEach { (question, answer) ->
@@ -266,6 +482,13 @@ private fun platformDisplayName(): String = when (currentStoragePlatform()) {
     StoragePlatform.ANDROID -> "Android"
     StoragePlatform.IOS -> "iOS"
     StoragePlatform.JVM -> "JVM"
+}
+
+private fun dependencyScopeKey(scope: String): StringKey = when (scope) {
+    "android" -> StringKey.ABOUT_SCOPE_ANDROID
+    "test" -> StringKey.ABOUT_SCOPE_TEST
+    "build" -> StringKey.ABOUT_SCOPE_BUILD
+    else -> StringKey.ABOUT_SCOPE_RUNTIME
 }
 
 /** 供测试断言：界面展示的存储位置必须覆盖 [StorageInventory] 的全部条目。 */

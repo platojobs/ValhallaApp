@@ -142,8 +142,18 @@ import com.valhalla.feature.i18n.render
 import com.valhalla.feature.i18n.resolveLanguage
 import com.valhalla.feature.ota.OtaController
 import com.valhalla.feature.ota.OtaState
+import com.valhalla.feature.onboarding.OnboardingController
+import com.valhalla.feature.onboarding.OnboardingStep
+import com.valhalla.feature.param.ParamEditorController
+import com.valhalla.feature.param.ParamEditorState
+import com.valhalla.feature.param.ParamFieldState
 import com.valhalla.feature.scan.ScanController
 import com.valhalla.feature.scan.ScanUiState
+import com.valhalla.feature.settings.AppSettings
+import com.valhalla.feature.settings.AppSettingsRepository
+import com.valhalla.core.logging.ConnectionQualityAnalyzer
+import com.valhalla.core.config.ParamCatalog
+import com.valhalla.core.config.ParamValueType
 import com.valhalla.feature.theme.AppPreferenceStore
 import com.valhalla.feature.theme.DesignTokens
 import com.valhalla.feature.theme.ThemeMode
@@ -167,6 +177,7 @@ private class DeviceSession(
     val ota: OtaController,
     val checkpointStore: OtaCheckpointStore,
     val config: ConfigEditorController,
+    val param: ParamEditorController,
     val packetLog: InMemoryPacketLog,
     val profileRepository: DeviceProfileRepository,
 ) {
@@ -188,9 +199,11 @@ private sealed interface Route {
     data object About : Route
     data object Help : Route
     data object Privacy : Route
+    data class Onboarding(val review: Boolean) : Route
     data class Detail(val deviceId: String) : Route
     data class Ota(val deviceId: String) : Route
     data class Logs(val deviceId: String) : Route
+    data class Diagnostic(val deviceId: String) : Route
 }
 
 /**
@@ -202,8 +215,12 @@ private sealed interface Route {
 fun ValhallaApp() {
     val settingsStore = remember { createAppSettingsStore() }
     var preferences by remember { mutableStateOf(AppPreferenceStore.load(settingsStore)) }
+    var appSettings by remember { mutableStateOf(AppSettingsRepository.load(settingsStore)) }
     val language = resolveLanguage(preferences.language, Locale.current.language)
     val strings = remember(language) { StringResolver(language) }
+    val showOnboardingOnLaunch = remember {
+        OnboardingController.shouldShowOnLaunch(settingsStore)
+    }
     val errorReporter = remember {
         ErrorReporter().also { installUncaughtExceptionBridge(it) }
     }
@@ -215,6 +232,8 @@ fun ValhallaApp() {
         ValhallaTheme(preferences.theme) {
             ValhallaContent(
                 preferences = preferences,
+                settings = appSettings,
+                showOnboardingOnLaunch = showOnboardingOnLaunch,
                 onLanguageChange = { mode ->
                     preferences = preferences.copy(language = mode)
                     AppPreferenceStore.saveLanguage(settingsStore, mode)
@@ -223,6 +242,19 @@ fun ValhallaApp() {
                     preferences = preferences.copy(theme = mode)
                     AppPreferenceStore.saveTheme(settingsStore, mode)
                 },
+                onSettingsChange = { updated ->
+                    AppSettingsRepository.saveReconnectMaxAttempts(settingsStore, updated.reconnectMaxAttempts)
+                    AppSettingsRepository.saveReconnectMaxDelaySeconds(
+                        settingsStore,
+                        updated.reconnectMaxDelaySeconds,
+                    )
+                    AppSettingsRepository.saveLogCapacity(settingsStore, updated.logCapacity)
+                    AppSettingsRepository.saveExportEntries(settingsStore, updated.exportEntries)
+                    AppSettingsRepository.saveExportBytesKb(settingsStore, updated.exportBytesKb)
+                    AppSettingsRepository.saveExportHexChars(settingsStore, updated.exportHexChars)
+                    appSettings = AppSettingsRepository.load(settingsStore)
+                },
+                onboardingStore = settingsStore,
             )
         }
     }
@@ -231,8 +263,12 @@ fun ValhallaApp() {
 @Composable
 private fun ValhallaContent(
     preferences: com.valhalla.feature.theme.AppPreferences,
+    settings: AppSettings,
+    showOnboardingOnLaunch: Boolean,
+    onboardingStore: com.valhalla.data.settings.AppSettingsStore,
     onLanguageChange: (AppLanguageMode) -> Unit,
     onThemeChange: (ThemeMode) -> Unit,
+    onSettingsChange: (AppSettings) -> Unit,
 ) {
     val bleClient = remember { createBleClient() }
     val permissionController = rememberBlePermissionController(bleClient)
@@ -264,7 +300,11 @@ private fun ValhallaContent(
         resolveBleAvailability(adapterState, permissionState)
     }
 
-    var route by remember { mutableStateOf<Route>(Route.Scan) }
+    var route by remember {
+        mutableStateOf<Route>(
+            if (showOnboardingOnLaunch) Route.Onboarding(review = false) else Route.Scan,
+        )
+    }
     var connectingDeviceId by remember { mutableStateOf<String?>(null) }
     var errorMessage by remember { mutableStateOf<UiMessage?>(null) }
     var reconnect by remember { mutableStateOf<ReconnectSession?>(null) }
@@ -304,6 +344,10 @@ private fun ValhallaContent(
                 dispatcher = dispatcher,
                 onError = { error -> errorReporter.record("config", error) },
             ),
+            param = ParamEditorController(
+                dispatcher = dispatcher,
+                onError = { error -> errorReporter.record("param", error) },
+            ),
             packetLog = packetLog,
             profileRepository = profileRepository,
         )
@@ -341,7 +385,10 @@ private fun ValhallaContent(
         val device = session.device
         val packetLog = session.packetLog
         val controller = AutoReconnectController(
-            policy = ReconnectPolicy(),
+            policy = ReconnectPolicy(
+                maxDelayMillis = settings.reconnectMaxDelaySeconds * 1_000L,
+                maxAttempts = settings.reconnectMaxAttempts,
+            ),
             scope = scope,
             isBluetoothOn = { bleClient.adapterState.value == BleAdapterState.POWERED_ON },
             attemptConnect = { runCatching { bleClient.connect(device.deviceId) }.getOrNull() },
@@ -413,7 +460,7 @@ private fun ValhallaContent(
                                     device.deviceId to createSession(
                                         result.device.connection,
                                         device,
-                                        InMemoryPacketLog(),
+                                        InMemoryPacketLog(capacity = settings.logCapacity),
                                     )
                                     )
                                 deviceManager.select(device.deviceId)
@@ -489,17 +536,30 @@ private fun ValhallaContent(
         Route.Settings -> SettingsScreen(
             language = preferences.language,
             theme = preferences.theme,
+            settings = settings,
             onLanguageChange = onLanguageChange,
             onThemeChange = onThemeChange,
+            onSettingsChange = onSettingsChange,
             onBack = { route = Route.Scan },
             onAbout = { route = Route.About },
             onHelp = { route = Route.Help },
             onPrivacy = { route = Route.Privacy },
+            onOnboardingReview = { route = Route.Onboarding(review = true) },
         )
 
         Route.About -> AboutScreen(onBack = { route = Route.Settings })
         Route.Help -> HelpScreen(onBack = { route = Route.Settings })
         Route.Privacy -> PrivacyScreen(onBack = { route = Route.Settings })
+
+        is Route.Onboarding -> OnboardingScreen(
+            reviewMode = current.review,
+            store = onboardingStore,
+            availability = availability,
+            onBleAction = { handleBleAction(it) },
+            onFinished = {
+                route = if (current.review) Route.Settings else Route.Scan
+            },
+        )
 
         is Route.Detail -> {
             val session = sessions[current.deviceId]
@@ -557,6 +617,7 @@ private fun ValhallaContent(
                     },
                     onOpenOta = { route = Route.Ota(current.deviceId) },
                     onOpenLogs = { route = Route.Logs(current.deviceId) },
+                    onOpenDiagnostics = { route = Route.Diagnostic(current.deviceId) },
                 )
             }
         }
@@ -579,6 +640,19 @@ private fun ValhallaContent(
                 LaunchedEffect(current.deviceId) { route = Route.Devices }
             } else {
                 PacketLogScreen(
+                    packetLog = session.packetLog,
+                    initialOptions = settings.exportOptions(),
+                    onBack = { route = Route.Detail(current.deviceId) },
+                )
+            }
+        }
+
+        is Route.Diagnostic -> {
+            val session = sessions[current.deviceId]
+            if (session == null) {
+                LaunchedEffect(current.deviceId) { route = Route.Devices }
+            } else {
+                DiagnosticScreen(
                     packetLog = session.packetLog,
                     onBack = { route = Route.Detail(current.deviceId) },
                 )
@@ -1049,6 +1123,7 @@ private fun DetailScreen(
     onBack: () -> Unit,
     onOpenOta: () -> Unit,
     onOpenLogs: () -> Unit,
+    onOpenDiagnostics: () -> Unit,
 ) {
     val strings = LocalStrings.current
     val format = remember(strings.language) { LocaleFormat(strings.language) }
@@ -1056,6 +1131,7 @@ private fun DetailScreen(
     val controller = session.detail
     val state by controller.state.collectAsState()
     val configState by session.config.state.collectAsState()
+    val paramState by session.param.state.collectAsState()
     val connected by session.connection.connected.collectAsState()
     val scope = rememberCoroutineScope()
     val errorReporter = LocalErrorReporter.current
@@ -1253,6 +1329,9 @@ private fun DetailScreen(
                     OutlinedButton(onClick = onOpenLogs, modifier = Modifier.fillMaxWidth()) {
                         Text(strings.t(StringKey.OPEN_LOGS))
                     }
+                    OutlinedButton(onClick = onOpenDiagnostics, modifier = Modifier.fillMaxWidth()) {
+                        Text(strings.t(StringKey.DIAG_ENTRY))
+                    }
                 }
             }
 
@@ -1332,6 +1411,14 @@ private fun DetailScreen(
                     controller = session.config,
                     state = configState,
                     onRefreshDevice = { scope.launchSafely(errorReporter, "refresh-info") { controller.refreshInfo() } },
+                )
+            }
+
+            item {
+                ParamSection(
+                    controller = session.param,
+                    state = paramState,
+                    connected = connected,
                 )
             }
 
@@ -1814,10 +1901,544 @@ private fun ConfigFieldRow(
 
 private enum class ExportAction { SAVE, SHARE }
 
+/**
+ * 设备参数面板。
+ *
+ * 参数表来自 [ParamCatalog] 的约定值，界面在标题区固定标注「需固件确认」，
+ * 不允许把未确认的参数表包装成设备能力。
+ */
+@Composable
+private fun ParamSection(
+    controller: ParamEditorController,
+    state: ParamEditorState,
+    connected: Boolean,
+) {
+    val strings = LocalStrings.current
+    val status = statusColors()
+    val scope = rememberCoroutineScope()
+    val errorReporter = LocalErrorReporter.current
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(DesignTokens.Spacing.md),
+            verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm),
+        ) {
+            Row(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    strings.t(StringKey.PARAM_TITLE),
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(
+                    onClick = { scope.launchSafely(errorReporter, "param-load") { controller.load() } },
+                    enabled = connected && !state.busy,
+                ) {
+                    Text(
+                        if (state.loading) {
+                            strings.t(StringKey.PARAM_LOADING)
+                        } else {
+                            strings.t(StringKey.PARAM_RELOAD)
+                        },
+                    )
+                }
+            }
+            Text(strings.t(StringKey.PARAM_HINT), style = MaterialTheme.typography.bodySmall)
+            Row(horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm)) {
+                Text(
+                    strings.t(StringKey.PARAM_FIRMWARE_UNCONFIRMED),
+                    color = MaterialTheme.colorScheme.secondary,
+                    style = MaterialTheme.typography.labelMedium,
+                )
+            }
+            Text(strings.t(StringKey.PARAM_FIRMWARE_NOTE), style = MaterialTheme.typography.bodySmall)
+
+            state.fields.forEach { field ->
+                ParamFieldRow(
+                    field = field,
+                    stateBusy = state.busy,
+                    connected = connected,
+                    onTextChange = { controller.updateText(field.spec.id, it) },
+                    onSave = {
+                        scope.launchSafely(errorReporter, "param-save") {
+                            controller.save(field.spec.id)
+                        }
+                    },
+                )
+            }
+
+            state.message?.let { message ->
+                Text(strings.render(message), color = status.success)
+            }
+            state.error?.let { message ->
+                Text(strings.render(message), color = status.error)
+                state.errorCode?.let { code ->
+                    Text(
+                        strings.t(
+                            StringKey.ERROR_CODE_LABEL,
+                            "code" to "${code.name} (0x${code.code.toString(16).uppercase().padStart(4, '0')}): ${code.title}",
+                        ),
+                        color = status.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ParamFieldRow(
+    field: ParamFieldState,
+    stateBusy: Boolean,
+    connected: Boolean,
+    onTextChange: (String) -> Unit,
+    onSave: () -> Unit,
+) {
+    val strings = LocalStrings.current
+    val status = statusColors()
+    val spec = field.spec
+    val typeLabel = strings.t(paramTypeKey(spec.type))
+    val rangeLabel = when (spec.type) {
+        ParamValueType.INTEGER ->
+            strings.t(StringKey.PARAM_RANGE, "range" to "${spec.intRange.first}..${spec.intRange.last}")
+
+        ParamValueType.ENUM ->
+            strings.t(StringKey.PARAM_RANGE, "range" to spec.enumValues.keys.sorted().joinToString("/"))
+
+        ParamValueType.STRING ->
+            strings.t(StringKey.PARAM_RANGE, "range" to "≤ ${spec.maxLength}")
+
+        ParamValueType.BOOLEAN -> null
+    }
+    val detailLine = buildList {
+        add(typeLabel)
+        rangeLabel?.let(::add)
+        spec.unit?.let(::add)
+        add(
+            strings.t(
+                StringKey.PARAM_ID_LINE,
+                "id" to spec.id.toString(16).uppercase().padStart(4, '0'),
+            ),
+        )
+    }.joinToString(" · ")
+
+    val supporting = when {
+        field.loading -> strings.t(StringKey.PARAM_LOADING)
+        field.loadError != null ->
+            strings.t(StringKey.PARAM_LOAD_ERROR) + " · " + field.loadError
+
+        field.validationError != null -> field.validationError!!
+        !spec.writable -> strings.t(StringKey.PARAM_READ_ONLY_REASON)
+        field.saving -> strings.t(StringKey.PARAM_SAVING)
+        field.lastSavedAtEpochMillis != null && !field.dirty ->
+            strings.t(StringKey.PARAM_SAVED_FIELD, "name" to spec.displayName)
+
+        field.dirty -> strings.t(StringKey.PARAM_UNSAVED)
+        else -> strings.t(StringKey.PARAM_VALUE_LABEL)
+    }
+    val isError = field.loadError != null || field.validationError != null
+
+    Column(verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xxs)) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(spec.displayName, style = MaterialTheme.typography.titleSmall)
+            if (!spec.writable) {
+                Text(
+                    strings.t(StringKey.PARAM_READ_ONLY),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        Text(detailLine, style = MaterialTheme.typography.bodySmall)
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            OutlinedTextField(
+                value = field.text,
+                onValueChange = onTextChange,
+                enabled = spec.writable && connected && !stateBusy,
+                label = { Text(strings.t(StringKey.PARAM_VALUE_LABEL)) },
+                singleLine = true,
+                isError = isError,
+                supportingText = {
+                    Text(
+                        supporting,
+                        color = if (isError) status.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                },
+                modifier = Modifier.weight(1f),
+            )
+            Button(
+                onClick = onSave,
+                enabled = spec.writable && connected && field.dirty && !stateBusy,
+            ) {
+                Text(
+                    if (field.saving) {
+                        strings.t(StringKey.PARAM_SAVING)
+                    } else {
+                        strings.t(StringKey.PARAM_SAVE)
+                    },
+                )
+            }
+        }
+    }
+}
+
+private fun paramTypeKey(type: ParamValueType): StringKey = when (type) {
+    ParamValueType.INTEGER -> StringKey.PARAM_TYPE_INTEGER
+    ParamValueType.BOOLEAN -> StringKey.PARAM_TYPE_BOOLEAN
+    ParamValueType.ENUM -> StringKey.PARAM_TYPE_ENUM
+    ParamValueType.STRING -> StringKey.PARAM_TYPE_STRING
+}
+
+/**
+ * 连接质量看板：只读本机报文日志的统计快照。
+ *
+ * 样本不足时只展示「样本不足（X 条）」，避免把个位数请求包装成结论。
+ */
+@OptIn(ExperimentalTime::class)
+@Composable
+private fun DiagnosticScreen(
+    packetLog: InMemoryPacketLog,
+    onBack: () -> Unit,
+) {
+    val strings = LocalStrings.current
+    val format = remember(strings.language) { LocaleFormat(strings.language) }
+    val entries by packetLog.entries.collectAsState()
+    val stats = remember(entries) { ConnectionQualityAnalyzer.analyze(entries) }
+    val zoneOffsetMinutes = remember {
+        currentTimeZoneOffsetMinutes(Clock.System.now().toEpochMilliseconds())
+    }
+    val cards = statusColors()
+
+    Column(
+        modifier = Modifier.fillMaxSize().padding(DesignTokens.Spacing.lg),
+        verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.md),
+    ) {
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                strings.t(StringKey.DIAG_TITLE),
+                style = MaterialTheme.typography.headlineSmall,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = onBack) { Text(strings.t(StringKey.BACK)) }
+        }
+        LazyColumn(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.md),
+        ) {
+            item {
+                Text(strings.t(StringKey.DIAG_HINT), style = MaterialTheme.typography.bodySmall)
+            }
+            if (stats.requests == 0) {
+                item { Text(strings.t(StringKey.DIAG_EMPTY)) }
+            } else if (stats.insufficientSample) {
+                item {
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(
+                            modifier = Modifier.padding(DesignTokens.Spacing.md),
+                            verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs),
+                        ) {
+                            Text(
+                                strings.t(
+                                    StringKey.DIAG_SAMPLE_INSUFFICIENT,
+                                    "count" to stats.sampleCount.toString(),
+                                ),
+                                style = MaterialTheme.typography.titleSmall,
+                            )
+                            Text(
+                                strings.t(
+                                    StringKey.DIAG_SAMPLE_NOTE,
+                                    "min" to ConnectionQualityAnalyzer.MIN_SAMPLES.toString(),
+                                ),
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    }
+                }
+            } else {
+                item {
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(
+                            modifier = Modifier.padding(DesignTokens.Spacing.md),
+                            verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xxs),
+                        ) {
+                            Text(
+                                strings.t(
+                                    StringKey.DIAG_REQUESTS,
+                                    "count" to format.number(stats.requests),
+                                ),
+                                style = MaterialTheme.typography.titleSmall,
+                            )
+                            stats.successRate?.let { rate ->
+                                Text(
+                                    strings.t(
+                                        StringKey.DIAG_SUCCESS_RATE,
+                                        "rate" to formatOneDecimal(rate * 100),
+                                    ),
+                                )
+                            }
+                            stats.averageLatencyMillis?.let { value ->
+                                Text(
+                                    strings.t(
+                                        StringKey.DIAG_LATENCY_AVG,
+                                        "value" to formatOneDecimal(value),
+                                    ),
+                                )
+                            }
+                            stats.maxLatencyMillis?.let { value ->
+                                Text(
+                                    strings.t(
+                                        StringKey.DIAG_LATENCY_MAX,
+                                        "value" to format.number(value),
+                                    ),
+                                )
+                            }
+                            Text(
+                                strings.t(
+                                    StringKey.DIAG_RETRANSMISSIONS,
+                                    "count" to format.number(stats.retransmissions),
+                                ),
+                            )
+                            Text(
+                                strings.t(
+                                    StringKey.DIAG_OUT_OF_ORDER,
+                                    "count" to format.number(stats.outOfOrderResponses),
+                                ),
+                            )
+                            Text(
+                                strings.t(
+                                    StringKey.DIAG_NO_RESPONSE,
+                                    "count" to format.number(stats.noResponses),
+                                ),
+                            )
+                            if (stats.unmatchedResponses > 0) {
+                                Text(
+                                    strings.t(
+                                        StringKey.DIAG_UNKNOWN_ERROR,
+                                    ) + " · " + format.number(stats.unmatchedResponses),
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
+                        }
+                    }
+                }
+                item {
+                    Text(
+                        strings.t(StringKey.DIAG_ERROR_TITLE),
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                }
+                if (stats.errorCodes.isEmpty()) {
+                    item { Text(strings.t(StringKey.DIAG_NO_FAILURE)) }
+                } else {
+                    items(stats.errorCodes) { error ->
+                        Text(
+                            strings.t(
+                                StringKey.DIAG_ERROR_CODE_LINE,
+                                "code" to error.code,
+                                "title" to error.title,
+                                "count" to format.number(error.count),
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+                item {
+                    Text(
+                        strings.t(StringKey.DIAG_COMMANDS_TITLE),
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                }
+                items(stats.commands) { command ->
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(
+                            modifier = Modifier.padding(DesignTokens.Spacing.md),
+                            verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xxs),
+                        ) {
+                            Text(
+                                strings.t(
+                                    StringKey.DIAG_COMMAND_LINE,
+                                    "command" to command.command.name,
+                                    "requests" to command.requests.toString(),
+                                    "successes" to command.successes.toString(),
+                                    "failures" to (command.deviceErrors + command.noResponses).toString(),
+                                ),
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                            val average = command.averageLatencyMillis
+                            val maximum = command.maxLatencyMillis
+                            if (average != null && maximum != null) {
+                                Text(
+                                    strings.t(
+                                        StringKey.DIAG_COMMAND_LATENCY,
+                                        "avg" to formatOneDecimal(average),
+                                        "max" to maximum.toString(),
+                                    ),
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
+                            if (command.retransmissions > 0) {
+                                Text(
+                                    strings.t(
+                                        StringKey.DIAG_RETRANSMISSIONS,
+                                        "count" to command.retransmissions.toString(),
+                                    ),
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
+                        }
+                    }
+                }
+                item {
+                    Text(
+                        strings.t(StringKey.DIAG_RECENT_FAILURES),
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                }
+                if (stats.recentFailures.isEmpty()) {
+                    item { Text(strings.t(StringKey.DIAG_NO_FAILURE)) }
+                } else {
+                    items(stats.recentFailures) { failure ->
+                        Text(
+                            strings.t(
+                                StringKey.DIAG_FAILURE_LINE,
+                                "time" to format.absoluteTime(failure.timestampMillis, zoneOffsetMinutes),
+                                "command" to failure.command.name,
+                                "detail" to failure.detail,
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = cards.error,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** 一位小数，避免把估算值展示成精确值。 */
+internal fun formatOneDecimal(value: Double): String {
+    val scaled = (value * 10).toLong()
+    return "${scaled / 10}.${scaled % 10}"
+}
+
+/** 首次使用引导：三步说明 + 可跳过；完成状态由控制器写入平台偏好。 */
+@Composable
+private fun OnboardingScreen(
+    reviewMode: Boolean,
+    store: com.valhalla.data.settings.AppSettingsStore,
+    availability: BleAvailability,
+    onBleAction: (BleGuidanceAction) -> Unit,
+    onFinished: () -> Unit,
+) {
+    val strings = LocalStrings.current
+    val controller = remember(store, reviewMode) { OnboardingController(store, reviewMode) }
+    val state by controller.state.collectAsState()
+    val steps = listOf(
+        OnboardingStep.PERMISSION to (
+            StringKey.ONBOARDING_STEP_PERMISSION_TITLE to StringKey.ONBOARDING_STEP_PERMISSION_BODY
+            ),
+        OnboardingStep.SCAN to (
+            StringKey.ONBOARDING_STEP_SCAN_TITLE to StringKey.ONBOARDING_STEP_SCAN_BODY
+            ),
+        OnboardingStep.CONNECT to (
+            StringKey.ONBOARDING_STEP_CONNECT_TITLE to StringKey.ONBOARDING_STEP_CONNECT_BODY
+            ),
+    )
+    val (titleKey, bodyKey) = steps.first { it.first == state.step }.second
+
+    Column(
+        modifier = Modifier.fillMaxSize().padding(DesignTokens.Spacing.lg),
+        verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.md),
+    ) {
+        Text(strings.t(StringKey.ONBOARDING_TITLE), style = MaterialTheme.typography.headlineSmall)
+        Text(
+            strings.t(
+                StringKey.ONBOARDING_STEP,
+                "index" to (state.index + 1).toString(),
+                "total" to state.total.toString(),
+            ),
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(DesignTokens.Spacing.md),
+                verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm),
+            ) {
+                Text(strings.t(titleKey), style = MaterialTheme.typography.titleMedium)
+                Text(strings.t(bodyKey), style = MaterialTheme.typography.bodyMedium)
+                if (state.step == OnboardingStep.PERMISSION) {
+                    Text(
+                        strings.t(StringKey.ONBOARDING_NO_PERMISSION_PROMPT),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    OutlinedButton(
+                        onClick = { onBleAction(BleGuidanceAction.REQUEST_PERMISSION) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(strings.t(StringKey.ONBOARDING_GRANT_PERMISSION))
+                    }
+                    availability.guidance()?.let { guidance ->
+                        Text(
+                            strings.render(guidance.message),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+                if (reviewMode) {
+                    Text(
+                        strings.t(StringKey.ONBOARDING_REVIEW_NOTE),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm)) {
+            if (!state.isLastStep) {
+                OutlinedButton(onClick = { controller.next() }) {
+                    Text(strings.t(StringKey.ONBOARDING_NEXT))
+                }
+                TextButton(
+                    onClick = {
+                        controller.skip()
+                        onFinished()
+                    },
+                ) {
+                    Text(strings.t(StringKey.ONBOARDING_SKIP))
+                }
+            } else {
+                Button(
+                    onClick = {
+                        controller.finish()
+                        onFinished()
+                    },
+                ) {
+                    Text(strings.t(StringKey.ONBOARDING_FINISH))
+                }
+                TextButton(
+                    onClick = {
+                        controller.skip()
+                        onFinished()
+                    },
+                ) {
+                    Text(strings.t(StringKey.ONBOARDING_SKIP))
+                }
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalTime::class)
 @Composable
 private fun PacketLogScreen(
     packetLog: InMemoryPacketLog,
+    initialOptions: PacketLogExportOptions,
     onBack: () -> Unit,
 ) {
     val strings = LocalStrings.current
@@ -1831,9 +2452,11 @@ private fun PacketLogScreen(
     var fromText by remember { mutableStateOf("") }
     var toText by remember { mutableStateOf("") }
     var format by remember { mutableStateOf(PacketLogExportFormat.TEXT) }
-    var maxEntriesText by remember { mutableStateOf(PacketLogExportOptions.DEFAULT.maxEntries.toString()) }
-    var maxBytesKbText by remember {
-        mutableStateOf((PacketLogExportOptions.DEFAULT.maxBytes / 1024).toString())
+    var maxEntriesText by remember(initialOptions) {
+        mutableStateOf(initialOptions.maxEntries.toString())
+    }
+    var maxBytesKbText by remember(initialOptions) {
+        mutableStateOf((initialOptions.maxBytes / 1024).toString())
     }
     var exporting by remember { mutableStateOf(false) }
     var progress by remember { mutableStateOf<PacketLogExportProgress?>(null) }
@@ -1883,7 +2506,11 @@ private fun PacketLogScreen(
     val entryLimit = validateEntryLimit(maxEntriesText)
     val byteLimit = validateByteLimitKb(maxBytesKbText)
     val options = if (entryLimit.valid && byteLimit.valid) {
-        PacketLogExportOptions(maxEntries = entryLimit.value!!, maxBytes = byteLimit.value!!)
+        PacketLogExportOptions(
+            maxEntries = entryLimit.value!!,
+            maxBytes = byteLimit.value!!,
+            maxHexCharsPerEntry = initialOptions.maxHexCharsPerEntry,
+        )
     } else {
         null
     }

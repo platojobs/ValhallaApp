@@ -71,6 +71,13 @@ object StorageKeys {
     const val IOS_SETTINGS_PREFIX = "valhalla.settings."
     const val SETTING_LANGUAGE = SettingsKeys.LANGUAGE
     const val SETTING_THEME = SettingsKeys.THEME
+    const val SETTING_RECONNECT_MAX_ATTEMPTS = SettingsKeys.RECONNECT_MAX_ATTEMPTS
+    const val SETTING_RECONNECT_MAX_DELAY_SECONDS = SettingsKeys.RECONNECT_MAX_DELAY_SECONDS
+    const val SETTING_LOG_CAPACITY = SettingsKeys.LOG_CAPACITY
+    const val SETTING_EXPORT_DEFAULT_ENTRIES = SettingsKeys.EXPORT_DEFAULT_ENTRIES
+    const val SETTING_EXPORT_DEFAULT_BYTES_KB = SettingsKeys.EXPORT_DEFAULT_BYTES_KB
+    const val SETTING_EXPORT_DEFAULT_HEX_CHARS = SettingsKeys.EXPORT_DEFAULT_HEX_CHARS
+    const val SETTING_ONBOARDING_COMPLETED = SettingsKeys.ONBOARDING_COMPLETED
 
     // 蓝牙权限标记
     const val ANDROID_BLE_PERMISSION_PREFS = "valhalla_ble_permission"
@@ -175,17 +182,14 @@ object StorageInventory {
             item = StorageItem.APP_SETTINGS,
             platform = StoragePlatform.ANDROID,
             location = "SharedPreferences(${StorageKeys.ANDROID_SETTINGS_PREFS})",
-            keys = listOf(StorageKeys.SETTING_LANGUAGE, StorageKeys.SETTING_THEME),
+            keys = SettingsKeys.ALL,
             persistent = true,
         ),
         StorageLocation(
             item = StorageItem.APP_SETTINGS,
             platform = StoragePlatform.IOS,
             location = "NSUserDefaults",
-            keys = listOf(
-                StorageKeys.IOS_SETTINGS_PREFIX + StorageKeys.SETTING_LANGUAGE,
-                StorageKeys.IOS_SETTINGS_PREFIX + StorageKeys.SETTING_THEME,
-            ),
+            keys = SettingsKeys.ALL.map { StorageKeys.IOS_SETTINGS_PREFIX + it },
             persistent = true,
         ),
         StorageLocation(

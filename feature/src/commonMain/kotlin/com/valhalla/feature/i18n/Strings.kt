@@ -908,6 +908,235 @@ object AppStrings {
         StringKey.COPIED to StringsEntry("已复制", "Copied"),
         StringKey.LOADING_DETAIL to StringsEntry("正在读取设备信息…", "Loading device info…"),
         StringKey.LONG_PRESS_TO_COPY to StringsEntry("长按可复制", "Long press to copy"),
+
+        // ---- 设备参数面板（v2.4.0） ----
+        StringKey.PARAM_TITLE to StringsEntry("设备参数", "Device parameters"),
+        StringKey.PARAM_RELOAD to StringsEntry("重新读取", "Reload"),
+        StringKey.PARAM_HINT to StringsEntry(
+            "参数值会在本地校验类型、范围与字节长度，校验失败不会下发。",
+            "Values are validated locally for type, range, and byte length; invalid input is never sent.",
+        ),
+        StringKey.PARAM_FIRMWARE_UNCONFIRMED to StringsEntry(
+            "需固件确认",
+            "Needs firmware confirmation",
+        ),
+        StringKey.PARAM_FIRMWARE_NOTE to StringsEntry(
+            "参数表来自协议约定值，固件尚未逐项确认；读写结果以设备应答为准，设备拒绝时展示错误码。",
+            "The parameter table comes from protocol conventions and is not yet confirmed with the firmware. Results are whatever the device returns, and rejections show the error code.",
+        ),
+        StringKey.PARAM_ID_LINE to StringsEntry("参数 ID：0x{id}", "Parameter ID: 0x{id}"),
+        StringKey.PARAM_TYPE_INTEGER to StringsEntry("整数", "Integer"),
+        StringKey.PARAM_TYPE_BOOLEAN to StringsEntry("布尔", "Boolean"),
+        StringKey.PARAM_TYPE_ENUM to StringsEntry("枚举", "Enum"),
+        StringKey.PARAM_TYPE_STRING to StringsEntry("字符串", "String"),
+        StringKey.PARAM_RANGE to StringsEntry("取值 {range}", "Range {range}"),
+        StringKey.PARAM_READ_ONLY to StringsEntry("只读", "Read-only"),
+        StringKey.PARAM_READ_ONLY_REASON to StringsEntry(
+            "只读参数，设备不允许写入。",
+            "Read-only parameter; the device does not allow writes.",
+        ),
+        StringKey.PARAM_SAVE to StringsEntry("写入", "Write"),
+        StringKey.PARAM_SAVING to StringsEntry("写入中…", "Writing…"),
+        StringKey.PARAM_LOADING to StringsEntry("读取中…", "Reading…"),
+        StringKey.PARAM_VALUE_LABEL to StringsEntry("当前值", "Current value"),
+        StringKey.PARAM_UNSAVED to StringsEntry("未写入", "Unsaved"),
+        StringKey.PARAM_SAVED_FIELD to StringsEntry("已写入 {name}", "{name} written"),
+        StringKey.PARAM_NO_ITEMS to StringsEntry("当前参数表为空。", "The parameter table is empty."),
+        StringKey.PARAM_UNKNOWN_ITEM to StringsEntry("未知参数：{id}", "Unknown parameter: {id}"),
+        StringKey.PARAM_READ_ONLY_ITEM to StringsEntry("{name} 为只读参数", "{name} is read-only"),
+        StringKey.PARAM_SAVING_BUSY to StringsEntry(
+            "正在写入 {name}，请稍候。",
+            "Writing {name}, please wait.",
+        ),
+        StringKey.PARAM_BUSY to StringsEntry(
+            "正在读取参数，请稍候。",
+            "Reading parameters, please wait.",
+        ),
+        StringKey.PARAM_LOAD_FAILED to StringsEntry(
+            "读取参数失败：{detail}，请重试。",
+            "Failed to read parameters: {detail}. Please retry.",
+        ),
+        StringKey.PARAM_SAVE_FAILED to StringsEntry(
+            "写入 {name} 失败：{detail}，请重试。",
+            "Failed to write {name}: {detail}. Please retry.",
+        ),
+        StringKey.PARAM_LOAD_ERROR to StringsEntry("读取失败", "Read failed"),
+
+        // ---- 连接质量看板（v2.4.0） ----
+        StringKey.DIAG_ENTRY to StringsEntry("诊断", "Diagnostics"),
+        StringKey.DIAG_TITLE to StringsEntry("连接质量", "Connection quality"),
+        StringKey.DIAG_HINT to StringsEntry(
+            "统计只基于本机真实报文日志；样本不足时不展示成功率与时延结论。",
+            "Statistics use only real on-device packet logs; with too few samples, success rate and latency conclusions are hidden.",
+        ),
+        StringKey.DIAG_SAMPLE_INSUFFICIENT to StringsEntry(
+            "样本不足（{count} 条）",
+            "Not enough samples ({count} requests)",
+        ),
+        StringKey.DIAG_SAMPLE_NOTE to StringsEntry(
+            "至少 {min} 条请求才展示完整统计。",
+            "At least {min} requests are needed for full statistics.",
+        ),
+        StringKey.DIAG_REQUESTS to StringsEntry("请求 {count} 条", "{count} requests"),
+        StringKey.DIAG_SUCCESS_RATE to StringsEntry("成功率 {rate}%", "Success rate {rate}%"),
+        StringKey.DIAG_LATENCY_AVG to StringsEntry(
+            "平均时延 {value} ms",
+            "Average latency {value} ms",
+        ),
+        StringKey.DIAG_LATENCY_MAX to StringsEntry("最大时延 {value} ms", "Max latency {value} ms"),
+        StringKey.DIAG_RETRANSMISSIONS to StringsEntry("重传 {count} 次", "Retransmissions {count}"),
+        StringKey.DIAG_OUT_OF_ORDER to StringsEntry(
+            "乱序应答 {count} 次",
+            "Out-of-order responses {count}",
+        ),
+        StringKey.DIAG_NO_RESPONSE to StringsEntry("无应答 {count} 条", "No response {count}"),
+        StringKey.DIAG_ERROR_TITLE to StringsEntry("错误码分布", "Error codes"),
+        StringKey.DIAG_ERROR_CODE_LINE to StringsEntry(
+            "{code} {title} ×{count}",
+            "{code} {title} ×{count}",
+        ),
+        StringKey.DIAG_COMMANDS_TITLE to StringsEntry("分命令明细", "By command"),
+        StringKey.DIAG_COMMAND_LINE to StringsEntry(
+            "{command}：请求 {requests} / 成功 {successes} / 失败 {failures}",
+            "{command}: {requests} requests / {successes} OK / {failures} failed",
+        ),
+        StringKey.DIAG_COMMAND_LATENCY to StringsEntry(
+            "平均 {avg} ms · 最大 {max} ms",
+            "Avg {avg} ms · max {max} ms",
+        ),
+        StringKey.DIAG_RECENT_FAILURES to StringsEntry("最近失败", "Recent failures"),
+        StringKey.DIAG_FAILURE_LINE to StringsEntry(
+            "{time} · {command} · {detail}",
+            "{time} · {command} · {detail}",
+        ),
+        StringKey.DIAG_UNKNOWN_ERROR to StringsEntry("未识别错误", "Unrecognized error"),
+        StringKey.DIAG_EMPTY to StringsEntry(
+            "还没有报文日志，先连接设备并刷新信息。",
+            "No packet logs yet. Connect a device and refresh first.",
+        ),
+        StringKey.DIAG_NO_FAILURE to StringsEntry("暂无失败记录。", "No failures recorded."),
+        StringKey.DIAG_MILLIS to StringsEntry("{value} ms", "{value} ms"),
+        StringKey.DIAG_PERCENT to StringsEntry("{value}%", "{value}%"),
+
+        // ---- 首次使用引导（v2.4.0） ----
+        StringKey.ONBOARDING_TITLE to StringsEntry("开始使用", "Getting started"),
+        StringKey.ONBOARDING_STEP to StringsEntry("第 {index}/{total} 步", "Step {index} of {total}"),
+        StringKey.ONBOARDING_STEP_PERMISSION_TITLE to StringsEntry(
+            "权限与蓝牙",
+            "Permissions & Bluetooth",
+        ),
+        StringKey.ONBOARDING_STEP_PERMISSION_BODY to StringsEntry(
+            "扫描需要蓝牙权限：Android 12+ 为「附近的设备」，Android 11 及以下为定位权限；iOS 需允许蓝牙。蓝牙关闭时请先在系统设置中开启。本步骤只做说明，点击按钮才会触发系统权限请求。",
+            "Scanning needs Bluetooth permission: Nearby devices on Android 12+, location on Android 11 and below, and Bluetooth access on iOS. Turn Bluetooth on in system settings if it is off. This step only explains; the system prompt appears only after you tap the button.",
+        ),
+        StringKey.ONBOARDING_STEP_SCAN_TITLE to StringsEntry("扫描设备", "Scan for devices"),
+        StringKey.ONBOARDING_STEP_SCAN_BODY to StringsEntry(
+            "点击「开始扫描」，设备会按信号强度或名称排序；已建档设备会显示最近连接时间。",
+            "Tap Start scan. Devices are sorted by signal or name; saved devices show their last connection time.",
+        ),
+        StringKey.ONBOARDING_STEP_CONNECT_TITLE to StringsEntry(
+            "连接与鉴权",
+            "Connect & authenticate",
+        ),
+        StringKey.ONBOARDING_STEP_CONNECT_BODY to StringsEntry(
+            "选择设备后建立连接；预共享密钥模式需要输入密钥，签名模式由设备发起挑战。鉴权成功后即可读取信息、配置与参数。",
+            "Pick a device to connect. Pre-shared-key mode asks for the key; signed mode uses a device challenge. After authentication you can read info, configuration, and parameters.",
+        ),
+        StringKey.ONBOARDING_GRANT_PERMISSION to StringsEntry(
+            "检查并授予权限",
+            "Check and grant permission",
+        ),
+        StringKey.ONBOARDING_SKIP to StringsEntry("跳过", "Skip"),
+        StringKey.ONBOARDING_NEXT to StringsEntry("下一步", "Next"),
+        StringKey.ONBOARDING_FINISH to StringsEntry("进入应用", "Enter app"),
+        StringKey.ONBOARDING_REVIEW_ENTRY to StringsEntry("查看使用引导", "View getting started"),
+        StringKey.ONBOARDING_REVIEW_NOTE to StringsEntry(
+            "引导只做说明，不会重复弹出系统权限框。",
+            "The guide only explains steps and never re-triggers the system permission prompt.",
+        ),
+        StringKey.ONBOARDING_NO_PERMISSION_PROMPT to StringsEntry(
+            "不会自动弹窗",
+            "No automatic permission prompt",
+        ),
+
+        // ---- 设置扩展（v2.4.0） ----
+        StringKey.SETTINGS_RECONNECT_SECTION to StringsEntry("重连策略", "Reconnect policy"),
+        StringKey.SETTINGS_RECONNECT_ATTEMPTS to StringsEntry("最大重连次数", "Max attempts"),
+        StringKey.SETTINGS_RECONNECT_DELAY to StringsEntry(
+            "退避上限（秒）",
+            "Backoff cap (seconds)",
+        ),
+        StringKey.SETTINGS_LOG_CAPACITY to StringsEntry("日志容量", "Log capacity"),
+        StringKey.SETTINGS_LOG_CAPACITY_NOTE to StringsEntry(
+            "变更对新建连接立即生效，已有连接保持当前容量；超出后丢弃最旧条目。",
+            "Changes apply to new connections immediately; existing connections keep their capacity. Oldest entries are dropped when full.",
+        ),
+        StringKey.SETTINGS_EXPORT_SECTION to StringsEntry("导出默认值", "Export defaults"),
+        StringKey.SETTINGS_EXPORT_ENTRIES to StringsEntry("默认条数", "Default entries"),
+        StringKey.SETTINGS_EXPORT_BYTES to StringsEntry("默认大小（KiB）", "Default size (KiB)"),
+        StringKey.SETTINGS_EXPORT_HEX to StringsEntry(
+            "单条 HEX 上限（字符）",
+            "Max HEX per entry (chars)",
+        ),
+        StringKey.SETTINGS_EXPORT_NOTE to StringsEntry(
+            "导出页仍可临时修改这些值。",
+            "The export page can still override these values.",
+        ),
+        StringKey.SETTINGS_RANGE_HINT to StringsEntry("范围 {min}..{max}", "Range {min}..{max}"),
+        StringKey.SETTINGS_INVALID_VALUE to StringsEntry(
+            "请输入 {min}..{max} 之间的整数",
+            "Enter an integer between {min} and {max}",
+        ),
+        StringKey.SETTINGS_APPLY to StringsEntry("应用", "Apply"),
+        StringKey.SETTINGS_RESET_DEFAULTS to StringsEntry("恢复默认", "Reset to defaults"),
+        StringKey.SETTINGS_APPLIED to StringsEntry("已保存设置", "Settings saved"),
+        StringKey.SETTINGS_RESET_DONE to StringsEntry("已恢复默认值", "Defaults restored"),
+        StringKey.SETTINGS_RESTART_NOTE to StringsEntry(
+            "日志容量对下一次连接生效。",
+            "Log capacity applies from the next connection.",
+        ),
+
+        // ---- 关于页补充（v2.4.0） ----
+        StringKey.ABOUT_COMMIT to StringsEntry("提交：{commit}", "Commit: {commit}"),
+        StringKey.ABOUT_COMMIT_UNKNOWN to StringsEntry("未知", "Unknown"),
+        StringKey.ABOUT_LICENSE_EMPTY to StringsEntry(
+            "未能读取依赖许可列表。",
+            "Dependency license list unavailable.",
+        ),
+        StringKey.ABOUT_LICENSE_LINE to StringsEntry(
+            "{name} {version} · {license} · {scope}",
+            "{name} {version} · {license} · {scope}",
+        ),
+        StringKey.ABOUT_SCOPE_RUNTIME to StringsEntry("运行时", "runtime"),
+        StringKey.ABOUT_SCOPE_ANDROID to StringsEntry("Android", "Android"),
+        StringKey.ABOUT_SCOPE_TEST to StringsEntry("测试", "test"),
+        StringKey.ABOUT_SCOPE_BUILD to StringsEntry("构建", "build"),
+
+        // ---- 帮助补充（v2.4.0） ----
+        StringKey.HELP_Q_PARAM to StringsEntry(
+            "参数面板能做什么？",
+            "What can the parameter panel do?",
+        ),
+        StringKey.HELP_A_PARAM to StringsEntry(
+            "参数面板通过 GET_PARAM / SET_PARAM 读写设备参数，写入前在本地校验类型、范围与字节长度。参数表来自协议约定值，固件尚未逐项确认，界面会标注「需固件确认」；设备拒绝时展示错误码。",
+            "The panel reads and writes parameters through GET_PARAM / SET_PARAM, validating type, range, and byte length locally before sending. The table comes from protocol conventions and is not yet confirmed with the firmware, so it is labelled \"Needs firmware confirmation\"; rejections show the device error code.",
+        ),
+        StringKey.HELP_Q_DIAG to StringsEntry(
+            "连接质量统计的数据来自哪里？",
+            "Where does connection quality data come from?",
+        ),
+        StringKey.HELP_A_DIAG to StringsEntry(
+            "全部来自本机报文日志：请求成功率、平均/最大时延、重传、乱序与错误码分布。样本少于 20 条时只提示「样本不足」，不给出结论。",
+            "Everything comes from on-device packet logs: success rate, average/max latency, retransmissions, out-of-order responses, and error-code distribution. Under 20 requests only \"not enough samples\" is shown.",
+        ),
+        StringKey.HELP_Q_ONBOARDING to StringsEntry(
+            "引导会反复弹出吗？",
+            "Will the guide pop up repeatedly?",
+        ),
+        StringKey.HELP_A_ONBOARDING to StringsEntry(
+            "三步引导可跳过，完成后写入本机偏好；可在设置页重新查看。引导不会自动触发系统权限弹窗，只有点击按钮才会走既有权限状态机。",
+            "The three-step guide can be skipped and its completion is stored locally; you can reopen it from Settings. It never triggers the system permission prompt automatically; only a tap runs the existing permission state machine.",
+        ),
     )
 
     /** 查表；缺失 key 直接抛出，避免静默显示空文案。 */

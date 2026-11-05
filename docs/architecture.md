@@ -536,4 +536,47 @@ CompositionLocalProvider(LocalStrings) → 全部 Composable 页面
 真机 BLE 并发、系统断链回调时序、长时间运行（小时级）与崩溃埋点不在本轮自动化范围，
 标注为未验证。
 
+## 10. v2.x 产品化扩展
+
+### 10.1 设备参数面板（v2.4.0）
+
+- `core/config/ParamCatalog`：集中定义参数表（paramId、名称、类型、可写、整数区间、
+  枚举表、UTF-8 字节上限、单位）。参数表是**协议约定值**，`confirmedByFirmware` 固定为
+  false，界面标题区与文档都标注「需固件确认」，不冒充设备上报能力。
+- 编码约定：整数大端 u32；布尔 1/0；枚举单字节；字符串 UTF-8。
+- `feature/param/ParamEditorController`：读取按顺序串行、写入单在途，读写状态机与
+  配置编辑器一致（加载中/保存中/成功/失败/错误码）；本地校验失败不产生请求。
+- 界面在详情页配置区之后展示，只读参数禁用输入并说明原因。
+
+### 10.2 连接质量看板（v2.4.0）
+
+- `core/logging/ConnectionQualityAnalyzer` 是纯函数：输入 `PacketLogEntry` 快照，
+  输出请求/应答/成功/设备错误/无应答、重传、乱序、时延（平均/最大）、错误码聚合、
+  分命令明细与最近失败。
+- 口径：请求只算 TX 非通知帧；同一 sequence 的重复 TX 计为重传，时延以最后一次发送为基准；
+  应答按 sequence 配对；乱序按应答时间顺序与请求发起顺序比较。
+- 样本少于 20 条时 `insufficientSample = true`，界面只显示「样本不足（X 条）」，
+  不给出成功率/时延结论。
+- 诊断页从详情页进入，数据只来自本机真实报文日志。
+
+### 10.3 首次引导与偏好（v2.4.0）
+
+- `feature/onboarding/OnboardingController`：三步（权限说明 / 扫描 / 连接与鉴权），
+  可任一步跳过；完成状态写入 `AppSettingsStore.onboarding_completed`。
+- 引导只做说明，不自动触发系统权限弹窗；「检查并授予权限」按钮调用既有
+  `BlePermissionState`，请求次数限制与拒绝后静默降级仍由权限状态机负责。
+- `feature/settings/AppSettings` + `AppSettingsRepository`：重连次数 1..5、退避上限
+  5..60 秒、日志容量 100..1000、导出条数/大小/单条 HEX 上限；写入时非法值拒绝，
+  读取时损坏值回退默认。
+- 日志容量只影响新建连接（`InMemoryPacketLog(capacity)`），已有连接保持当前容量。
+- 重连策略在新建 `AutoReconnectController` 时生效。
+
+### 10.4 构建信息与依赖许可（v2.4.0）
+
+- `:core:generateAppInfo` 从 `gradle.properties`、环境变量
+  （`VALHALLA_BUILD_CHANNEL` / `VALHALLA_BUILD_COMMIT` / `GITHUB_SHA`）与依赖版本表生成
+  `AppBuildInfo` 与 `AppDependencyInfo`；取不到提交号时为空字符串，关于页显示「未知」。
+- 关于页逐条展示依赖名称、版本、许可证与作用域，不再用一句写死的许可证文案代替。
+
+
 
