@@ -69,6 +69,9 @@ import com.valhalla.core.security.HmacAuthSigner
 import com.valhalla.core.command.ConcurrentCommandDispatcher
 import com.valhalla.core.command.PacketRecordingFrameLink
 import com.valhalla.core.config.DeviceConfigTarget
+import com.valhalla.core.automation.AutomationRuleRepository
+import com.valhalla.core.automation.AutomationTrigger
+import com.valhalla.core.config.ConfigPresetRepository
 import com.valhalla.core.firmware.OtaCheckpointStore
 import com.valhalla.core.logging.InMemoryPacketLog
 import com.valhalla.core.logging.PacketLogEntry
@@ -149,6 +152,9 @@ import com.valhalla.feature.ble.resolveBleAvailability
 import com.valhalla.feature.config.ConfigEditorController
 import com.valhalla.feature.config.ConfigEditorState
 import com.valhalla.feature.config.ConfigFieldState
+import com.valhalla.feature.config.ConfigPresetApplier
+import com.valhalla.feature.automation.AutomationContext
+import com.valhalla.feature.automation.AutomationRuleRunner
 import com.valhalla.feature.detail.DeviceDetailController
 import com.valhalla.feature.detail.DeviceDetailState
 import com.valhalla.feature.export.FileSaveStatus
@@ -183,6 +189,8 @@ import com.valhalla.feature.scan.ScanController
 import com.valhalla.feature.scan.ScanUiState
 import com.valhalla.feature.settings.AppSettings
 import com.valhalla.feature.settings.AppSettingsRepository
+import com.valhalla.feature.settings.PreferencesAutomationRuleStore
+import com.valhalla.feature.settings.PreferencesConfigPresetStore
 import com.valhalla.core.logging.ConnectionQualityAnalyzer
 import com.valhalla.core.config.ParamCatalog
 import com.valhalla.core.config.ParamValueType
@@ -253,6 +261,9 @@ private sealed interface Route {
     data class Ota(val deviceId: String) : Route
     data class Logs(val deviceId: String) : Route
     data class Diagnostic(val deviceId: String) : Route
+    data object Automation : Route
+    data object Stats : Route
+    data object Backup : Route
 }
 
 /**
@@ -314,11 +325,16 @@ fun ValhallaApp() {
                     appSettings = AppSettingsRepository.load(settingsStore)
                 },
                 onboardingStore = settingsStore,
+                onReloadPersisted = {
+                    preferences = AppPreferenceStore.load(settingsStore)
+                    appSettings = AppSettingsRepository.load(settingsStore)
+                },
             )
         }
     }
 }
 
+@OptIn(ExperimentalTime::class)
 @Composable
 private fun ValhallaContent(
     preferences: com.valhalla.feature.theme.AppPreferences,
@@ -328,6 +344,7 @@ private fun ValhallaContent(
     onLanguageChange: (AppLanguageMode) -> Unit,
     onThemeChange: (ThemeMode) -> Unit,
     onSettingsChange: (AppSettings) -> Unit,
+    onReloadPersisted: () -> Unit,
 ) {
     val bleClient = remember { createBleClient() }
     val permissionController = rememberBlePermissionController(bleClient)
@@ -341,6 +358,20 @@ private fun ValhallaContent(
     val firmwareLibrary = remember { FirmwareLibraryRepository(createFirmwareLibraryStore()) }
     // 指标采样只保存在本机，按设备分片，最多 50 个点。
     val metrics = remember { DeviceMetricRepository(createDeviceMetricStore()) }
+    // 预设与自动化规则复用平台偏好存储；损坏数据在仓储层回退为空。
+    val presetRepository = remember {
+        ConfigPresetRepository(
+            store = PreferencesConfigPresetStore(onboardingStore),
+            clockMillis = { Clock.System.now().toEpochMilliseconds() },
+        )
+    }
+    val automationRepository = remember {
+        AutomationRuleRepository(
+            store = PreferencesAutomationRuleStore(onboardingStore),
+            clockMillis = { Clock.System.now().toEpochMilliseconds() },
+        )
+    }
+    var lastDiagnosticReport by remember { mutableStateOf<String?>(null) }
     val notificationPresenter = rememberNotificationPresenter()
     val scanController = remember {
         ScanController(
@@ -420,6 +451,51 @@ private fun ValhallaContent(
         )
     }
 
+    /**
+     * 前台自动化：只在连接/OTA 成功的 UI 回调里调用。
+     * App 没有后台服务或后台唤起路径，因此这里的 isForeground 恒为 true；
+     * 若将来加入后台执行，必须改为真实生命周期状态。
+     */
+    fun triggerAutomation(trigger: AutomationTrigger, session: DeviceSession) {
+        val healthCheck = DeviceHealthCheckController(
+            dispatcher = session.dispatcher,
+            isLinkAlive = { session.connection.connected.value },
+            otaHistoryProvider = {
+                session.profileRepository.get(session.connection.deviceId)?.otaHistory.orEmpty()
+            },
+            knownUptimeSeconds = { session.detail.state.value.uptimeSeconds ?: 0L },
+        )
+        val runner = AutomationRuleRunner(
+            rules = automationRepository,
+            presets = presetRepository,
+            presetApplier = ConfigPresetApplier(session.dispatcher),
+            events = session.events,
+            isForeground = { true },
+            eventSummary = { rule ->
+                strings.t(
+                    StringKey.AUTOMATION_EVENT_SUMMARY,
+                    "action" to strings.t(rule.action.stringKey()),
+                )
+            },
+            onDiagnosticReport = { lastDiagnosticReport = it },
+        )
+        scope.launchSafely(errorReporter, "automation") {
+            runner.run(
+                trigger = trigger,
+                context = AutomationContext(
+                    deviceId = session.connection.deviceId,
+                    dispatcher = session.dispatcher,
+                    detail = session.detail,
+                    events = session.events,
+                    profileProvider = { session.profileRepository.get(session.connection.deviceId) },
+                    healthCheckFactory = { healthCheck },
+                    isLinkAlive = { session.connection.connected.value },
+                    platformDisplayName = platformDisplayName(),
+                ),
+            )
+        }
+    }
+
     fun handleBleAction(action: BleGuidanceAction) {
         when (action) {
             BleGuidanceAction.REQUEST_PERMISSION -> permissionController.requestPermission()
@@ -474,6 +550,7 @@ private fun ValhallaContent(
                 sessions = sessions + (device.deviceId to refreshed)
                 deviceManager.replaceConnection(device.deviceId, connection)
                 route = Route.Detail(device.deviceId)
+                triggerAutomation(AutomationTrigger.CONNECTED, refreshed)
             },
             onError = { error -> errorReporter.record("reconnect", error) },
         )
@@ -543,6 +620,7 @@ private fun ValhallaContent(
                                 sessions = sessions + (device.deviceId to newSession)
                                 deviceManager.select(device.deviceId)
                                 route = Route.Detail(device.deviceId)
+                                triggerAutomation(AutomationTrigger.CONNECTED, newSession)
                             }
 
                             MultiDeviceConnectResult.AlreadyConnected -> {
@@ -636,6 +714,29 @@ private fun ValhallaContent(
             onHelp = { route = Route.Help },
             onPrivacy = { route = Route.Privacy },
             onOnboardingReview = { route = Route.Onboarding(review = true) },
+            onOpenAutomation = { route = Route.Automation },
+            onOpenStats = { route = Route.Stats },
+            onOpenBackup = { route = Route.Backup },
+        )
+
+        Route.Automation -> AutomationScreen(
+            rules = automationRepository,
+            presets = presetRepository,
+            lastDiagnosticReport = lastDiagnosticReport,
+            onBack = { route = Route.Settings },
+        )
+
+        Route.Stats -> UsageStatsScreen(
+            profileRepository = profileRepository,
+            onBack = { route = Route.Settings },
+        )
+
+        Route.Backup -> BackupScreen(
+            store = onboardingStore,
+            presets = presetRepository,
+            rules = automationRepository,
+            onReloadPersisted = onReloadPersisted,
+            onBack = { route = Route.Settings },
         )
 
         Route.About -> AboutScreen(onBack = { route = Route.Settings })
@@ -674,6 +775,7 @@ private fun ValhallaContent(
                     session = session,
                     settings = settings,
                     metrics = metrics,
+                    presets = presetRepository,
                     notificationPresenter = notificationPresenter,
                     connectedCount = deviceState.occupied,
                     disconnectInfo = disconnectInfo,
@@ -733,6 +835,7 @@ private fun ValhallaContent(
                     settings = settings,
                     notificationPresenter = notificationPresenter,
                     onBack = { route = Route.Detail(current.deviceId) },
+                    onOtaSucceeded = { triggerAutomation(AutomationTrigger.OTA_SUCCESS, session) },
                 )
             }
         }
@@ -1410,6 +1513,8 @@ private fun DeviceEventType.timelineKey(): StringKey = when (this) {
     DeviceEventType.CONFIG_CHANGE -> StringKey.TIMELINE_TYPE_CONFIG
     DeviceEventType.PARAM_CHANGE -> StringKey.TIMELINE_TYPE_PARAM
     DeviceEventType.OTA -> StringKey.TIMELINE_TYPE_OTA
+    DeviceEventType.HEALTH -> StringKey.TIMELINE_TYPE_HEALTH
+    DeviceEventType.AUTOMATION -> StringKey.TIMELINE_TYPE_AUTOMATION
     DeviceEventType.ERROR -> StringKey.TIMELINE_TYPE_ERROR
 }
 
@@ -1419,6 +1524,7 @@ private fun DetailScreen(
     session: DeviceSession,
     settings: AppSettings,
     metrics: DeviceMetricRepository,
+    presets: ConfigPresetRepository,
     notificationPresenter: NotificationPresenter,
     connectedCount: Int,
     disconnectInfo: DisconnectInfo?,
@@ -1638,7 +1744,21 @@ private fun DetailScreen(
                                 onClick = {
                                     healthMessage = null
                                     healthJob = scope.launchSafely(errorReporter, "health-check") {
-                                        healthCheck.run()
+                                        val checked = healthCheck.run()
+                                        if (checked != null) {
+                                            session.events.record(
+                                                deviceId = session.detail.deviceId,
+                                                type = DeviceEventType.HEALTH,
+                                                summary = strings.t(StringKey.HEALTH_TITLE),
+                                                result = if (checked.abortedByLinkLoss) {
+                                                    DeviceEventResult.FAILURE
+                                                } else {
+                                                    DeviceEventResult.SUCCESS
+                                                },
+                                                detail = "ok=${checked.okCount}, abnormal=${checked.abnormalCount}, " +
+                                                    "failed=${checked.failedCount}, skipped=${checked.skippedCount}",
+                                            )
+                                        }
                                     }
                                 },
                             ) {
@@ -2024,6 +2144,23 @@ private fun DetailScreen(
 
             profile?.let { snapshot ->
                 item { ProfileCard(snapshot, format, zoneOffsetMinutes) }
+            }
+
+            item {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(
+                        modifier = Modifier.padding(DesignTokens.Spacing.md),
+                        verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm),
+                    ) {
+                        PresetSection(
+                            presets = presets,
+                            applier = remember(session.dispatcher) { ConfigPresetApplier(session.dispatcher) },
+                            config = session.config,
+                            deviceId = session.device.deviceId,
+                            events = session.events,
+                        )
+                    }
+                }
             }
 
             item {
@@ -3877,6 +4014,7 @@ private fun OtaScreen(
     settings: AppSettings,
     notificationPresenter: NotificationPresenter,
     onBack: () -> Unit,
+    onOtaSucceeded: () -> Unit,
 ) {
     val strings = LocalStrings.current
     val format = remember(strings.language) { LocaleFormat(strings.language) }
@@ -3939,6 +4077,7 @@ private fun OtaScreen(
             detail = (current as? OtaState.Failed)?.let { strings.render(it.reason) },
             errorCode = (current as? OtaState.Aborted)?.reason,
         )
+        if (current is OtaState.Succeeded) onOtaSucceeded()
 
         // 固件库：只落元信息与原始引用，不复制二进制。
         val version = selectionState.version

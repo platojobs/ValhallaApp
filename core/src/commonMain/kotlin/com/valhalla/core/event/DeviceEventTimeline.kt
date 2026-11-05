@@ -12,6 +12,8 @@ enum class DeviceEventType {
     CONFIG_CHANGE,
     PARAM_CHANGE,
     OTA,
+    HEALTH,
+    AUTOMATION,
     ERROR,
 }
 

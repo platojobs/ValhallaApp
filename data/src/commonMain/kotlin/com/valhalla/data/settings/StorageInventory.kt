@@ -28,6 +28,12 @@ enum class StorageItem {
 
     /** 设备指标采样：电量与 RSSI，每设备最近 50 个点。 */
     DEVICE_METRICS,
+
+    /** 配置预设：命名场景方案的配置值，存于偏好存储。 */
+    CONFIG_PRESETS,
+
+    /** 自动化规则：本地触发规则与顺序，存于偏好存储。 */
+    AUTOMATION_RULES,
 }
 
 enum class StoragePlatform {
@@ -110,6 +116,10 @@ object StorageKeys {
     const val ANDROID_METRICS_PREFS = "valhalla_device_metrics"
     const val ANDROID_METRICS_KEY_PREFIX = "metrics."
     const val IOS_METRICS_KEY_PREFIX = "valhalla.metrics."
+
+    // 配置预设与自动化规则（复用偏好存储，行式编码）
+    const val SETTING_CONFIG_PRESETS = SettingsKeys.CONFIG_PRESETS
+    const val SETTING_AUTOMATION_RULES = SettingsKeys.AUTOMATION_RULES
 }
 
 /** 各平台真实的存储位置清单。 */
@@ -308,6 +318,50 @@ object StorageInventory {
             item = StorageItem.DEVICE_METRICS,
             platform = StoragePlatform.JVM,
             location = "In-memory (InMemoryDeviceMetricStore)",
+            keys = emptyList(),
+            persistent = false,
+        ),
+        StorageLocation(
+            item = StorageItem.CONFIG_PRESETS,
+            platform = StoragePlatform.ANDROID,
+            location = "SharedPreferences(${StorageKeys.ANDROID_SETTINGS_PREFS})",
+            // 键已包含在 APP_SETTINGS 的 SettingsKeys.ALL 中，此处不重复列出。
+            keys = emptyList(),
+            persistent = true,
+        ),
+        StorageLocation(
+            item = StorageItem.CONFIG_PRESETS,
+            platform = StoragePlatform.IOS,
+            location = "NSUserDefaults",
+            keys = emptyList(),
+            persistent = true,
+        ),
+        StorageLocation(
+            item = StorageItem.CONFIG_PRESETS,
+            platform = StoragePlatform.JVM,
+            location = "In-memory (AppSettingsStore)",
+            keys = emptyList(),
+            persistent = false,
+        ),
+        StorageLocation(
+            item = StorageItem.AUTOMATION_RULES,
+            platform = StoragePlatform.ANDROID,
+            location = "SharedPreferences(${StorageKeys.ANDROID_SETTINGS_PREFS})",
+            // 键已包含在 APP_SETTINGS 的 SettingsKeys.ALL 中，此处不重复列出。
+            keys = emptyList(),
+            persistent = true,
+        ),
+        StorageLocation(
+            item = StorageItem.AUTOMATION_RULES,
+            platform = StoragePlatform.IOS,
+            location = "NSUserDefaults",
+            keys = emptyList(),
+            persistent = true,
+        ),
+        StorageLocation(
+            item = StorageItem.AUTOMATION_RULES,
+            platform = StoragePlatform.JVM,
+            location = "In-memory (AppSettingsStore)",
             keys = emptyList(),
             persistent = false,
         ),

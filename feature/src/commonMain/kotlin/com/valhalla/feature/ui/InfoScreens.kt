@@ -106,6 +106,9 @@ fun SettingsScreen(
     onHelp: () -> Unit,
     onPrivacy: () -> Unit,
     onOnboardingReview: () -> Unit,
+    onOpenAutomation: () -> Unit,
+    onOpenStats: () -> Unit,
+    onOpenBackup: () -> Unit,
 ) {
     val strings = LocalStrings.current
     InfoScreen(title = strings.t(StringKey.SETTINGS_TITLE), onBack = onBack) {
@@ -150,6 +153,15 @@ fun SettingsScreen(
             onSettingsChange = onSettingsChange,
         )
         Column(verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs)) {
+            OutlinedButton(onClick = onOpenAutomation, modifier = Modifier.fillMaxWidth()) {
+                Text(strings.t(StringKey.SETTINGS_AUTOMATION_ENTRY))
+            }
+            OutlinedButton(onClick = onOpenStats, modifier = Modifier.fillMaxWidth()) {
+                Text(strings.t(StringKey.SETTINGS_STATS_ENTRY))
+            }
+            OutlinedButton(onClick = onOpenBackup, modifier = Modifier.fillMaxWidth()) {
+                Text(strings.t(StringKey.SETTINGS_BACKUP_ENTRY))
+            }
             OutlinedButton(onClick = onOnboardingReview, modifier = Modifier.fillMaxWidth()) {
                 Text(strings.t(StringKey.ONBOARDING_REVIEW_ENTRY))
             }
@@ -599,6 +611,8 @@ private fun storageDescriptionKey(item: StorageItem): StringKey = when (item) {
     StorageItem.FIRMWARE_LIBRARY -> StringKey.PRIVACY_ITEM_FIRMWARE_LIBRARY
     StorageItem.DEVICE_EVENTS -> StringKey.PRIVACY_ITEM_EVENTS
     StorageItem.DEVICE_METRICS -> StringKey.PRIVACY_ITEM_METRICS
+    StorageItem.CONFIG_PRESETS -> StringKey.PRIVACY_ITEM_PRESETS
+    StorageItem.AUTOMATION_RULES -> StringKey.PRIVACY_ITEM_AUTOMATION
 }
 
 internal fun platformDisplayName(): String = when (currentStoragePlatform()) {

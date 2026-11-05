@@ -1,7 +1,7 @@
 # 交付说明
 
 本文汇总 ValhallaApp 的可交付内容、构建方式、产物路径与完成度对照。最新发布说明见
-[release-notes/v2.5.0.md](release-notes/v2.5.0.md)，历史版本见
+[release-notes/v2.7.0.md](release-notes/v2.7.0.md)，历史版本见
 [release-notes/v2.0.0.md](release-notes/v2.0.0.md)，全部文档入口见 [README.md](README.md)。
 
 ## 1. 交付物清单
@@ -185,3 +185,16 @@ xcodebuild -project iosApp/iosApp.xcodeproj -scheme iosApp \
   ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO`；失败即红。
 - 本期不做启动冒烟、性能基准与脚手架脚本；如需再单独立项。
 - 本地等价命令已验证通过，远程 runner 结论以待推送后的 Actions 记录为准。
+
+## 9. 复用、可迁移与可度量能力（v2.7.0）
+
+| 能力 | 实现位置 | 自动化验证 |
+| --- | --- | --- |
+| 配置预设（命名/重命名/删除/复制/最近使用排序） | `core/config/ConfigPreset.kt` + 详情页预设区 | `ConfigPresetTest` |
+| 预设差异与逐键写入、部分失败 | `ConfigPresetDiffer` + `feature/config/ConfigPresetApplier.kt` | `ConfigPresetTest` / `ConfigPresetApplierTest` |
+| 自动化规则（前台触发、开关/排序/删除） | `core/automation/` + `feature/automation/AutomationRuleRunner.kt` | `AutomationRuleTest` / `AutomationRuleRunnerTest` |
+| 使用统计（各维度、时间范围、空数据） | `core/metrics/UsageStatistics.kt` + 统计页 | `UsageStatisticsTest` |
+| 偏好备份导出/导入/恢复出厂 | `feature/settings/PreferencesBackup.kt` + 备份页 | `PreferencesBackupTest` |
+
+- 自动化规则只在 App 前台触发，不做后台唤起；统计只用本机真实数据，不做估算；
+- 备份 JSON 只含白名单字段，测试断言不出现令牌、密钥、凭证、设备档案、日志与断点键名。

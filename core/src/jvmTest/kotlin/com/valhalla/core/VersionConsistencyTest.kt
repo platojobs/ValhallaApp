@@ -31,10 +31,10 @@ class VersionConsistencyTest {
     private val versionCode: String get() = gradleProperties["valhalla.versionCode"].orEmpty()
 
     @Test
-    fun `gradle properties 提供 2_6_0 版本号`() {
-        assertEquals("2.6.0", versionName)
+    fun `gradle properties 提供 2_7_0 版本号`() {
+        assertEquals("2.7.0", versionName)
         assertTrue(versionName.matches(Regex("""\d+\.\d+\.\d+""")), "versionName 应为 x.y.z：$versionName")
-        assertEquals(26, versionCode.toIntOrNull())
+        assertEquals(27, versionCode.toIntOrNull())
     }
 
     @Test
@@ -74,7 +74,7 @@ class VersionConsistencyTest {
         val plist = File(root, "iosApp/iosApp/Info.plist").readText()
         assertTrue(plist.contains("<string>\$(MARKETING_VERSION)</string>"))
         assertTrue(plist.contains("<string>\$(CURRENT_PROJECT_VERSION)</string>"))
-        assertFalse(plist.contains("<string>2.6.0</string>"), "Info.plist 不应硬编码版本号")
+        assertFalse(plist.contains("<string>2.7.0</string>"), "Info.plist 不应硬编码版本号")
     }
 
     @Test
@@ -94,6 +94,6 @@ class VersionConsistencyTest {
         assertTrue(script.contains("gradleProperty(\"valhalla.versionCode\")"))
         assertTrue(script.contains("versionName = appVersionName"))
         assertTrue(script.contains("versionCode = appVersionCode"))
-        assertFalse(script.contains("versionName = \"2.6.0\""), "Android 不应硬编码版本号")
+        assertFalse(script.contains("versionName = \"2.7.0\""), "Android 不应硬编码版本号")
     }
 }

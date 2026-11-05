@@ -150,3 +150,15 @@ Keystore/Keychain 常量；`PrivacyDisclosureTest` 断言隐私页条目与清�
 - 内容为 `timestamp|batteryPercent|rssi` 行式编码（`v1` 头），每设备最多 50 点，超出淘汰最旧；
 - 空值不写入，编码损坏或版本不符回退为空；读取走本机键值存储，跨进程可读；
 - 仪表盘每次刷新采样一次，不足 3 点只显示当前值，不画折线。
+
+## 10. 配置预设与自动化规则（v2.7.0）
+
+| 数据 | 存储位置 | 键 | 持久化 |
+| --- | --- | --- | --- |
+| 配置预设 | 应用偏好存储（Android `valhalla_settings` / iOS `NSUserDefaults` 前缀） | `SettingsKeys.CONFIG_PRESETS` | Android/iOS 是，JVM 内存 |
+| 自动化规则 | 同上 | `SettingsKeys.AUTOMATION_RULES` | Android/iOS 是，JVM 内存 |
+
+- 两者为行式编码（`v1` 头、百分号转义），损坏数据回退为空列表；预设默认上限 50 条，
+  规则默认上限 20 条；
+- 使用统计不新增存储：连接/写入/体检来自事件时间线，OTA 来自设备档案；
+- 偏好备份只导出白名单字段，不含令牌、密钥、凭证、设备档案、日志与断点。

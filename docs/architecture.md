@@ -606,3 +606,20 @@ CompositionLocalProvider(LocalStrings) → 全部 Composable 页面
 - `core/metrics/DeviceMetricSamples.kt`：采样模型、行式编码与 50 点淘汰；仓库按设备隔离，
   不足 3 点不画线。平台存储走 `DeviceMetricStore` expect/actual。
 - UI 仍是 `ValhallaApp.kt` 内的组合式接入，向导只重组展示层，不改 OTA 状态机。
+
+## 12. 配置预设、自动化与统计（v2.7.0）
+
+- `core/config/ConfigPreset.kt`：预设模型（`id/name/values/createdAt/lastUsedAt`）与行式编码
+  （`v1` 头 + `P|...` + `V|key|value`），损坏回退空；仓储按最近使用倒序，支持重命名、删除、
+  复制与整表替换。`ConfigPresetDiffer` 按设备能力与配置目录计算三态差异
+  （`WILL_CHANGE` / `ALREADY_TARGET` / `UNSUPPORTED`）。
+- `feature/config/ConfigPresetApplier.kt`：只对 `WILL_CHANGE` 逐键下发 `SET_CONFIG`，
+  单键失败记错误码并继续后续键；`UNSUPPORTED` 跳过并保留原因；取消异常原样透传。
+- `core/automation/AutomationRule.kt`：规则模型、编码与仓储（开关/排序/删除/整表替换）。
+  触发时机只有 `CONNECTED` 与 `OTA_SUCCESS`，由前台回调显式调用。
+- `feature/automation/AutomationRuleRunner.kt`：前台守卫 + 动作执行；单条失败写 `AUTOMATION`
+  事件并继续，不向主流程抛异常；诊断报告动作复用 `DiagnosticReportComposer` 的真实数据。
+- `core/metrics/UsageStatistics.kt`：纯函数聚合设备档案、OTA 历史与事件时间线；
+  只统计真实记录，空维度返回 0/null，由界面显示「暂无数据」。
+- `feature/settings/PreferencesBackup.kt` + `MiniJson.kt`：备份只序列化白名单字段，
+  导入先校验 `schema/schemaVersion` 再逐字段回退；`PreferencesReset` 只清偏好与预设。

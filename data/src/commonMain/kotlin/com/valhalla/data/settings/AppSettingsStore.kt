@@ -56,6 +56,12 @@ object SettingsKeys {
     /** 低电量阈值百分比，默认 20，取值 5..50。 */
     const val NOTIFY_LOW_BATTERY_THRESHOLD = "notify_low_battery_threshold"
 
+    /** 配置预设（行式编码，v1）。 */
+    const val CONFIG_PRESETS = "config_presets"
+
+    /** 自动化规则（行式编码，v1）。 */
+    const val AUTOMATION_RULES = "automation_rules"
+
     /** 全部偏好键，供隐私页与存储清单展示。 */
     val ALL: List<String> = listOf(
         LANGUAGE,
@@ -71,5 +77,7 @@ object SettingsKeys {
         NOTIFY_DISCONNECT_ENABLED,
         NOTIFY_LOW_BATTERY_ENABLED,
         NOTIFY_LOW_BATTERY_THRESHOLD,
+        CONFIG_PRESETS,
+        AUTOMATION_RULES,
     )
 }
