@@ -7,7 +7,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * 版本号一致性（v2.4.0 扩展依赖许可清单）：
+ * 版本号一致性（v2.5.0 扩展依赖许可清单）：
  * gradle.properties 是唯一来源，Android/iOS 与关于页的 AppBuildInfo 都从它派生。
  * 该测试防止各处版本号漂移，也防止回退到硬编码。
  */
@@ -31,10 +31,10 @@ class VersionConsistencyTest {
     private val versionCode: String get() = gradleProperties["valhalla.versionCode"].orEmpty()
 
     @Test
-    fun `gradle properties 提供 2_4_0 版本号`() {
-        assertEquals("2.4.0", versionName)
+    fun `gradle properties 提供 2_5_0 版本号`() {
+        assertEquals("2.5.0", versionName)
         assertTrue(versionName.matches(Regex("""\d+\.\d+\.\d+""")), "versionName 应为 x.y.z：$versionName")
-        assertEquals(24, versionCode.toIntOrNull())
+        assertEquals(25, versionCode.toIntOrNull())
     }
 
     @Test
@@ -74,7 +74,7 @@ class VersionConsistencyTest {
         val plist = File(root, "iosApp/iosApp/Info.plist").readText()
         assertTrue(plist.contains("<string>\$(MARKETING_VERSION)</string>"))
         assertTrue(plist.contains("<string>\$(CURRENT_PROJECT_VERSION)</string>"))
-        assertFalse(plist.contains("<string>2.4.0</string>"), "Info.plist 不应硬编码版本号")
+        assertFalse(plist.contains("<string>2.5.0</string>"), "Info.plist 不应硬编码版本号")
     }
 
     @Test
@@ -94,6 +94,6 @@ class VersionConsistencyTest {
         assertTrue(script.contains("gradleProperty(\"valhalla.versionCode\")"))
         assertTrue(script.contains("versionName = appVersionName"))
         assertTrue(script.contains("versionCode = appVersionCode"))
-        assertFalse(script.contains("versionName = \"2.4.0\""), "Android 不应硬编码版本号")
+        assertFalse(script.contains("versionName = \"2.5.0\""), "Android 不应硬编码版本号")
     }
 }

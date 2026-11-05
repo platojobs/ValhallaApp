@@ -44,6 +44,18 @@ object SettingsKeys {
     /** 首次使用引导是否已完成（true/false）。 */
     const val ONBOARDING_COMPLETED = "onboarding_completed"
 
+    /** 本地提醒：OTA 完成/失败是否通知（默认关闭）。 */
+    const val NOTIFY_OTA_ENABLED = "notify_ota_enabled"
+
+    /** 本地提醒：连接断开是否通知（默认关闭）。 */
+    const val NOTIFY_DISCONNECT_ENABLED = "notify_disconnect_enabled"
+
+    /** 本地提醒：低电量是否通知（默认关闭）。 */
+    const val NOTIFY_LOW_BATTERY_ENABLED = "notify_low_battery_enabled"
+
+    /** 低电量阈值百分比，默认 20，取值 5..50。 */
+    const val NOTIFY_LOW_BATTERY_THRESHOLD = "notify_low_battery_threshold"
+
     /** 全部偏好键，供隐私页与存储清单展示。 */
     val ALL: List<String> = listOf(
         LANGUAGE,
@@ -55,5 +67,9 @@ object SettingsKeys {
         EXPORT_DEFAULT_BYTES_KB,
         EXPORT_DEFAULT_HEX_CHARS,
         ONBOARDING_COMPLETED,
+        NOTIFY_OTA_ENABLED,
+        NOTIFY_DISCONNECT_ENABLED,
+        NOTIFY_LOW_BATTERY_ENABLED,
+        NOTIFY_LOW_BATTERY_THRESHOLD,
     )
 }

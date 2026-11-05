@@ -1,7 +1,7 @@
 # 交付说明
 
 本文汇总 ValhallaApp 的可交付内容、构建方式、产物路径与完成度对照。最新发布说明见
-[release-notes/v2.4.0.md](release-notes/v2.4.0.md)，历史版本见
+[release-notes/v2.5.0.md](release-notes/v2.5.0.md)，历史版本见
 [release-notes/v2.0.0.md](release-notes/v2.0.0.md)，全部文档入口见 [README.md](README.md)。
 
 ## 1. 交付物清单
@@ -110,10 +110,11 @@ xcodebuild -project iosApp/iosApp.xcodeproj -scheme iosApp \
 | [testing.md](testing.md) | 设备模拟器、场景矩阵、故障注入、端到端用例 |
 | [environment-report.md](environment-report.md) | 本机工具链与实际构建记录 |
 | [delivery.md](delivery.md) | 本文：交付物、构建命令、产物路径、完成度对照 |
+| [release-notes/v2.5.0.md](release-notes/v2.5.0.md) | v2.5.0 固件库、诊断报告、事件时间线与本地提醒 |
 | [release-notes/v2.4.0.md](release-notes/v2.4.0.md) | v2.4.0 参数面板、连接质量、引导与设置扩展 |
 | [release-notes/v2.3.0.md](release-notes/v2.3.0.md) | v2.3.0 多设备管理、扫描增强、快捷操作与 OTA 历史 |
 | [release-notes/v2.0.0.md](release-notes/v2.0.0.md) | v2.0.0 发布说明与真机验收清单 |
-| [CHANGELOG.md](../CHANGELOG.md) | v0.0.1 → v2.4.0 版本演进 |
+| [CHANGELOG.md](../CHANGELOG.md) | v0.0.1 → v2.5.0 版本演进 |
 
 ## 6. 可交付状态与未完成项
 
@@ -125,6 +126,10 @@ xcodebuild -project iosApp/iosApp.xcodeproj -scheme iosApp \
 | 指令调度（seq 配对、超时重试、通知分流） | `core`/`feature` JVM 测试 + 并发压力用例 |
 | OTA 预检、分片、重传、续传三分支、旧设备回退 | `protocol-testkit` 端到端 13 用例 |
 | 权限/可用状态机、断连映射、自动重连退避 | `feature` JVM 测试（纯逻辑） |
+| 固件库归并/排序/淘汰/损坏回退、复用校验 | `FirmwareLibraryTest`（11 项） |
+| 事件时间线倒序/筛选/100 条环形/脱敏/隔离 | `DeviceEventTimelineTest`（6 项） |
+| 诊断报告章节/体积预估一致/脱敏/进度/上限 | `DiagnosticReportTest`（6 项） |
+| 通知开关默认关闭、低电条件与去抖 | `NotificationPolicyTest`（5 项） |
 | 配置能力协商、报文日志筛选/导出/脱敏 | `core`/`feature` JVM 测试，TEXT/JSON/CSV 等价断言 |
 | 设备档案、OTA 历史、保留策略 | `core` 仓储测试 + `storage.md` |
 | 版本单一来源与 release 产物校验 | `verifyVersionConsistency` / `verifyReleaseArtifact` |

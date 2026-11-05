@@ -4,10 +4,10 @@
 OTA 升级与报文诊断在 Android / iOS 之间共享，平台能力通过 `expect/actual` 落到 Android BLE
 与 iOS CoreBluetooth。
 
-当前版本 **v2.3.0（versionCode 23）**。状态：**源码级可交付** —— 构建与测试可复现、
+当前版本 **v2.5.0（versionCode 25）**。状态：**源码级可交付** —— 构建与测试可复现、
 协议与行为有文档和自动化证据；release 产物默认未签名，权限弹窗、真实 BLE/OTA、
 Keystore/Keychain、TalkBack/VoiceOver 等真机路径**未验证**。发布边界见
-[docs/release-notes/v2.3.0.md](docs/release-notes/v2.3.0.md)（历史版本见
+[docs/release-notes/v2.5.0.md](docs/release-notes/v2.5.0.md)（历史版本见
 [CHANGELOG.md](CHANGELOG.md)），交付清单见 [docs/delivery.md](docs/delivery.md)。
 
 ## 核心能力

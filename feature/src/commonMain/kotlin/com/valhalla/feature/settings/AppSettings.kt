@@ -17,6 +17,10 @@ data class AppSettings(
     val exportEntries: Int = DEFAULT_EXPORT_ENTRIES,
     val exportBytesKb: Int = DEFAULT_EXPORT_BYTES_KB,
     val exportHexChars: Int = DEFAULT_EXPORT_HEX_CHARS,
+    val notifyOtaEnabled: Boolean = DEFAULT_NOTIFY_ENABLED,
+    val notifyDisconnectEnabled: Boolean = DEFAULT_NOTIFY_ENABLED,
+    val notifyLowBatteryEnabled: Boolean = DEFAULT_NOTIFY_ENABLED,
+    val lowBatteryThreshold: Int = DEFAULT_LOW_BATTERY_THRESHOLD,
 ) {
 
     /** 转换为导出选项；构造前再夹取一次，避免边界外的持久化值导致构造异常。 */
@@ -52,6 +56,12 @@ data class AppSettings(
         const val MIN_EXPORT_BYTES_KB = 1
         const val MAX_EXPORT_BYTES_KB = PacketLogExportOptions.MAX_BYTES / 1024
 
+        /** 本地提醒默认全部关闭，避免首次安装即弹窗。 */
+        const val DEFAULT_NOTIFY_ENABLED = false
+        const val DEFAULT_LOW_BATTERY_THRESHOLD = 20
+        const val MIN_LOW_BATTERY_THRESHOLD = 5
+        const val MAX_LOW_BATTERY_THRESHOLD = 50
+
         /** 默认值：5 次重连、30 秒封顶、500 条日志、200 条导出 / 512 KiB。 */
         val DEFAULTS = AppSettings()
 
@@ -69,6 +79,9 @@ data class AppSettings(
         fun isValidExportBytesKb(value: Int): Boolean = value in MIN_EXPORT_BYTES_KB..MAX_EXPORT_BYTES_KB
 
         fun isValidExportHexChars(value: Int): Boolean = value in 1..PacketLogExportOptions.MAX_HEX_CHARS
+
+        fun isValidLowBatteryThreshold(value: Int): Boolean =
+            value in MIN_LOW_BATTERY_THRESHOLD..MAX_LOW_BATTERY_THRESHOLD
     }
 }
 
@@ -119,6 +132,27 @@ object AppSettingsRepository {
                 default = defaults.exportHexChars,
                 valid = { AppSettings.isValidExportHexChars(it) },
             ),
+            notifyOtaEnabled = storedBoolean(
+                store,
+                SettingsKeys.NOTIFY_OTA_ENABLED,
+                defaults.notifyOtaEnabled,
+            ),
+            notifyDisconnectEnabled = storedBoolean(
+                store,
+                SettingsKeys.NOTIFY_DISCONNECT_ENABLED,
+                defaults.notifyDisconnectEnabled,
+            ),
+            notifyLowBatteryEnabled = storedBoolean(
+                store,
+                SettingsKeys.NOTIFY_LOW_BATTERY_ENABLED,
+                defaults.notifyLowBatteryEnabled,
+            ),
+            lowBatteryThreshold = storedInt(
+                store = store,
+                key = SettingsKeys.NOTIFY_LOW_BATTERY_THRESHOLD,
+                default = defaults.lowBatteryThreshold,
+                valid = { AppSettings.isValidLowBatteryThreshold(it) },
+            ),
         )
     }
 
@@ -150,7 +184,21 @@ object AppSettingsRepository {
             AppSettings.isValidExportHexChars(it)
         }
 
-    /** 恢复全部默认值（语言与主题不受影响）。 */
+    fun saveNotifyOtaEnabled(store: AppSettingsStore, value: Boolean): Boolean =
+        saveBoolean(store, SettingsKeys.NOTIFY_OTA_ENABLED, value)
+
+    fun saveNotifyDisconnectEnabled(store: AppSettingsStore, value: Boolean): Boolean =
+        saveBoolean(store, SettingsKeys.NOTIFY_DISCONNECT_ENABLED, value)
+
+    fun saveNotifyLowBatteryEnabled(store: AppSettingsStore, value: Boolean): Boolean =
+        saveBoolean(store, SettingsKeys.NOTIFY_LOW_BATTERY_ENABLED, value)
+
+    fun saveLowBatteryThreshold(store: AppSettingsStore, value: Int): Boolean =
+        saveInt(store, SettingsKeys.NOTIFY_LOW_BATTERY_THRESHOLD, value) {
+            AppSettings.isValidLowBatteryThreshold(it)
+        }
+
+    /** 恢复全部默认值（语言与主题不受影响；提醒开关默认关闭）。 */
     fun resetToDefaults(store: AppSettingsStore) {
         listOf(
             SettingsKeys.RECONNECT_MAX_ATTEMPTS,
@@ -159,6 +207,10 @@ object AppSettingsRepository {
             SettingsKeys.EXPORT_DEFAULT_ENTRIES,
             SettingsKeys.EXPORT_DEFAULT_BYTES_KB,
             SettingsKeys.EXPORT_DEFAULT_HEX_CHARS,
+            SettingsKeys.NOTIFY_OTA_ENABLED,
+            SettingsKeys.NOTIFY_DISCONNECT_ENABLED,
+            SettingsKeys.NOTIFY_LOW_BATTERY_ENABLED,
+            SettingsKeys.NOTIFY_LOW_BATTERY_THRESHOLD,
         ).forEach { store.write(it, null) }
     }
 
@@ -177,6 +229,14 @@ object AppSettingsRepository {
     ): Int {
         val raw = store.read(key)?.trim()?.toIntOrNull() ?: return default
         return if (valid(raw)) raw else default
+    }
+
+    private fun storedBoolean(store: AppSettingsStore, key: String, default: Boolean): Boolean =
+        store.read(key)?.trim()?.toBooleanStrictOrNull() ?: default
+
+    private fun saveBoolean(store: AppSettingsStore, key: String, value: Boolean): Boolean {
+        store.write(key, value.toString())
+        return true
     }
 
     private fun saveInt(

@@ -48,6 +48,17 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.intl.Locale
 import kotlin.random.Random
+import com.valhalla.core.AppBuildInfo
+import com.valhalla.core.diagnostics.DiagnosticReportComposer
+import com.valhalla.core.diagnostics.DiagnosticReportError
+import com.valhalla.core.diagnostics.DiagnosticReportFormat
+import com.valhalla.core.diagnostics.DiagnosticReportInput
+import com.valhalla.core.diagnostics.DiagnosticReportOptions
+import com.valhalla.core.diagnostics.DiagnosticReportOta
+import com.valhalla.core.diagnostics.DiagnosticReportProgress
+import com.valhalla.core.diagnostics.DiagnosticReportResult
+import com.valhalla.core.diagnostics.DiagnosticReportSection
+import com.valhalla.core.diagnostics.DiagnosticReportValue
 import com.valhalla.core.logging.PacketLogRedaction
 import com.valhalla.core.protocol.message.AuthMode
 import com.valhalla.core.security.HmacAuthSigner
@@ -154,6 +165,22 @@ import com.valhalla.feature.settings.AppSettingsRepository
 import com.valhalla.core.logging.ConnectionQualityAnalyzer
 import com.valhalla.core.config.ParamCatalog
 import com.valhalla.core.config.ParamValueType
+import com.valhalla.core.event.DeviceEventResult
+import com.valhalla.core.event.DeviceEventTimeline
+import com.valhalla.core.event.DeviceEventType
+import com.valhalla.core.firmware.FirmwareLibraryOutcome
+import com.valhalla.core.firmware.FirmwareLibraryRecord
+import com.valhalla.core.firmware.FirmwareLibraryRepository
+import com.valhalla.core.firmware.FirmwareLibrarySort
+import com.valhalla.core.firmware.FirmwareReuseCheck
+import com.valhalla.core.firmware.FirmwareReuseReason
+import com.valhalla.data.event.createDeviceEventStore
+import com.valhalla.data.firmware.createFirmwareLibraryStore
+import com.valhalla.feature.firmware.FirmwareLibraryReuse
+import com.valhalla.feature.notification.NotificationPresenter
+import com.valhalla.feature.notification.LowBatteryAlertTracker
+import com.valhalla.feature.notification.NotificationPolicy
+import com.valhalla.feature.notification.rememberNotificationPresenter
 import com.valhalla.feature.theme.AppPreferenceStore
 import com.valhalla.feature.theme.DesignTokens
 import com.valhalla.feature.theme.ThemeMode
@@ -180,6 +207,7 @@ private class DeviceSession(
     val param: ParamEditorController,
     val packetLog: InMemoryPacketLog,
     val profileRepository: DeviceProfileRepository,
+    val events: DeviceEventTimeline,
 ) {
     /** 用户主动返回断开时为 true，用于区分「设备侧断开」与「主动断开」。 */
     var userDisconnected: Boolean = false
@@ -252,6 +280,16 @@ fun ValhallaApp() {
                     AppSettingsRepository.saveExportEntries(settingsStore, updated.exportEntries)
                     AppSettingsRepository.saveExportBytesKb(settingsStore, updated.exportBytesKb)
                     AppSettingsRepository.saveExportHexChars(settingsStore, updated.exportHexChars)
+                    AppSettingsRepository.saveNotifyOtaEnabled(settingsStore, updated.notifyOtaEnabled)
+                    AppSettingsRepository.saveNotifyDisconnectEnabled(
+                        settingsStore,
+                        updated.notifyDisconnectEnabled,
+                    )
+                    AppSettingsRepository.saveNotifyLowBatteryEnabled(
+                        settingsStore,
+                        updated.notifyLowBatteryEnabled,
+                    )
+                    AppSettingsRepository.saveLowBatteryThreshold(settingsStore, updated.lowBatteryThreshold)
                     appSettings = AppSettingsRepository.load(settingsStore)
                 },
                 onboardingStore = settingsStore,
@@ -273,9 +311,14 @@ private fun ValhallaContent(
     val bleClient = remember { createBleClient() }
     val permissionController = rememberBlePermissionController(bleClient)
     val scope = rememberCoroutineScope()
+    val strings = LocalStrings.current
     val errorReporter = LocalErrorReporter.current
     // 档案仓储跨连接共享，保证扫描/详情页看到同一份设备历史。
     val profileRepository = remember { DeviceProfileRepository(createDeviceProfileStore()) }
+    // 事件时间线跨进程共享（存储层每次读取都走平台键值），固件库在同一 App 进程内共享。
+    val eventStore = remember { createDeviceEventStore() }
+    val firmwareLibrary = remember { FirmwareLibraryRepository(createFirmwareLibraryStore()) }
+    val notificationPresenter = rememberNotificationPresenter()
     val scanController = remember {
         ScanController(
             bleClient = bleClient,
@@ -350,6 +393,7 @@ private fun ValhallaContent(
             ),
             packetLog = packetLog,
             profileRepository = profileRepository,
+            events = DeviceEventTimeline(eventStore),
         )
     }
 
@@ -398,6 +442,12 @@ private fun ValhallaContent(
                 }
                 reconnect = null
                 val refreshed = createSession(connection, device, packetLog)
+                refreshed.events.record(
+                    deviceId = device.deviceId,
+                    type = DeviceEventType.CONNECTION,
+                    summary = strings.t(StringKey.TIMELINE_EVENT_RECONNECTED),
+                    result = DeviceEventResult.SUCCESS,
+                )
                 sessions = sessions + (device.deviceId to refreshed)
                 deviceManager.replaceConnection(device.deviceId, connection)
                 route = Route.Detail(device.deviceId)
@@ -456,13 +506,18 @@ private fun ValhallaContent(
                         when (val result = deviceManager.connect(device)) {
                             is MultiDeviceConnectResult.Connected -> {
                                 scanController.stopScan()
-                                sessions = sessions + (
-                                    device.deviceId to createSession(
-                                        result.device.connection,
-                                        device,
-                                        InMemoryPacketLog(capacity = settings.logCapacity),
-                                    )
-                                    )
+                                val newSession = createSession(
+                                    result.device.connection,
+                                    device,
+                                    InMemoryPacketLog(capacity = settings.logCapacity),
+                                )
+                                newSession.events.record(
+                                    deviceId = device.deviceId,
+                                    type = DeviceEventType.CONNECTION,
+                                    summary = strings.t(StringKey.TIMELINE_EVENT_CONNECTED),
+                                    result = DeviceEventResult.SUCCESS,
+                                )
+                                sessions = sessions + (device.deviceId to newSession)
                                 deviceManager.select(device.deviceId)
                                 route = Route.Detail(device.deviceId)
                             }
@@ -508,6 +563,12 @@ private fun ValhallaContent(
             onDisconnect = { id ->
                 scope.launchSafely(errorReporter, "disconnect-device") {
                     sessions[id]?.let { session ->
+                        session.events.record(
+                            deviceId = id,
+                            type = DeviceEventType.DISCONNECTION,
+                            summary = strings.t(StringKey.TIMELINE_EVENT_DISCONNECTED),
+                            result = DeviceEventResult.INFO,
+                        )
                         runCatching { session.detail.disconnect() }
                         runCatching { session.dispatcher.close() }
                     }
@@ -522,6 +583,12 @@ private fun ValhallaContent(
             onDisconnectAll = {
                 scope.launchSafely(errorReporter, "disconnect-all") {
                     sessions.values.forEach { session ->
+                        session.events.record(
+                            deviceId = session.device.deviceId,
+                            type = DeviceEventType.DISCONNECTION,
+                            summary = strings.t(StringKey.TIMELINE_EVENT_DISCONNECTED),
+                            result = DeviceEventResult.INFO,
+                        )
                         runCatching { session.detail.disconnect() }
                         runCatching { session.dispatcher.close() }
                     }
@@ -537,6 +604,7 @@ private fun ValhallaContent(
             language = preferences.language,
             theme = preferences.theme,
             settings = settings,
+            notificationPresenter = notificationPresenter,
             onLanguageChange = onLanguageChange,
             onThemeChange = onThemeChange,
             onSettingsChange = onSettingsChange,
@@ -581,6 +649,8 @@ private fun ValhallaContent(
                 }
                 DetailScreen(
                     session = session,
+                    settings = settings,
+                    notificationPresenter = notificationPresenter,
                     connectedCount = deviceState.occupied,
                     disconnectInfo = disconnectInfo,
                     reconnectState = reconnect
@@ -603,6 +673,12 @@ private fun ValhallaContent(
                         session.userDisconnected = true
                         reconnect?.controller?.cancel()
                         reconnect = null
+                        session.events.record(
+                            deviceId = current.deviceId,
+                            type = DeviceEventType.DISCONNECTION,
+                            summary = strings.t(StringKey.TIMELINE_EVENT_DISCONNECTED),
+                            result = DeviceEventResult.INFO,
+                        )
                         scope.launchSafely(errorReporter, "disconnect-back") {
                             session.detail.disconnect()
                             session.dispatcher.close()
@@ -629,6 +705,9 @@ private fun ValhallaContent(
             } else {
                 OtaScreen(
                     session = session,
+                    library = firmwareLibrary,
+                    settings = settings,
+                    notificationPresenter = notificationPresenter,
                     onBack = { route = Route.Detail(current.deviceId) },
                 )
             }
@@ -653,7 +732,7 @@ private fun ValhallaContent(
                 LaunchedEffect(current.deviceId) { route = Route.Devices }
             } else {
                 DiagnosticScreen(
-                    packetLog = session.packetLog,
+                    session = session,
                     onBack = { route = Route.Detail(current.deviceId) },
                 )
             }
@@ -1108,10 +1187,42 @@ private fun DisconnectBanner(
     }
 }
 
+private const val TIMELINE_VISIBLE_LIMIT = 20
+private const val LIBRARY_VISIBLE_LIMIT = 8
+
+private fun DiagnosticReportSection.reportLabelKey(): StringKey = when (this) {
+    DiagnosticReportSection.DEVICE -> StringKey.DIAG_REPORT_SECTION_DEVICE
+    DiagnosticReportSection.FIRMWARE -> StringKey.DIAG_REPORT_SECTION_FIRMWARE
+    DiagnosticReportSection.BATTERY -> StringKey.DIAG_REPORT_SECTION_BATTERY
+    DiagnosticReportSection.CONFIG -> StringKey.DIAG_REPORT_SECTION_CONFIG
+    DiagnosticReportSection.PARAM -> StringKey.DIAG_REPORT_SECTION_PARAM
+    DiagnosticReportSection.ERRORS -> StringKey.DIAG_REPORT_SECTION_ERRORS
+    DiagnosticReportSection.QUALITY -> StringKey.DIAG_REPORT_SECTION_QUALITY
+    DiagnosticReportSection.OTA -> StringKey.DIAG_REPORT_SECTION_OTA
+    DiagnosticReportSection.PACKET_LOG -> StringKey.DIAG_REPORT_SECTION_PACKET_LOG
+}
+
+private fun DiagnosticReportFormat.formatKey(): StringKey = when (this) {
+    DiagnosticReportFormat.MARKDOWN -> StringKey.DIAG_REPORT_FORMAT_MARKDOWN
+    DiagnosticReportFormat.TEXT -> StringKey.DIAG_REPORT_FORMAT_TEXT
+}
+
+private fun DeviceEventType.timelineKey(): StringKey = when (this) {
+    DeviceEventType.CONNECTION -> StringKey.TIMELINE_TYPE_CONNECTION
+    DeviceEventType.DISCONNECTION -> StringKey.TIMELINE_TYPE_DISCONNECTION
+    DeviceEventType.AUTH -> StringKey.TIMELINE_TYPE_AUTH
+    DeviceEventType.CONFIG_CHANGE -> StringKey.TIMELINE_TYPE_CONFIG
+    DeviceEventType.PARAM_CHANGE -> StringKey.TIMELINE_TYPE_PARAM
+    DeviceEventType.OTA -> StringKey.TIMELINE_TYPE_OTA
+    DeviceEventType.ERROR -> StringKey.TIMELINE_TYPE_ERROR
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun DetailScreen(
     session: DeviceSession,
+    settings: AppSettings,
+    notificationPresenter: NotificationPresenter,
     connectedCount: Int,
     disconnectInfo: DisconnectInfo?,
     reconnectState: ReconnectState?,
@@ -1140,11 +1251,68 @@ private fun DetailScreen(
     val zoneOffsetMinutes = remember { currentTimeZoneOffsetMinutes(Clock.System.now().toEpochMilliseconds()) }
     var authMode by remember { mutableStateOf(AuthMode.TOKEN) }
     var credential by remember { mutableStateOf("") }
+    var timelineFilter by remember { mutableStateOf<DeviceEventType?>(null) }
+    var disconnectNotified by remember(session) { mutableStateOf(false) }
+    val lowBatteryTracker = remember(session, settings.lowBatteryThreshold) {
+        LowBatteryAlertTracker(settings.lowBatteryThreshold)
+    }
 
     LaunchedEffect(session, connected) {
         if (!connected && !session.userDisconnected) {
             onConnectionLost()
         }
+    }
+
+    // 低电量提醒：只在未充电且跌破阈值时提醒一次，电量回升或开始充电后由 tracker 复位。
+    LaunchedEffect(state.batteryPercent, state.charging, settings.notifyLowBatteryEnabled, settings.lowBatteryThreshold) {
+        val percent = state.batteryPercent ?: return@LaunchedEffect
+        val shouldNotify = NotificationPolicy.shouldNotifyLowBattery(settings, percent, state.charging)
+        val triggered = lowBatteryTracker.update(percent, state.charging)
+        if (shouldNotify && triggered && notificationPresenter.canNotify) {
+            notificationPresenter.show(
+                strings.t(StringKey.NOTIFICATION_LOW_BATTERY_TITLE),
+                strings.t(
+                    StringKey.NOTIFICATION_LOW_BATTERY_BODY,
+                    "device" to (state.deviceInfo?.model ?: state.deviceId),
+                    "percent" to percent.toString(),
+                    "threshold" to settings.lowBatteryThreshold.toString(),
+                ),
+            )
+        }
+    }
+
+    // 断开提醒：每次掉线最多提醒一次，重连成功后复位。
+    LaunchedEffect(connected, settings.notifyDisconnectEnabled) {
+        if (connected) {
+            disconnectNotified = false
+        } else if (
+            !session.userDisconnected &&
+            !disconnectNotified &&
+            NotificationPolicy.shouldNotifyDisconnect(settings) &&
+            notificationPresenter.canNotify
+        ) {
+            disconnectNotified = true
+            notificationPresenter.show(
+                strings.t(StringKey.NOTIFICATION_DISCONNECTED_TITLE),
+                strings.t(
+                    StringKey.NOTIFICATION_DISCONNECTED_BODY,
+                    "device" to (state.deviceInfo?.model ?: state.deviceId),
+                ),
+            )
+        }
+    }
+
+    // 错误入时间线：写入失败只返回 false，不影响主流程。
+    LaunchedEffect(state.error, state.errorCode) {
+        val message = state.error ?: return@LaunchedEffect
+        session.events.record(
+            deviceId = state.deviceId,
+            type = DeviceEventType.ERROR,
+            summary = strings.t(StringKey.TIMELINE_EVENT_ERROR, "detail" to strings.render(message)),
+            result = DeviceEventResult.FAILURE,
+            detail = state.errorCode?.let { "${it.name} (0x${it.code.toString(16)})" },
+            errorCode = state.errorCode?.name,
+        )
     }
 
     LaunchedEffect(session.config, state.firmware, state.deviceInfo?.model) {
@@ -1291,7 +1459,7 @@ private fun DetailScreen(
                             onClick = {
                                 val secret = credential
                                 scope.launchSafely(errorReporter, "auth") {
-                                    if (authMode == AuthMode.SIGNED) {
+                                    val ok = if (authMode == AuthMode.SIGNED) {
                                         controller.authenticateSigned(
                                             signer = HmacAuthSigner(secret.encodeToByteArray()),
                                             clientNonce = Random.nextBytes(16),
@@ -1300,6 +1468,15 @@ private fun DetailScreen(
                                     } else {
                                         controller.authenticate(secret)
                                     }
+                                    session.events.record(
+                                        deviceId = state.deviceId,
+                                        type = DeviceEventType.AUTH,
+                                        summary = strings.t(
+                                            if (ok) StringKey.TIMELINE_EVENT_AUTH_OK
+                                            else StringKey.TIMELINE_EVENT_AUTH_FAILED,
+                                        ),
+                                        result = if (ok) DeviceEventResult.SUCCESS else DeviceEventResult.FAILURE,
+                                    )
                                 }
                             },
                         ) {
@@ -1402,6 +1579,68 @@ private fun DetailScreen(
                 }
             }
 
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs)) {
+                    Text(strings.t(StringKey.TIMELINE_TITLE), style = MaterialTheme.typography.titleMedium)
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm),
+                        modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    ) {
+                        FilterChip(
+                            selected = timelineFilter == null,
+                            onClick = { timelineFilter = null },
+                            label = { Text(strings.t(StringKey.TIMELINE_FILTER_ALL)) },
+                        )
+                        DeviceEventType.entries.forEach { type ->
+                            FilterChip(
+                                selected = timelineFilter == type,
+                                onClick = { timelineFilter = type },
+                                label = { Text(strings.t(type.timelineKey())) },
+                            )
+                        }
+                    }
+                    val events = session.events.list(state.deviceId, timelineFilter)
+                    if (events.isEmpty()) {
+                        Text(strings.t(StringKey.TIMELINE_EMPTY), style = MaterialTheme.typography.bodySmall)
+                    } else {
+                        events.take(TIMELINE_VISIBLE_LIMIT).forEach { event ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm),
+                            ) {
+                                Text(
+                                    format.absoluteTime(event.timestampMillis, zoneOffsetMinutes),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Text(
+                                    event.summary,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = when (event.result) {
+                                        DeviceEventResult.FAILURE -> status.error
+                                        DeviceEventResult.SUCCESS -> status.success
+                                        DeviceEventResult.INFO -> MaterialTheme.colorScheme.onSurface
+                                    },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .combinedClickable(
+                                            onClick = {},
+                                            onLongClick = {
+                                                clipboard.setText(
+                                                    AnnotatedString(
+                                                        listOfNotNull(event.summary, event.detail)
+                                                            .joinToString(" · "),
+                                                    ),
+                                                )
+                                            },
+                                        ),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
             profile?.let { snapshot ->
                 item { ProfileCard(snapshot, format, zoneOffsetMinutes) }
             }
@@ -1411,6 +1650,17 @@ private fun DetailScreen(
                     controller = session.config,
                     state = configState,
                     onRefreshDevice = { scope.launchSafely(errorReporter, "refresh-info") { controller.refreshInfo() } },
+                    onSaved = { ok ->
+                        session.events.record(
+                            deviceId = state.deviceId,
+                            type = DeviceEventType.CONFIG_CHANGE,
+                            summary = strings.t(
+                                if (ok) StringKey.TIMELINE_EVENT_CONFIG_SAVED
+                                else StringKey.TIMELINE_EVENT_CONFIG_FAILED,
+                            ),
+                            result = if (ok) DeviceEventResult.SUCCESS else DeviceEventResult.FAILURE,
+                        )
+                    },
                 )
             }
 
@@ -1419,6 +1669,17 @@ private fun DetailScreen(
                     controller = session.param,
                     state = paramState,
                     connected = connected,
+                    onSaved = { ok ->
+                        session.events.record(
+                            deviceId = state.deviceId,
+                            type = DeviceEventType.PARAM_CHANGE,
+                            summary = strings.t(
+                                if (ok) StringKey.TIMELINE_EVENT_PARAM_SAVED
+                                else StringKey.TIMELINE_EVENT_PARAM_FAILED,
+                            ),
+                            result = if (ok) DeviceEventResult.SUCCESS else DeviceEventResult.FAILURE,
+                        )
+                    },
                 )
             }
 
@@ -1749,6 +2010,7 @@ private fun ConfigSection(
     controller: ConfigEditorController,
     state: ConfigEditorState,
     onRefreshDevice: () -> Unit,
+    onSaved: (Boolean) -> Unit = {},
 ) {
     val strings = LocalStrings.current
     val status = statusColors()
@@ -1822,7 +2084,12 @@ private fun ConfigSection(
                     field = field,
                     savingAny = state.saving,
                     onTextChange = { controller.updateText(field.spec.key, it) },
-                    onSave = { scope.launchSafely(errorReporter, "config-save") { controller.save(field.spec.key) } },
+                    onSave = {
+                        scope.launchSafely(errorReporter, "config-save") {
+                            val ok = controller.save(field.spec.key)
+                            onSaved(ok)
+                        }
+                    },
                 )
             }
             state.message?.let { message ->
@@ -1912,6 +2179,7 @@ private fun ParamSection(
     controller: ParamEditorController,
     state: ParamEditorState,
     connected: Boolean,
+    onSaved: (Boolean) -> Unit = {},
 ) {
     val strings = LocalStrings.current
     val status = statusColors()
@@ -1960,7 +2228,8 @@ private fun ParamSection(
                     onTextChange = { controller.updateText(field.spec.id, it) },
                     onSave = {
                         scope.launchSafely(errorReporter, "param-save") {
-                            controller.save(field.spec.id)
+                            val ok = controller.save(field.spec.id)
+                            onSaved(ok)
                         }
                     },
                 )
@@ -2096,24 +2365,165 @@ private fun paramTypeKey(type: ParamValueType): StringKey = when (type) {
 }
 
 /**
- * 连接质量看板：只读本机报文日志的统计快照。
+ * 连接质量看板 + 一键诊断报告。
  *
- * 样本不足时只展示「样本不足（X 条）」，避免把个位数请求包装成结论。
+ * 质量统计只读本机报文日志；样本不足时只展示「样本不足（X 条）」，避免把个位数请求包装成结论。
+ * 诊断报告在生成前给出小节与体积预估，生成在 Default 调度器执行，可显示进度并中途取消。
  */
 @OptIn(ExperimentalTime::class)
 @Composable
 private fun DiagnosticScreen(
-    packetLog: InMemoryPacketLog,
+    session: DeviceSession,
     onBack: () -> Unit,
 ) {
+    val packetLog = session.packetLog
     val strings = LocalStrings.current
     val format = remember(strings.language) { LocaleFormat(strings.language) }
     val entries by packetLog.entries.collectAsState()
     val stats = remember(entries) { ConnectionQualityAnalyzer.analyze(entries) }
+    val detail by session.detail.state.collectAsState()
+    val configState by session.config.state.collectAsState()
+    val paramState by session.param.state.collectAsState()
     val zoneOffsetMinutes = remember {
         currentTimeZoneOffsetMinutes(Clock.System.now().toEpochMilliseconds())
     }
     val cards = statusColors()
+    val clipboard = LocalClipboardManager.current
+    val fileSaver = rememberFileSaver()
+    val scope = rememberCoroutineScope()
+    val errorReporter = LocalErrorReporter.current
+    var reportFormat by remember { mutableStateOf(DiagnosticReportFormat.MARKDOWN) }
+    var reportGenerating by remember { mutableStateOf(false) }
+    var reportProgress by remember { mutableStateOf<DiagnosticReportProgress?>(null) }
+    var reportJob by remember { mutableStateOf<Job?>(null) }
+    var reportResult by remember { mutableStateOf<DiagnosticReportResult?>(null) }
+    var reportMessage by remember { mutableStateOf<String?>(null) }
+    var reportMessageSuccess by remember { mutableStateOf(false) }
+
+    // 输入只来自真实快照：本会话状态 + 设备档案 + 本机报文日志，缺失项由报告标注「暂无数据」。
+    fun currentReportInput(generatedAt: Long): DiagnosticReportInput {
+        val profile = session.profileRepository.get(detail.deviceId)
+        val configValues = configState.visibleFields.map { field ->
+            DiagnosticReportValue(
+                label = field.spec.displayName,
+                value = if (field.loaded) field.text else null,
+                status = field.loadError,
+            )
+        }
+        val paramValues = paramState.fields.map { field ->
+            DiagnosticReportValue(
+                label = field.spec.displayName,
+                value = if (field.loaded) field.text else null,
+                status = field.loadError,
+            )
+        }
+        val otaHistory = profile?.otaHistory.orEmpty().map { record ->
+            DiagnosticReportOta(
+                firmwareVersion = record.firmwareVersion,
+                finishedAtEpochMillis = record.finishedAtEpochMillis,
+                outcome = record.outcome.name,
+                durationMillis = record.durationMillis,
+                errorCode = record.errorCode,
+                sentBytes = record.sentBytes,
+                totalBytes = record.totalBytes,
+            )
+        }
+        val recentErrors = stats.recentFailures.map { failure ->
+            DiagnosticReportError(
+                timestampMillis = failure.timestampMillis,
+                command = failure.command.name,
+                detail = failure.detail,
+            )
+        }
+        return DiagnosticReportInput(
+            generatedAtEpochMillis = generatedAt,
+            zoneOffsetMinutes = zoneOffsetMinutes,
+            appVersion = AppBuildInfo.VERSION_NAME,
+            platform = platformDisplayName(),
+            deviceId = detail.deviceId,
+            deviceModel = detail.deviceInfo?.model ?: profile?.model,
+            firmwareVersion = detail.firmwareVersion ?: detail.firmware?.toString(),
+            batteryPercent = detail.batteryPercent,
+            charging = detail.charging,
+            configValues = configValues,
+            paramValues = paramValues,
+            recentErrors = recentErrors,
+            quality = stats,
+            otaHistory = otaHistory,
+            packetLog = entries,
+        )
+    }
+
+    val previewAt = remember { Clock.System.now().toEpochMilliseconds() }
+    val preview = remember(
+        reportFormat,
+        entries,
+        detail.firmwareVersion,
+        detail.batteryPercent,
+        detail.charging,
+        configState.fields,
+        paramState.fields,
+    ) {
+        DiagnosticReportComposer.estimate(
+            input = currentReportInput(previewAt),
+            options = DiagnosticReportOptions(format = reportFormat),
+        )
+    }
+
+    fun saveReport(result: DiagnosticReportResult) {
+        scope.launchSafely(errorReporter, "diagnostic-report-save") {
+            val fileName = "valhalla-diagnostic-${Clock.System.now().toEpochMilliseconds()}.${result.format.extension}"
+            val save = fileSaver.save(SaveableFile(fileName, result.text, result.format.mimeType))
+            reportMessageSuccess = save.status == FileSaveStatus.SAVED
+            reportMessage = when (save.status) {
+                FileSaveStatus.SAVED -> strings.t(
+                    StringKey.DIAG_REPORT_SAVE_SUCCESS,
+                    "name" to fileName,
+                    "bytes" to format.number(result.byteSize.toLong()),
+                )
+
+                FileSaveStatus.CANCELLED -> strings.t(StringKey.DIAG_REPORT_SAVE_CANCELLED)
+                FileSaveStatus.UNAVAILABLE -> strings.t(StringKey.LOGS_SAVE_UNAVAILABLE)
+                FileSaveStatus.FAILED -> strings.t(
+                    StringKey.LOGS_SAVE_FAILED,
+                    "detail" to (save.message ?: strings.t(StringKey.UNKNOWN)),
+                )
+            }
+        }
+    }
+
+    fun startReport() {
+        if (reportGenerating) return
+        reportGenerating = true
+        reportResult = null
+        reportProgress = null
+        reportMessage = null
+        val input = currentReportInput(Clock.System.now().toEpochMilliseconds())
+        val options = DiagnosticReportOptions(format = reportFormat)
+        reportJob = scope.launchSafely(errorReporter, "diagnostic-report") {
+            try {
+                val built = withContext(Dispatchers.Default) {
+                    DiagnosticReportComposer.build(input, options) { reportProgress = it }
+                }
+                reportResult = built
+            } catch (cancellation: CancellationException) {
+                reportMessageSuccess = false
+                reportMessage = strings.t(StringKey.DIAG_REPORT_CANCELLED)
+                throw cancellation
+            } catch (error: Throwable) {
+                reportMessageSuccess = false
+                reportMessage = strings.t(
+                    StringKey.DIAG_REPORT_FAILED,
+                    "detail" to (error.message ?: error::class.simpleName ?: "unknown"),
+                )
+                errorReporter.record("diagnostic-report", error)
+            } finally {
+                reportGenerating = false
+                reportProgress = null
+                reportJob = null
+            }
+        }
+    }
 
     Column(
         modifier = Modifier.fillMaxSize().padding(DesignTokens.Spacing.lg),
@@ -2131,6 +2541,93 @@ private fun DiagnosticScreen(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.md),
         ) {
+            item {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(
+                        modifier = Modifier.padding(DesignTokens.Spacing.md),
+                        verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs),
+                    ) {
+                        Text(
+                            strings.t(StringKey.DIAG_REPORT_TITLE),
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                        Text(
+                            strings.t(
+                                StringKey.DIAG_REPORT_PREVIEW,
+                                "sections" to preview.sectionCount.toString(),
+                                "size" to format.bytes(preview.estimatedBytes.toLong()),
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        Text(
+                            strings.t(
+                                StringKey.DIAG_REPORT_SECTION_LIST,
+                                "list" to preview.sections.keys.joinToString(", ") {
+                                    strings.t(it.reportLabelKey())
+                                },
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs)) {
+                            DiagnosticReportFormat.entries.forEach { candidate ->
+                                FilterChip(
+                                    selected = reportFormat == candidate,
+                                    enabled = !reportGenerating,
+                                    onClick = {
+                                        reportFormat = candidate
+                                        reportResult = null
+                                        reportMessage = null
+                                    },
+                                    label = { Text(strings.t(candidate.formatKey())) },
+                                )
+                            }
+                        }
+                        if (reportGenerating) {
+                            LinearProgressIndicator(
+                                progress = { reportProgress?.fraction ?: 0f },
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            Text(
+                                strings.t(
+                                    StringKey.DIAG_REPORT_GENERATING,
+                                    "percent" to ((reportProgress?.fraction ?: 0f) * 100).toInt().toString(),
+                                ),
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                            OutlinedButton(onClick = { reportJob?.cancel() }) {
+                                Text(strings.t(StringKey.DIAG_REPORT_CANCEL))
+                            }
+                        } else {
+                            Button(onClick = { startReport() }) {
+                                Text(strings.t(StringKey.DIAG_REPORT_GENERATE))
+                            }
+                        }
+                        reportResult?.let { built ->
+                            Row(horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs)) {
+                                OutlinedButton(
+                                    onClick = {
+                                        clipboard.setText(AnnotatedString(built.text))
+                                        reportMessageSuccess = true
+                                        reportMessage = strings.t(StringKey.DIAG_REPORT_COPIED)
+                                    },
+                                ) {
+                                    Text(strings.t(StringKey.DIAG_REPORT_COPY))
+                                }
+                                OutlinedButton(onClick = { saveReport(built) }) {
+                                    Text(strings.t(StringKey.DIAG_REPORT_SAVE))
+                                }
+                            }
+                        }
+                        reportMessage?.let { message ->
+                            Text(
+                                message,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (reportMessageSuccess) cards.success else cards.error,
+                            )
+                        }
+                    }
+                }
+            }
             item {
                 Text(strings.t(StringKey.DIAG_HINT), style = MaterialTheme.typography.bodySmall)
             }
@@ -2995,6 +3492,9 @@ private fun OtaOutcome.label(strings: StringResolver): String = when (this) {
 @Composable
 private fun OtaScreen(
     session: DeviceSession,
+    library: FirmwareLibraryRepository,
+    settings: AppSettings,
+    notificationPresenter: NotificationPresenter,
     onBack: () -> Unit,
 ) {
     val strings = LocalStrings.current
@@ -3005,6 +3505,10 @@ private fun OtaScreen(
     val detailState by session.detail.state.collectAsState()
     val picker = rememberFirmwarePicker()
     val signingKeyPem = rememberFirmwareSigningKeyPem()
+    val reuse = remember(picker) { FirmwareLibraryReuse(picker) }
+    var libraryVersion by remember { mutableStateOf(0) }
+    var libraryBusyId by remember { mutableStateOf<String?>(null) }
+    var libraryMessage by remember { mutableStateOf<String?>(null) }
     val selection = remember(picker, session.checkpointStore, signingKeyPem) {
         FirmwareSelectionController(
             picker = picker,
@@ -3019,9 +3523,82 @@ private fun OtaScreen(
 
     LaunchedEffect(selection) { selection.refreshResume() }
     val terminal = state is OtaState.Succeeded || state is OtaState.Failed || state is OtaState.Aborted
-    LaunchedEffect(terminal) {
-        if (terminal) {
-            if (state is OtaState.Succeeded) selection.clearResume() else selection.refreshResume()
+    LaunchedEffect(terminal, state) {
+        if (!terminal) return@LaunchedEffect
+        val current = state
+        if (current !is OtaState.Succeeded && current !is OtaState.Failed && current !is OtaState.Aborted) {
+            return@LaunchedEffect
+        }
+        if (current is OtaState.Succeeded) selection.clearResume() else selection.refreshResume()
+
+        // 事件时间线：终端状态只记一次（key 为 state 实例变化才重跑）。
+        val summary = when (current) {
+            is OtaState.Succeeded -> strings.t(StringKey.TIMELINE_EVENT_OTA_DONE)
+            is OtaState.Failed -> strings.t(StringKey.TIMELINE_EVENT_OTA_FAILED)
+            else -> strings.t(StringKey.TIMELINE_EVENT_OTA_ABORTED)
+        }
+        val result = when (current) {
+            is OtaState.Succeeded -> DeviceEventResult.SUCCESS
+            is OtaState.Failed -> DeviceEventResult.FAILURE
+            else -> DeviceEventResult.INFO
+        }
+        session.events.record(
+            deviceId = session.device.deviceId,
+            type = DeviceEventType.OTA,
+            summary = summary,
+            result = result,
+            detail = (current as? OtaState.Failed)?.let { strings.render(it.reason) },
+            errorCode = (current as? OtaState.Aborted)?.reason,
+        )
+
+        // 固件库：只落元信息与原始引用，不复制二进制。
+        val version = selectionState.version
+        val path = selectionState.sourcePath
+        val crc = selectionState.computedCrc32 ?: selectionState.declaredCrc32
+        val firmware = selection.firmware
+        if (version != null && path != null && crc != null && firmware != null && selectionState.packageName != null) {
+            val insurer = library.record(
+                FirmwareLibraryRecord(
+                    fileName = selectionState.packageName!!,
+                    version = version.toString(),
+                    channel = version.channel,
+                    modelWhitelist = firmware.header.targetModels.toList(),
+                    totalBytes = selectionState.payloadBytes,
+                    crc32 = crc,
+                    addedAtEpochMillis = Clock.System.now().toEpochMilliseconds(),
+                    sourcePath = path,
+                ),
+            )
+            val outcome = when (current) {
+                is OtaState.Succeeded -> FirmwareLibraryOutcome.SUCCEEDED
+                is OtaState.Failed -> FirmwareLibraryOutcome.FAILED
+                else -> FirmwareLibraryOutcome.ABORTED
+            }
+            library.markUsed(insurer.id, session.device.deviceId, outcome)
+            libraryVersion++
+        }
+
+        if (settings.notifyOtaEnabled && notificationPresenter.canNotify) {
+            when (current) {
+                is OtaState.Succeeded -> notificationPresenter.show(
+                    strings.t(StringKey.NOTIFICATION_OTA_SUCCESS_TITLE),
+                    strings.t(
+                        StringKey.NOTIFICATION_OTA_SUCCESS_BODY,
+                        "version" to (version?.toString() ?: strings.t(StringKey.UNKNOWN)),
+                    ),
+                )
+
+                is OtaState.Failed -> notificationPresenter.show(
+                    strings.t(StringKey.NOTIFICATION_OTA_FAILED_TITLE),
+                    strings.t(
+                        StringKey.NOTIFICATION_OTA_FAILED_BODY,
+                        "version" to (version?.toString() ?: strings.t(StringKey.UNKNOWN)),
+                        "reason" to strings.render(current.reason),
+                    ),
+                )
+
+                else -> Unit
+            }
         }
     }
     DisposableEffect(selection) {
@@ -3123,6 +3700,160 @@ private fun OtaScreen(
                 }
             },
         )
+
+        libraryMessage?.let { message ->
+            Text(message, color = status.warning, style = MaterialTheme.typography.bodySmall)
+        }
+        val libraryRecords = remember(libraryVersion, library) {
+            library.list(FirmwareLibrarySort.RECENT)
+        }
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(DesignTokens.Spacing.md),
+                verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs),
+            ) {
+                Text(strings.t(StringKey.OTA_LIBRARY_TITLE), style = MaterialTheme.typography.titleMedium)
+                Text(
+                    strings.t(StringKey.OTA_LIBRARY_NOTE),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                if (libraryRecords.isEmpty()) {
+                    Text(strings.t(StringKey.OTA_LIBRARY_EMPTY), style = MaterialTheme.typography.bodySmall)
+                } else {
+                    libraryRecords.take(LIBRARY_VISIBLE_LIMIT).forEach { record ->
+                        Column(verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xxs)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        record.fileName,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                    )
+                                    Text(
+                                        "${record.version} · ${format.bytes(record.totalBytes)}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                    record.lastDeviceId?.let { device ->
+                                        Text(
+                                            strings.t(
+                                                StringKey.OTA_LIBRARY_LAST_USED,
+                                                "device" to device,
+                                                "outcome" to strings.t(
+                                                    when (record.lastOutcome) {
+                                                        FirmwareLibraryOutcome.SUCCEEDED ->
+                                                            StringKey.OTA_LIBRARY_OUTCOME_SUCCEEDED
+
+                                                        FirmwareLibraryOutcome.FAILED ->
+                                                            StringKey.OTA_LIBRARY_OUTCOME_FAIL
+
+                                                        else -> StringKey.OTA_LIBRARY_OUTCOME_ABORTED
+                                                    },
+                                                ),
+                                            ),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                }
+                                TextButton(
+                                    onClick = {
+                                        if (libraryBusyId != null || running || selectionState.picking ||
+                                            selectionState.prechecking
+                                        ) {
+                                            return@TextButton
+                                        }
+                                        scope.launchSafely(errorReporter, "firmware-library-use") {
+                                            libraryBusyId = record.id
+                                            libraryMessage = strings.t(StringKey.OTA_LIBRARY_CHECKING)
+                                            val check = reuse.check(record)
+                                            libraryBusyId = null
+                                            libraryMessage = when (check) {
+                                                is FirmwareReuseCheck.Available -> {
+                                                    val opened = selection.openFromLibrary(
+                                                        sourcePath = record.sourcePath,
+                                                        currentVersion = detailState.firmware,
+                                                        currentModel = detailState.deviceInfo?.model,
+                                                    )
+                                                    if (opened) {
+                                                        strings.t(StringKey.OTA_LIBRARY_AVAILABLE)
+                                                    } else {
+                                                        strings.t(
+                                                            StringKey.OTA_LIBRARY_USE_FAILED,
+                                                            "detail" to "open failed",
+                                                        )
+                                                    }
+                                                }
+
+                                                is FirmwareReuseCheck.Missing -> strings.t(
+                                                    StringKey.OTA_LIBRARY_MISSING,
+                                                    "reason" to strings.t(
+                                                        when (check.reason) {
+                                                            FirmwareReuseReason.ACCESS_DENIED ->
+                                                                StringKey.OTA_LIBRARY_MISSING_ACCESS
+
+                                                            FirmwareReuseReason.READ_FAILED ->
+                                                                StringKey.OTA_LIBRARY_MISSING_READ
+                                                        },
+                                                    ),
+                                                )
+
+                                                is FirmwareReuseCheck.CrcMismatch -> strings.t(
+                                                    StringKey.OTA_LIBRARY_CRC_MISMATCH,
+                                                    "expected" to hex32(check.expectedCrc32),
+                                                    "actual" to (check.actualCrc32?.let(::hex32) ?: "-"),
+                                                )
+
+                                                FirmwareReuseCheck.NotFound ->
+                                                    strings.t(StringKey.OTA_LIBRARY_USE_FAILED, "detail" to "not found")
+                                            }
+                                        }
+                                    },
+                                    enabled = !running && libraryBusyId == null,
+                                ) {
+                                    Text(
+                                        if (libraryBusyId == record.id) {
+                                            strings.t(StringKey.OTA_LIBRARY_CHECKING)
+                                        } else {
+                                            strings.t(StringKey.OTA_LIBRARY_USE)
+                                        },
+                                    )
+                                }
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm)) {
+                                TextButton(
+                                    onClick = {
+                                        library.setFavorite(record.id, !record.favorite)
+                                        libraryVersion++
+                                    },
+                                ) {
+                                    Text(
+                                        strings.t(
+                                            if (record.favorite) {
+                                                StringKey.OTA_LIBRARY_UNMARK_FAVORITE
+                                            } else {
+                                                StringKey.OTA_LIBRARY_MARK_FAVORITE
+                                            },
+                                        ),
+                                    )
+                                }
+                                TextButton(
+                                    onClick = {
+                                        library.delete(record.id)
+                                        libraryVersion++
+                                    },
+                                ) {
+                                    Text(strings.t(StringKey.OTA_LIBRARY_DELETE))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         when (val current = state) {
             OtaState.Idle -> Text(strings.t(StringKey.OTA_IDLE))

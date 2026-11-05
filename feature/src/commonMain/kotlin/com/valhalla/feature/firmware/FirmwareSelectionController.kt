@@ -31,6 +31,8 @@ data class FirmwareSelectionState(
     val packageName: String? = null,
     val version: FirmwareVersion? = null,
     val payloadBytes: Long = 0,
+    /** 平台持久引用（固件库复用）；仅在记录元信息时使用。 */
+    val sourcePath: String? = null,
     /** 文件头声明的 CRC-32。 */
     val declaredCrc32: Long? = null,
     /** 预检实际重算出的 CRC-32；读取失败时为 null。 */
@@ -120,6 +122,60 @@ class FirmwareSelectionController(
                 return false
             }
 
+            cancelRequested.value = false
+            mutableState.update {
+                it.copy(picking = false, prechecking = true, precheckProgress = 0f)
+            }
+            return loadAndCheck(picked, currentVersion, currentModel)
+        } finally {
+            operationMutex.unlock()
+        }
+    }
+
+    /**
+     * 按固件库记录中的路径重新打开并预检（等效于再次选择同一文件）。
+     * 文件已删除/移动/权限失效时返回 false，并保留上一次可用选择。
+     */
+    suspend fun openFromLibrary(
+        sourcePath: String,
+        currentVersion: FirmwareVersion?,
+        currentModel: String?,
+    ): Boolean {
+        if (!operationMutex.tryLock()) return false
+        try {
+            if (mutableState.value.picking || mutableState.value.prechecking) return false
+            mutableState.update {
+                it.copy(
+                    picking = true,
+                    prechecking = false,
+                    precheckProgress = 0f,
+                    error = null,
+                    errorCode = null,
+                )
+            }
+            val picked = try {
+                picker.openFirmware(sourcePath)
+            } catch (cancellation: CancellationException) {
+                mutableState.update { it.copy(picking = false) }
+                throw cancellation
+            } catch (error: Throwable) {
+                mutableState.update { it.copy(picking = false) }
+                fail(error)
+                return false
+            }
+            if (picked == null) {
+                mutableState.update {
+                    it.copy(
+                        picking = false,
+                        error = UiMessage(
+                            StringKey.FIRMWARE_FILE_READ_FAILED,
+                            mapOf("detail" to "firmware.library.unavailable"),
+                        ),
+                        errorCode = "firmware.library.unavailable",
+                    )
+                }
+                return false
+            }
             cancelRequested.value = false
             mutableState.update {
                 it.copy(picking = false, prechecking = true, precheckProgress = 0f)
@@ -270,6 +326,7 @@ class FirmwareSelectionController(
                 packageName = picked.name,
                 version = outcome.firmware.version,
                 payloadBytes = outcome.firmware.payloadLength,
+                sourcePath = picked.sourcePath,
                 declaredCrc32 = outcome.firmware.payloadCrc32,
                 computedCrc32 = outcome.result.payloadCrc32,
                 computedCrc16 = outcome.result.payloadCrc16,

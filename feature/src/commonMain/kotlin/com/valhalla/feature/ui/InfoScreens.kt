@@ -14,9 +14,11 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -37,6 +39,8 @@ import com.valhalla.feature.i18n.LocalStrings
 import com.valhalla.feature.i18n.ResolvedLanguage
 import com.valhalla.feature.firmware.rememberFirmwareSigningKeyPem
 import com.valhalla.feature.i18n.StringKey
+import com.valhalla.feature.ble.BlePermissionState
+import com.valhalla.feature.notification.NotificationPresenter
 import com.valhalla.feature.settings.AppSettings
 import com.valhalla.feature.theme.DesignTokens
 import com.valhalla.feature.theme.ThemeMode
@@ -93,6 +97,7 @@ fun SettingsScreen(
     language: AppLanguageMode,
     theme: ThemeMode,
     settings: AppSettings,
+    notificationPresenter: NotificationPresenter,
     onLanguageChange: (AppLanguageMode) -> Unit,
     onThemeChange: (ThemeMode) -> Unit,
     onSettingsChange: (AppSettings) -> Unit,
@@ -139,6 +144,11 @@ fun SettingsScreen(
             },
         )
         SettingsValuesSection(settings = settings, onSettingsChange = onSettingsChange)
+        NotificationSettingsSection(
+            settings = settings,
+            presenter = notificationPresenter,
+            onSettingsChange = onSettingsChange,
+        )
         Column(verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs)) {
             OutlinedButton(onClick = onOnboardingReview, modifier = Modifier.fillMaxWidth()) {
                 Text(strings.t(StringKey.ONBOARDING_REVIEW_ENTRY))
@@ -273,6 +283,10 @@ private fun SettingsValuesSection(
                             exportEntries = entriesValue!!,
                             exportBytesKb = bytesValue!!,
                             exportHexChars = hexValue!!,
+                            notifyOtaEnabled = settings.notifyOtaEnabled,
+                            notifyDisconnectEnabled = settings.notifyDisconnectEnabled,
+                            notifyLowBatteryEnabled = settings.notifyLowBatteryEnabled,
+                            lowBatteryThreshold = settings.lowBatteryThreshold,
                         ),
                     )
                     status = StringKey.SETTINGS_APPLIED
@@ -294,6 +308,112 @@ private fun SettingsValuesSection(
     }
     status?.let { Text(strings.t(it), style = MaterialTheme.typography.bodySmall) }
     Text(strings.t(StringKey.SETTINGS_RESTART_NOTE), style = MaterialTheme.typography.bodySmall)
+}
+
+/** 本地提醒设置：逐项开关默认全部关闭，只有打开开关时才请求系统权限。 */
+@Composable
+private fun NotificationSettingsSection(
+    settings: AppSettings,
+    presenter: NotificationPresenter,
+    onSettingsChange: (AppSettings) -> Unit,
+) {
+    val strings = LocalStrings.current
+    val permissionState by presenter.state.collectAsState()
+    var threshold by remember(settings) { mutableStateOf(settings.lowBatteryThreshold.toString()) }
+
+    SectionTitle(strings.t(StringKey.SETTINGS_NOTIFY_SECTION))
+    Text(
+        strings.t(StringKey.SETTINGS_NOTIFY_DEFAULT_OFF),
+        style = MaterialTheme.typography.bodySmall,
+    )
+    if (!presenter.supported) {
+        Text(
+            strings.t(StringKey.SETTINGS_NOTIFY_UNSUPPORTED),
+            style = MaterialTheme.typography.bodySmall,
+        )
+    } else {
+        when (permissionState) {
+            BlePermissionState.GRANTED ->
+                Text(
+                    strings.t(StringKey.SETTINGS_NOTIFY_PERMISSION_GRANTED),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+
+            BlePermissionState.PERMANENTLY_DENIED -> {
+                Text(
+                    strings.t(StringKey.SETTINGS_NOTIFY_PERMISSION_DENIED),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                TextButton(onClick = { presenter.openAppSettings() }) {
+                    Text(strings.t(StringKey.SETTINGS_NOTIFY_OPEN_SETTINGS))
+                }
+            }
+
+            else ->
+                Text(
+                    strings.t(StringKey.SETTINGS_NOTIFY_PERMISSION_REQUEST),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+        }
+    }
+
+    NotificationToggleRow(
+        label = strings.t(StringKey.SETTINGS_NOTIFY_OTA),
+        checked = settings.notifyOtaEnabled,
+        onCheckedChange = { enabled ->
+            if (enabled && permissionState != BlePermissionState.GRANTED) {
+                presenter.requestPermission()
+            }
+            onSettingsChange(settings.copy(notifyOtaEnabled = enabled))
+        },
+    )
+    NotificationToggleRow(
+        label = strings.t(StringKey.SETTINGS_NOTIFY_DISCONNECT),
+        checked = settings.notifyDisconnectEnabled,
+        onCheckedChange = { enabled ->
+            if (enabled && permissionState != BlePermissionState.GRANTED) {
+                presenter.requestPermission()
+            }
+            onSettingsChange(settings.copy(notifyDisconnectEnabled = enabled))
+        },
+    )
+    NotificationToggleRow(
+        label = strings.t(StringKey.SETTINGS_NOTIFY_LOW_BATTERY),
+        checked = settings.notifyLowBatteryEnabled,
+        onCheckedChange = { enabled ->
+            if (enabled && permissionState != BlePermissionState.GRANTED) {
+                presenter.requestPermission()
+            }
+            onSettingsChange(settings.copy(notifyLowBatteryEnabled = enabled))
+        },
+    )
+    SettingNumberField(
+        label = strings.t(StringKey.SETTINGS_NOTIFY_THRESHOLD),
+        value = threshold,
+        min = AppSettings.MIN_LOW_BATTERY_THRESHOLD,
+        max = AppSettings.MAX_LOW_BATTERY_THRESHOLD,
+        onValueChange = { text ->
+            threshold = text
+            parseSettingInt(text, AppSettings.MIN_LOW_BATTERY_THRESHOLD, AppSettings.MAX_LOW_BATTERY_THRESHOLD)
+                ?.let { onSettingsChange(settings.copy(lowBatteryThreshold = it)) }
+        },
+    )
+}
+
+@Composable
+private fun NotificationToggleRow(
+    label: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, modifier = Modifier.weight(1f))
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
+    }
 }
 
 /** 解析 1..max 的整数设置；非法返回 null。 */
@@ -476,9 +596,11 @@ private fun storageDescriptionKey(item: StorageItem): StringKey = when (item) {
     StorageItem.PACKET_LOG -> StringKey.PRIVACY_ITEM_LOGS
     StorageItem.APP_SETTINGS -> StringKey.PRIVACY_ITEM_SETTINGS
     StorageItem.BLE_PERMISSION_FLAG -> StringKey.PRIVACY_ITEM_PERMISSION_FLAG
+    StorageItem.FIRMWARE_LIBRARY -> StringKey.PRIVACY_ITEM_FIRMWARE_LIBRARY
+    StorageItem.DEVICE_EVENTS -> StringKey.PRIVACY_ITEM_EVENTS
 }
 
-private fun platformDisplayName(): String = when (currentStoragePlatform()) {
+internal fun platformDisplayName(): String = when (currentStoragePlatform()) {
     StoragePlatform.ANDROID -> "Android"
     StoragePlatform.IOS -> "iOS"
     StoragePlatform.JVM -> "JVM"

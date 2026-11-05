@@ -580,3 +580,18 @@ CompositionLocalProvider(LocalStrings) → 全部 Composable 页面
 
 
 
+
+### 10.5 固件库、事件时间线与诊断报告（v2.5.0）
+
+- `core/firmware/FirmwareLibrary.kt`：`FirmwareLibraryRecord` 只保存元信息与平台文件引用，
+  身份为 `CRC-32 + payload 总长 + 版本`；`FirmwareLibraryStore` 行式编码，损坏回退空，
+  默认 20 条，淘汰顺序为「非常用优先、最久未用优先」。
+- `feature/firmware/FirmwareLibraryReuse`：复用前重新打开原始引用并重算 payload CRC，
+  返回 `Available / Missing(ACCESS_DENIED|READ_FAILED) / CrcMismatch / NotFound`，UI 逐项本地化。
+- `core/event/DeviceEventTimeline.kt`：每设备一份环形存储（100 条），倒序读取、类型筛选；
+  落盘前脱敏，写入失败返回 false，不阻塞业务。
+- `core/diagnostics/DiagnosticReport.kt`：`DiagnosticReportComposer.build` 为 suspend，
+  逐小节 `ensureActive`；`estimate` 与 `build` 共用渲染逻辑，保证预览体积与结果一致。
+  报告只读真实快照，设备 ID 输出短哈希，所有自由文本走 `SensitiveTextRedaction`。
+- `feature/notification/NotificationPolicy.kt`：通知策略与低电去抖为纯逻辑；平台 presenters
+  负责权限与展示（Android `POST_NOTIFICATIONS`、iOS `UNUserNotificationCenter`），JVM 空实现。

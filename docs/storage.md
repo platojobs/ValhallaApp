@@ -129,3 +129,14 @@ P|...
 `StorageInventoryTest` 断言每个平台覆盖全部类别、键非空且不重复、令牌条目引用真实的
 Keystore/Keychain 常量；`PrivacyDisclosureTest` 断言隐私页条目与清单一致、声明「没有网络上传」。
 
+
+## 8. 固件库与事件时间线（v2.5.0）
+
+| 数据 | Android | iOS | JVM | 持久化 |
+| --- | --- | --- | --- | --- |
+| 固件库 | `SharedPreferences(valhalla_firmware_library)`，键 `firmware.library` | `NSUserDefaults`，键 `valhalla.firmware.library` | 内存实现 | Android/iOS 是 |
+| 设备事件时间线 | `SharedPreferences(valhalla_device_events)`，键 `device.<deviceId>` | `NSUserDefaults`，键 `valhalla.events.<deviceId>` | 内存实现 | Android/iOS 是 |
+
+- 两者均为行式编码（百分号转义），损坏数据回退为空；
+- 固件库只保存元信息与平台文件引用，不缓存二进制；事件时间线每设备 100 条环形；
+- 通知开关与低电量阈值存入既有应用偏好（`SettingsKeys.NOTIFY_*`），JVM 恒为内存实现。

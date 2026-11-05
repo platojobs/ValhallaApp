@@ -19,6 +19,12 @@ enum class StorageItem {
 
     /** 是否已请求过蓝牙权限（只存一个布尔标记）。 */
     BLE_PERMISSION_FLAG,
+
+    /** 固件库：只存元信息与原始文件引用，不缓存固件二进制。 */
+    FIRMWARE_LIBRARY,
+
+    /** 设备事件时间线：每设备最近 100 条，跨进程可读。 */
+    DEVICE_EVENTS,
 }
 
 enum class StoragePlatform {
@@ -78,10 +84,24 @@ object StorageKeys {
     const val SETTING_EXPORT_DEFAULT_BYTES_KB = SettingsKeys.EXPORT_DEFAULT_BYTES_KB
     const val SETTING_EXPORT_DEFAULT_HEX_CHARS = SettingsKeys.EXPORT_DEFAULT_HEX_CHARS
     const val SETTING_ONBOARDING_COMPLETED = SettingsKeys.ONBOARDING_COMPLETED
+    const val SETTING_NOTIFY_OTA_ENABLED = SettingsKeys.NOTIFY_OTA_ENABLED
+    const val SETTING_NOTIFY_DISCONNECT_ENABLED = SettingsKeys.NOTIFY_DISCONNECT_ENABLED
+    const val SETTING_NOTIFY_LOW_BATTERY_ENABLED = SettingsKeys.NOTIFY_LOW_BATTERY_ENABLED
+    const val SETTING_NOTIFY_LOW_BATTERY_THRESHOLD = SettingsKeys.NOTIFY_LOW_BATTERY_THRESHOLD
 
     // 蓝牙权限标记
     const val ANDROID_BLE_PERMISSION_PREFS = "valhalla_ble_permission"
     const val ANDROID_BLE_PERMISSION_KEY = "requested"
+
+    // 固件库（仅元信息，不缓存二进制）
+    const val ANDROID_FIRMWARE_PREFS = "valhalla_firmware_library"
+    const val ANDROID_FIRMWARE_KEY = "records"
+    const val IOS_FIRMWARE_KEY = "valhalla.firmware.library"
+
+    // 设备事件时间线（每设备一个键）
+    const val ANDROID_EVENTS_PREFS = "valhalla_device_events"
+    const val ANDROID_EVENTS_KEY_PREFIX = "device."
+    const val IOS_EVENTS_KEY_PREFIX = "valhalla.events."
 }
 
 /** 各平台真实的存储位置清单。 */
@@ -217,6 +237,48 @@ object StorageInventory {
             item = StorageItem.BLE_PERMISSION_FLAG,
             platform = StoragePlatform.JVM,
             location = "Not stored",
+            keys = emptyList(),
+            persistent = false,
+        ),
+        StorageLocation(
+            item = StorageItem.FIRMWARE_LIBRARY,
+            platform = StoragePlatform.ANDROID,
+            location = "SharedPreferences(${StorageKeys.ANDROID_FIRMWARE_PREFS})",
+            keys = listOf(StorageKeys.ANDROID_FIRMWARE_KEY),
+            persistent = true,
+        ),
+        StorageLocation(
+            item = StorageItem.FIRMWARE_LIBRARY,
+            platform = StoragePlatform.IOS,
+            location = "NSUserDefaults",
+            keys = listOf(StorageKeys.IOS_FIRMWARE_KEY),
+            persistent = true,
+        ),
+        StorageLocation(
+            item = StorageItem.FIRMWARE_LIBRARY,
+            platform = StoragePlatform.JVM,
+            location = "In-memory (InMemoryFirmwareLibraryStore)",
+            keys = emptyList(),
+            persistent = false,
+        ),
+        StorageLocation(
+            item = StorageItem.DEVICE_EVENTS,
+            platform = StoragePlatform.ANDROID,
+            location = "SharedPreferences(${StorageKeys.ANDROID_EVENTS_PREFS})",
+            keys = listOf("${StorageKeys.ANDROID_EVENTS_KEY_PREFIX}<deviceId>"),
+            persistent = true,
+        ),
+        StorageLocation(
+            item = StorageItem.DEVICE_EVENTS,
+            platform = StoragePlatform.IOS,
+            location = "NSUserDefaults",
+            keys = listOf("${StorageKeys.IOS_EVENTS_KEY_PREFIX}<deviceId>"),
+            persistent = true,
+        ),
+        StorageLocation(
+            item = StorageItem.DEVICE_EVENTS,
+            platform = StoragePlatform.JVM,
+            location = "In-memory (InMemoryDeviceEventStore)",
             keys = emptyList(),
             persistent = false,
         ),

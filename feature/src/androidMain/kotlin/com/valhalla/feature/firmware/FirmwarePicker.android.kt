@@ -46,8 +46,23 @@ actual fun rememberFirmwarePicker(): FirmwarePicker {
                 launcher.launch(arrayOf("application/octet-stream", "*/*"))
                 val uri = deferred.await() ?: return null
                 val name = queryDisplayName(resolver, uri) ?: "firmware.bin"
-                return PickedFirmware(name = name, source = ContentUriFirmwareSource(resolver, uri))
+                return PickedFirmware(
+                    name = name,
+                    source = ContentUriFirmwareSource(resolver, uri),
+                    sourcePath = uri.toString(),
+                )
             }
+
+            override suspend fun openFirmware(sourcePath: String): PickedFirmware? = runCatching {
+                val uri = Uri.parse(sourcePath)
+                if (uri.scheme == null) return@runCatching null
+                val name = queryDisplayName(resolver, uri) ?: "firmware.bin"
+                PickedFirmware(
+                    name = name,
+                    source = ContentUriFirmwareSource(resolver, uri),
+                    sourcePath = sourcePath,
+                )
+            }.getOrNull()
         }
     }
 }

@@ -63,7 +63,19 @@ private class IosFirmwarePicker : FirmwarePicker {
         return PickedFirmware(
             name = url.lastPathComponent ?: "firmware.bin",
             source = source,
+            sourcePath = path,
         )
+    }
+
+    override suspend fun openFirmware(sourcePath: String): PickedFirmware? {
+        if (sourcePath.isBlank()) return null
+        return runCatching {
+            PickedFirmware(
+                name = sourcePath.substringAfterLast('/').ifBlank { "firmware.bin" },
+                source = PosixFirmwareSource(sourcePath),
+                sourcePath = sourcePath,
+            )
+        }.getOrNull()
     }
 }
 
