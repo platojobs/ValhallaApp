@@ -76,6 +76,8 @@ private class IosNotificationPresenter : NotificationPresenter {
             setTitle(title)
             setBody(body)
             setSound(UNNotificationSound.defaultSound())
+            // Swift 的 UNUserNotificationCenterDelegate 读取该字段并交给 Compose 根界面跳转。
+            setUserInfo(mapOf("route" to target.wireValue()))
         }
         val request = UNNotificationRequest.requestWithIdentifier(
             identifier = "valhalla.local.${nextId++}",
