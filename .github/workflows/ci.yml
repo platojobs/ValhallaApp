@@ -18,7 +18,7 @@ jobs:
   version-check:
     name: 版本一致性
     # composeApp 是 Android 工程，配置阶段依赖 Android SDK；使用预装 SDK 的 macOS runner。
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -124,7 +124,7 @@ jobs:
 
   android:
     name: Android 构建（debug + release 未签名）
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
@@ -165,7 +165,7 @@ jobs:
 
   ios:
     name: iOS Framework（模拟器 Debug）
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
@@ -188,7 +188,7 @@ jobs:
 
   ios-app-build:
     name: iOS 完整 App 构建（模拟器）
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 45
     # 失败即红：完整 App 构建不允许静默变绿。
     steps:
@@ -273,7 +273,7 @@ jobs:
 
   ios-runtime-tests:
     name: iOS 模拟器运行时验签（Kotlin/Native）
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 45
     # 失败即红：不设 continue-on-error。
     steps:
