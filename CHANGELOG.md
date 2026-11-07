@@ -2,6 +2,25 @@
 
 本文件记录 ValhallaApp 的版本演进，按「阶段完成即提交 + 打 annotated tag」的节奏维护。
 
+## v3.0.0 - 工程收口与真实资源
+
+### 工程与质量门禁
+
+- **静态分析**：接入 detekt + ktlint，可在 Gradle 单独执行并进入 CI（`static-analysis` job，失败即红）。
+  首次全量 406 条，本轮修复 15 条，基线保留 391 条（core 266 / data 10 / feature 115 / composeApp 0），
+  逐条原因见 [docs/static-analysis-baseline.md](docs/static-analysis-baseline.md)。
+- **覆盖率**：接入 Kover（只统计 JVM 单元测试，不含 Android instrumented），生成 XML/HTML 并在 CI
+  上传 `kover-reports`；阈值 core 行覆盖 ≥ 75%、data ≥ 55%、feature ≥ 60%。实测 core 94.32%、
+  data 87.55%、feature 89.39%（feature 排除 `com.valhalla.feature.ui`，Compose UI 无法在 JVM 单测执行）。
+- **存储 schema 迁移**：偏好、设备档案、OTA 断点、指标采样、偏好备份统一加 `schemaVersion`，
+  集中入口 `StorageSchemaMigrator`；旧版本升级、未来版本回退并提示、损坏数据给出可见原因；
+  覆盖偏好 v1→v2 与指标采样 v1→v2 的真实旧格式迁移。
+- **真实资源**：Android adaptive icon（前景/背景矢量 + 单色层）与 Android 12+ SplashScreen 主题；
+  iOS 全尺寸 AppIcon asset catalog、LaunchScreen 与 Xcode 工程资源引用。
+- **进程死亡恢复**：启动按持久化断点与真实存储状态校正，不恢复「传输中」「扫描中」假状态；
+  OTA 断点给出「可续传」或「失效并说明原因」，并覆盖有/无/损坏断点重启测试。
+- 版本 `3.0.0`（`versionCode 30`）；JVM 测试 679 项基线不回归（本期实际 688）。
+
 ## v2.9.0 - 批量、队列与可复用固件库
 
 ### 新增

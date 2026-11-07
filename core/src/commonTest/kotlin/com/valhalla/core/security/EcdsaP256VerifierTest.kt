@@ -19,7 +19,6 @@ import kotlin.test.assertTrue
  * iOS 模拟器运行时测试使用，保证三端不是各写一套数据。
  */
 class EcdsaP256VerifierTest {
-
     private val publicKeyPem = EcdsaTestVectors.PUBLIC_KEY_PEM
     private val certificatePem = EcdsaTestVectors.CERTIFICATE_PEM
     private val p384PublicKeyPem = EcdsaTestVectors.P384_PUBLIC_KEY_PEM
@@ -49,12 +48,13 @@ class EcdsaP256VerifierTest {
         val verifier = EcdsaP256Verifier.fromPem(publicKeyPem)
         assertEquals(EcdsaP256Verifier.Source.PEM_PUBLIC_KEY, verifier.source)
 
-        val results = listOf(
-            digest1 to signature1,
-            digest2 to signature2,
-        ).map { (digest, signature) ->
-            verifier.verifyDetailed(Hex.decode(digest), Hex.decode(signature))
-        }
+        val results =
+            listOf(
+                digest1 to signature1,
+                digest2 to signature2,
+            ).map { (digest, signature) ->
+                verifier.verifyDetailed(Hex.decode(digest), Hex.decode(signature))
+            }
 
         assertTrue(results.all { it is EcdsaVerificationResult.Valid })
         assertTrue(verifier.verify(Hex.decode(digest1), Hex.decode(signature1)))
@@ -88,9 +88,10 @@ class EcdsaP256VerifierTest {
     @Test
     fun `篡改签名后验签失败`() {
         val verifier = EcdsaP256Verifier.fromPem(publicKeyPem)
-        val tampered = Hex.decode(signature1).also {
-            it[it.lastIndex] = (it[it.lastIndex].toInt() xor 0x01).toByte()
-        }
+        val tampered =
+            Hex.decode(signature1).also {
+                it[it.lastIndex] = (it[it.lastIndex].toInt() xor 0x01).toByte()
+            }
         assertIs<EcdsaVerificationResult.Invalid>(
             verifier.verifyDetailed(Hex.decode(digest1), tampered),
         )
@@ -142,25 +143,28 @@ class EcdsaP256VerifierTest {
 
     @Test
     fun `非 P-256 公钥被明确拒绝`() {
-        val error = assertFailsWith<EcdsaKeyException> {
-            EcdsaP256Verifier.fromPem(p384PublicKeyPem)
-        }
+        val error =
+            assertFailsWith<EcdsaKeyException> {
+                EcdsaP256Verifier.fromPem(p384PublicKeyPem)
+            }
         assertEquals(EcdsaFailureCode.PUBLIC_KEY_UNSUPPORTED, error.code)
     }
 
     @Test
     fun `私钥 PEM 被拒绝加载`() {
-        val error = assertFailsWith<EcdsaKeyException> {
-            EcdsaP256Verifier.fromPem(EcdsaTestVectors.PRIVATE_KEY_PEM)
-        }
+        val error =
+            assertFailsWith<EcdsaKeyException> {
+                EcdsaP256Verifier.fromPem(EcdsaTestVectors.PRIVATE_KEY_PEM)
+            }
         assertEquals(EcdsaFailureCode.PUBLIC_KEY_PARSE, error.code)
     }
 
     @Test
     fun `损坏的 PEM 分类为公钥解析失败`() {
-        val error = assertFailsWith<EcdsaKeyException> {
-            EcdsaP256Verifier.fromPem("-----BEGIN PUBLIC KEY-----\nnot-base64!\n-----END PUBLIC KEY-----")
-        }
+        val error =
+            assertFailsWith<EcdsaKeyException> {
+                EcdsaP256Verifier.fromPem("-----BEGIN PUBLIC KEY-----\nnot-base64!\n-----END PUBLIC KEY-----")
+            }
         assertEquals(EcdsaFailureCode.PUBLIC_KEY_PARSE, error.code)
     }
 
@@ -176,16 +180,18 @@ class EcdsaP256VerifierTest {
     fun `固件验签器只接受 ECDSA 算法编号`() {
         val verifier = EcdsaP256FirmwareVerifier(EcdsaP256Verifier.fromPem(publicKeyPem))
         val digest = Hex.decode(digest1)
-        val ecdsa = com.valhalla.core.firmware.FirmwareSignature(
-            com.valhalla.core.firmware.FirmwareSignatureAlgorithm.ECDSA_P256,
-            Hex.decode(signature1),
-        )
+        val ecdsa =
+            com.valhalla.core.firmware.FirmwareSignature(
+                com.valhalla.core.firmware.FirmwareSignatureAlgorithm.ECDSA_P256,
+                Hex.decode(signature1),
+            )
         assertTrue(verifier.verify(digest, ecdsa))
 
-        val hmac = com.valhalla.core.firmware.FirmwareSignature(
-            com.valhalla.core.firmware.FirmwareSignatureAlgorithm.HMAC_SHA256,
-            Hex.decode(signature1),
-        )
+        val hmac =
+            com.valhalla.core.firmware.FirmwareSignature(
+                com.valhalla.core.firmware.FirmwareSignatureAlgorithm.HMAC_SHA256,
+                Hex.decode(signature1),
+            )
         val result = verifier.verifyDetailed(digest, hmac)
         assertEquals(
             EcdsaFailureCode.ALGORITHM_MISMATCH,

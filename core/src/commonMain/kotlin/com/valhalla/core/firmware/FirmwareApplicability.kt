@@ -37,7 +37,6 @@ data class FirmwareApplicabilityResult(
  * 真正升级前仍必须打开文件执行完整预检（CRC、签名、版本、型号）。
  */
 object FirmwareApplicabilityEvaluator {
-
     private val VERSION_PATTERN =
         Regex("""^(\d+)\.(\d+)\.(\d+)(?:\s*\(build\s+(\d+),\s*([^)]+)\))?$""")
 
@@ -58,12 +57,13 @@ object FirmwareApplicabilityEvaluator {
         currentModel: String?,
         currentVersion: FirmwareVersion?,
     ): FirmwareApplicabilityResult {
-        val targetVersion = parseVersion(record.version)
-            ?: return FirmwareApplicabilityResult(
-                status = FirmwareApplicabilityStatus.INAPPLICABLE,
-                reason = FirmwareApplicabilityReason.VERSION_UNPARSEABLE,
-                firmwareVersionText = record.version,
-            )
+        val targetVersion =
+            parseVersion(record.version)
+                ?: return FirmwareApplicabilityResult(
+                    status = FirmwareApplicabilityStatus.INAPPLICABLE,
+                    reason = FirmwareApplicabilityReason.VERSION_UNPARSEABLE,
+                    firmwareVersionText = record.version,
+                )
         if (currentModel.isNullOrBlank()) {
             return FirmwareApplicabilityResult(
                 status = FirmwareApplicabilityStatus.INAPPLICABLE,

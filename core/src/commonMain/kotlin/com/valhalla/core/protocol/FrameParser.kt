@@ -6,8 +6,9 @@ package com.valhalla.core.protocol
  * 使用方式：把每次收到的数据块交给 [feed]，返回值即本次凑齐的完整帧。
  * 解析器内部维护残留缓冲，遇到噪声或损坏帧会自动重新寻找 SOF。
  */
-class FrameParser(private val maxPayloadSize: Int = FrameCodec.MAX_PAYLOAD_SIZE) {
-
+class FrameParser(
+    private val maxPayloadSize: Int = FrameCodec.MAX_PAYLOAD_SIZE,
+) {
     private var buffer: ByteArray = ByteArray(0)
 
     val bufferedBytes: Int get() = buffer.size
@@ -26,11 +27,12 @@ class FrameParser(private val maxPayloadSize: Int = FrameCodec.MAX_PAYLOAD_SIZE)
             val start = indexOfSof()
             if (start < 0) {
                 // 没有完整 SOF：只保留可能是 SOF 前半段的最后一个字节
-                buffer = if (buffer.isNotEmpty() && buffer[buffer.size - 1] == FrameCodec.SOF_FIRST) {
-                    byteArrayOf(FrameCodec.SOF_FIRST)
-                } else {
-                    ByteArray(0)
-                }
+                buffer =
+                    if (buffer.isNotEmpty() && buffer[buffer.size - 1] == FrameCodec.SOF_FIRST) {
+                        byteArrayOf(FrameCodec.SOF_FIRST)
+                    } else {
+                        ByteArray(0)
+                    }
                 break
             }
             if (start > 0) {

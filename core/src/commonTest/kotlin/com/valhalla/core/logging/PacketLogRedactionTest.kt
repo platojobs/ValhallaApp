@@ -14,21 +14,18 @@ import com.valhalla.core.protocol.message.FirmwareVersion
 import com.valhalla.core.protocol.message.MessageCodec
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
-import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 class PacketLogRedactionTest {
-
     private val secretToken = "tok_live_9f8e7d6c5b4a"
     private val secretChallenge = "challenge-0123456789abcdef".encodeToByteArray()
     private val secretCredential = "super-secret-credential".encodeToByteArray()
     private val secretSerial = "SN-ABC123456789"
 
-    private fun authRequestPayload(): ByteArray =
-        MessageCodec.encodeRequest(AuthRequest(AuthMode.TOKEN, secretCredential))
+    private fun authRequestPayload(): ByteArray = MessageCodec.encodeRequest(AuthRequest(AuthMode.TOKEN, secretCredential))
 
     private fun authResponsePayload(): ByteArray =
         MessageCodec.encodeResponse(
@@ -91,14 +88,15 @@ class PacketLogRedactionTest {
 
     @Test
     fun authFailureResponseIsKeptForDiagnostics() {
-        val payload = MessageCodec.encodeResponse(
-            AuthResponse(
-                status = DeviceStatus.AUTH_FAILED,
-                token = "",
-                expiresInSeconds = 0,
-                challenge = ByteArray(0),
-            ),
-        )
+        val payload =
+            MessageCodec.encodeResponse(
+                AuthResponse(
+                    status = DeviceStatus.AUTH_FAILED,
+                    token = "",
+                    expiresInSeconds = 0,
+                    challenge = ByteArray(0),
+                ),
+            )
         val redacted = PacketLogRedaction.redactPayload(CommandType.AUTH, isResponse = true, payload = payload)
         assertSame(payload, redacted, "错误应答无敏感字段，应原样保留")
     }
@@ -106,11 +104,12 @@ class PacketLogRedactionTest {
     @Test
     fun deviceSerialKeepsOnlyPrefix() {
         val original = deviceInfoPayload()
-        val redacted = PacketLogRedaction.redactPayload(
-            CommandType.GET_DEVICE_INFO,
-            isResponse = true,
-            payload = original,
-        )
+        val redacted =
+            PacketLogRedaction.redactPayload(
+                CommandType.GET_DEVICE_INFO,
+                isResponse = true,
+                payload = original,
+            )
         assertEquals(original.size, redacted.size)
         val decoded = MessageCodec.decodeResponse(CommandType.GET_DEVICE_INFO, redacted) as DeviceInfoResponse
         assertEquals("Valhalla", decoded.vendor, "非敏感字段不受影响")
@@ -135,12 +134,13 @@ class PacketLogRedactionTest {
 
     @Test
     fun redactedFrameKeepsHeaderAndProducesValidCrc() {
-        val frame = Frame(
-            type = CommandType.AUTH,
-            sequence = 7,
-            payload = authResponsePayload(),
-            isResponse = true,
-        )
+        val frame =
+            Frame(
+                type = CommandType.AUTH,
+                sequence = 7,
+                payload = authResponsePayload(),
+                isResponse = true,
+            )
         val redactedFrame = PacketLogRedaction.redactFrame(frame)
         assertEquals(frame.type, redactedFrame.type)
         assertEquals(frame.sequence, redactedFrame.sequence)
@@ -152,56 +152,59 @@ class PacketLogRedactionTest {
     }
 
     @Test
-    fun packetLogExportsAreRedactedInAllFormats() = runTest {
-        val log = InMemoryPacketLog(capacity = 16, clockMillis = { 1_700_000_000_000 })
-        log.record(
-            FrameDirection.TX,
-            Frame(type = CommandType.AUTH, sequence = 1, payload = authRequestPayload()),
-        )
-        log.record(
-            FrameDirection.RX,
-            Frame(
-                type = CommandType.AUTH,
-                sequence = 1,
-                payload = authResponsePayload(),
-                isResponse = true,
-            ),
-        )
-        log.record(
-            FrameDirection.RX,
-            Frame(
-                type = CommandType.GET_DEVICE_INFO,
-                sequence = 2,
-                payload = deviceInfoPayload(),
-                isResponse = true,
-            ),
-        )
+    fun packetLogExportsAreRedactedInAllFormats() =
+        runTest {
+            val log = InMemoryPacketLog(capacity = 16, clockMillis = { 1_700_000_000_000 })
+            log.record(
+                FrameDirection.TX,
+                Frame(type = CommandType.AUTH, sequence = 1, payload = authRequestPayload()),
+            )
+            log.record(
+                FrameDirection.RX,
+                Frame(
+                    type = CommandType.AUTH,
+                    sequence = 1,
+                    payload = authResponsePayload(),
+                    isResponse = true,
+                ),
+            )
+            log.record(
+                FrameDirection.RX,
+                Frame(
+                    type = CommandType.GET_DEVICE_INFO,
+                    sequence = 2,
+                    payload = deviceInfoPayload(),
+                    isResponse = true,
+                ),
+            )
 
-        val originalHex = Hex.encode(authRequestPayload())
-        val entries = log.entries.value
-        assertEquals(3, entries.size)
-        entries.forEach { entry ->
-            assertFalse(entry.hex.contains(originalHex), "脱敏后的 HEX 不能包含原始 credential")
-            assertFalse(entry.summary.contains(secretToken), "摘要不能泄露 token")
-            assertFalse(entry.summary.contains(secretSerial), "摘要不能泄露完整序列号")
-        }
+            val originalHex = Hex.encode(authRequestPayload())
+            val entries = log.entries.value
+            assertEquals(3, entries.size)
+            entries.forEach { entry ->
+                assertFalse(entry.hex.contains(originalHex), "脱敏后的 HEX 不能包含原始 credential")
+                assertFalse(entry.summary.contains(secretToken), "摘要不能泄露 token")
+                assertFalse(entry.summary.contains(secretSerial), "摘要不能泄露完整序列号")
+            }
 
-        val outputs = PacketLogExportFormat.entries.associateWith { format ->
-            PacketLogExporter.build(
-                entries = entries,
-                nowMillis = 1_700_000_000_000,
-                zoneOffsetMinutes = 480,
-                format = format,
-            ).text
+            val outputs =
+                PacketLogExportFormat.entries.associateWith { format ->
+                    PacketLogExporter
+                        .build(
+                            entries = entries,
+                            nowMillis = 1_700_000_000_000,
+                            zoneOffsetMinutes = 480,
+                            format = format,
+                        ).text
+                }
+            outputs.forEach { (format, text) ->
+                assertFalse(text.contains(secretToken), "$format 导出不能包含 token")
+                assertFalse(text.contains(Hex.encode(secretCredential)), "$format 导出不能包含 credential HEX")
+                assertFalse(text.contains(secretSerial), "$format 导出不能包含完整序列号")
+                assertTrue(text.contains("AUTH"), "$format 导出应保留命令名以便排障")
+            }
+            assertEquals(outputs.keys, setOf(PacketLogExportFormat.TEXT, PacketLogExportFormat.JSON, PacketLogExportFormat.CSV))
         }
-        outputs.forEach { (format, text) ->
-            assertFalse(text.contains(secretToken), "$format 导出不能包含 token")
-            assertFalse(text.contains(Hex.encode(secretCredential)), "$format 导出不能包含 credential HEX")
-            assertFalse(text.contains(secretSerial), "$format 导出不能包含完整序列号")
-            assertTrue(text.contains("AUTH"), "$format 导出应保留命令名以便排障")
-        }
-        assertEquals(outputs.keys, setOf(PacketLogExportFormat.TEXT, PacketLogExportFormat.JSON, PacketLogExportFormat.CSV))
-    }
 
     @Test
     fun deviceIdMaskingAndHashingAreStableAndIrreversible() {

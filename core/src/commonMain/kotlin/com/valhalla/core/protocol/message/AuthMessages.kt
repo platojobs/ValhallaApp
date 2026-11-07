@@ -3,7 +3,9 @@ package com.valhalla.core.protocol.message
 import com.valhalla.core.protocol.CommandType
 
 /** 鉴权模式。 */
-enum class AuthMode(val code: Int) {
+enum class AuthMode(
+    val code: Int,
+) {
     /** 直接使用长期令牌鉴权。 */
     TOKEN(0x01),
 
@@ -34,7 +36,6 @@ class AuthRequest(
     val mode: AuthMode,
     val credential: ByteArray,
 ) : DeviceRequest() {
-
     override val command: CommandType = CommandType.AUTH
 
     override fun encodeBody(writer: PayloadWriter) {
@@ -58,7 +59,6 @@ class AuthResponse(
     val expiresInSeconds: Long,
     val challenge: ByteArray,
 ) : DeviceResponse() {
-
     override val command: CommandType = CommandType.AUTH
 
     override val status: DeviceStatus = status
@@ -88,32 +88,32 @@ class SignedAuthCredential(
     val deviceDigest: String,
     val signature: ByteArray,
 ) {
-
     init {
         require(clientNonce.isNotEmpty()) { "clientNonce 不能为空" }
         require(signature.isNotEmpty()) { "签名不能为空" }
     }
 
-    fun encode(): ByteArray = PayloadWriter()
-        .u16(challenge.size)
-        .bytes(challenge)
-        .u16(clientNonce.size)
-        .bytes(clientNonce)
-        .string2(deviceDigest)
-        .u16(signature.size)
-        .bytes(signature)
-        .toByteArray()
+    fun encode(): ByteArray =
+        PayloadWriter()
+            .u16(challenge.size)
+            .bytes(challenge)
+            .u16(clientNonce.size)
+            .bytes(clientNonce)
+            .string2(deviceDigest)
+            .u16(signature.size)
+            .bytes(signature)
+            .toByteArray()
 
     companion object {
-
         fun decode(bytes: ByteArray): SignedAuthCredential {
             val reader = PayloadReader(bytes)
-            val credential = SignedAuthCredential(
-                challenge = reader.bytes(reader.u16()),
-                clientNonce = reader.bytes(reader.u16()),
-                deviceDigest = reader.string2(),
-                signature = reader.bytes(reader.u16()),
-            )
+            val credential =
+                SignedAuthCredential(
+                    challenge = reader.bytes(reader.u16()),
+                    clientNonce = reader.bytes(reader.u16()),
+                    deviceDigest = reader.string2(),
+                    signature = reader.bytes(reader.u16()),
+                )
             reader.ensureExhausted()
             return credential
         }

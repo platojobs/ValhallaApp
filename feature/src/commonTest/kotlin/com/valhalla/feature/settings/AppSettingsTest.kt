@@ -9,14 +9,18 @@ import kotlin.test.assertTrue
 
 private class FakeSettingsStore : AppSettingsStore {
     val values = mutableMapOf<String, String>()
+
     override fun read(key: String): String? = values[key]
-    override fun write(key: String, value: String?) {
+
+    override fun write(
+        key: String,
+        value: String?,
+    ) {
         if (value == null) values.remove(key) else values[key] = value
     }
 }
 
 class AppSettingsTest {
-
     @Test
     fun `默认值与产品定义一致`() {
         val settings = AppSettings.DEFAULTS

@@ -7,19 +7,27 @@ package com.valhalla.core.logging
  * 预先拼成小写字符串；输入关键字时只做一次 `contains`，不再逐条拼接列表。
  * 排序与 [filterPacketEntries] 完全一致，保证切换实现后结果不变。
  */
-class PacketLogIndex(entries: List<PacketLogEntry>) {
+class PacketLogIndex(
+    entries: List<PacketLogEntry>,
+) {
+    private data class Indexed(
+        val entry: PacketLogEntry,
+        val haystack: String,
+    )
 
-    private data class Indexed(val entry: PacketLogEntry, val haystack: String)
-
-    private val indexed: List<Indexed> = entries
-        .sortedWith(compareByDescending<PacketLogEntry> { it.timestampMillis }.thenByDescending { it.id })
-        .map { entry ->
-            Indexed(entry = entry, haystack = entry.searchText().lowercase())
-        }
+    private val indexed: List<Indexed> =
+        entries
+            .sortedWith(compareByDescending<PacketLogEntry> { it.timestampMillis }.thenByDescending { it.id })
+            .map { entry ->
+                Indexed(entry = entry, haystack = entry.searchText().lowercase())
+            }
 
     val size: Int get() = indexed.size
 
-    fun query(filter: PacketLogFilter, limit: Int = Int.MAX_VALUE): List<PacketLogEntry> {
+    fun query(
+        filter: PacketLogFilter,
+        limit: Int = Int.MAX_VALUE,
+    ): List<PacketLogEntry> {
         if (limit <= 0) return emptyList()
         val keyword = filter.keyword.trim().lowercase()
         val result = ArrayList<PacketLogEntry>(minOf(limit, indexed.size))

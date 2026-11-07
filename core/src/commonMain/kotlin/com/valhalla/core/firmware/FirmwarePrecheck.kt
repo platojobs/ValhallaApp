@@ -4,7 +4,6 @@ import com.valhalla.core.protocol.message.FirmwareVersion
 
 /** 固件验签策略。 */
 enum class FirmwareSignaturePolicy {
-
     /** 必须签名且验签通过，否则拒绝升级（生产构建推荐）。 */
     REQUIRE,
 
@@ -23,21 +22,21 @@ data class FirmwarePrecheckResult(
     /** 协议层 CRC-16/CCITT-FALSE，用于断点续传时确认「续的是同一份内容」。 */
     val payloadCrc16: Int? = null,
 ) {
-
     val passed: Boolean get() = errors.isEmpty()
 
     val primaryError: FirmwareException? get() = errors.firstOrNull()
 
     /** UI 可直接展示的多行原因；[warnings] 通过 [warningSummary] 单独展示。 */
-    fun summary(): String =
-        if (passed) "预检通过" else errors.joinToString(separator = "\n") { it.message ?: it.code }
+    fun summary(): String = if (passed) "预检通过" else errors.joinToString(separator = "\n") { it.message ?: it.code }
 
     /** 非阻断性风险提示，例如「固件未签名」。 */
     fun warningSummary(): String? = warnings.takeIf { it.isNotEmpty() }?.joinToString("；")
 
     companion object {
-        fun success(payloadCrc32: Long, payloadCrc16: Int? = null) =
-            FirmwarePrecheckResult(payloadCrc32 = payloadCrc32, payloadCrc16 = payloadCrc16)
+        fun success(
+            payloadCrc32: Long,
+            payloadCrc16: Int? = null,
+        ) = FirmwarePrecheckResult(payloadCrc32 = payloadCrc32, payloadCrc16 = payloadCrc16)
     }
 }
 
@@ -73,7 +72,6 @@ class FirmwarePrechecker(
     /** 签名策略：默认 WARN，兼容旧固件；生产构建应显式使用 REQUIRE。 */
     private val signaturePolicy: FirmwareSignaturePolicy = FirmwareSignaturePolicy.WARN,
 ) {
-
     init {
         require(maxPayloadBytes > 0) { "maxPayloadBytes 必须大于 0: $maxPayloadBytes" }
     }
@@ -111,15 +109,16 @@ class FirmwarePrechecker(
         var scan: FirmwareScan? = null
         if (!oversize) {
             try {
-                scan = firmware.scanPayload(
-                    includeSignatureDigest = shouldComputeSignatureDigest(firmware),
-                    onProgress = { readBytes, totalBytes ->
-                        if (shouldCancel?.invoke() == true) {
-                            throw FirmwarePrecheckCancelledException()
-                        }
-                        onProgress?.invoke(FirmwarePrecheckProgress(readBytes, totalBytes))
-                    },
-                )
+                scan =
+                    firmware.scanPayload(
+                        includeSignatureDigest = shouldComputeSignatureDigest(firmware),
+                        onProgress = { readBytes, totalBytes ->
+                            if (shouldCancel?.invoke() == true) {
+                                throw FirmwarePrecheckCancelledException()
+                            }
+                            onProgress?.invoke(FirmwarePrecheckProgress(readBytes, totalBytes))
+                        },
+                    )
             } catch (cancelled: FirmwarePrecheckCancelledException) {
                 throw cancelled
             } catch (error: FirmwareException) {
@@ -189,10 +188,11 @@ class FirmwarePrechecker(
         if (digest == null) return
 
         if (!verifier.verify(digest, signature)) {
-            errors += FirmwareException.SignatureInvalid(
-                algorithm = signature.algorithm.title,
-                detail = "摘要与签名不匹配（内容被篡改或密钥不一致）",
-            )
+            errors +=
+                FirmwareException.SignatureInvalid(
+                    algorithm = signature.algorithm.title,
+                    detail = "摘要与签名不匹配（内容被篡改或密钥不一致）",
+                )
         }
     }
 
@@ -204,14 +204,18 @@ class FirmwarePrechecker(
          * 版本比较仅看 `major.minor.patch.build`，忽略渠道名：
          * 渠道切换（例如 release → beta）不属于版本回退，由部署流程自行约束。
          */
-        fun compare(target: FirmwareVersion, current: FirmwareVersion): Int {
+        fun compare(
+            target: FirmwareVersion,
+            current: FirmwareVersion,
+        ): Int {
             if (target.sameReleaseAs(current)) return 0
-            val fields = listOf(
-                target.major to current.major,
-                target.minor to current.minor,
-                target.patch to current.patch,
-                target.build to current.build,
-            )
+            val fields =
+                listOf(
+                    target.major to current.major,
+                    target.minor to current.minor,
+                    target.patch to current.patch,
+                    target.build to current.build,
+                )
             for ((left, right) in fields) {
                 if (left != right) return left.compareTo(right)
             }

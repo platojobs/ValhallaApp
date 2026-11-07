@@ -8,7 +8,6 @@ import kotlin.test.assertTrue
 
 /** RFC 4231 标准测试向量。 */
 class HmacSha256Test {
-
     @Test
     fun `RFC4231 测试用例 1`() {
         val key = ByteArray(20) { 0x0b }
@@ -67,8 +66,9 @@ class HmacSha256Test {
     @Test
     fun `RFC4231 测试用例 7 超长密钥与超长消息`() {
         val key = ByteArray(131) { 0xaa.toByte() }
-        val message = "This is a test using a larger than block-size key and a larger than " +
-            "block-size data. The key needs to be hashed before being used by the HMAC algorithm."
+        val message =
+            "This is a test using a larger than block-size key and a larger than " +
+                "block-size data. The key needs to be hashed before being used by the HMAC algorithm."
         assertEquals(
             "9b09ffa71b942fcb27635fbcd5b0e944bfdc63644f0713938a7f51535c3a35e2",
             Hex.encode(HmacSha256.compute(key, message.encodeToByteArray()), upperCase = false),

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android 12+ SplashScreen API：深色底 + 信号/波形图标。 -->
+    <style name="Theme.Valhalla.Starting" parent="Theme.Valhalla">
+        <item name="android:windowSplashScreenBackground">@color/valhalla_icon_background</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">@color/valhalla_icon_background</item>
+        <item name="android:windowSplashScreenAnimationDuration">300</item>
+    </style>
+</resources>

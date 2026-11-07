@@ -7,7 +7,6 @@ import android.content.Context
  * 之后 [createBleClient] 才能拿到 Application Context。
  */
 object AndroidBleSupport {
-
     @Volatile
     private var applicationContext: Context? = null
 
@@ -15,8 +14,7 @@ object AndroidBleSupport {
         applicationContext = context.applicationContext
     }
 
-    internal fun requireContext(): Context =
-        applicationContext ?: throw IllegalStateException("请先调用 AndroidBleSupport.init(context)")
+    internal fun requireContext(): Context = applicationContext ?: error("请先调用 AndroidBleSupport.init(context)")
 }
 
 actual fun createBleClient(): BleClient = AndroidBleClient(AndroidBleSupport.requireContext())

@@ -7,7 +7,6 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class NotificationCenterTest {
-
     private fun event(
         type: NotificationEventType = NotificationEventType.HEALTH_ABNORMAL,
         body: String = "2 项异常",
@@ -16,15 +15,17 @@ class NotificationCenterTest {
         type = type,
         title = "标题",
         body = body,
-        target = NotificationTarget(
-            page = when (type) {
-                NotificationEventType.OTA_SUCCESS, NotificationEventType.OTA_FAILED -> NotificationPage.OTA
-                NotificationEventType.RECONNECT_EXHAUSTED, NotificationEventType.DISCONNECTED ->
-                    NotificationPage.DETAIL
-                else -> NotificationPage.DIAGNOSTIC
-            },
-            deviceId = deviceId,
-        ),
+        target =
+            NotificationTarget(
+                page =
+                    when (type) {
+                        NotificationEventType.OTA_SUCCESS, NotificationEventType.OTA_FAILED -> NotificationPage.OTA
+                        NotificationEventType.RECONNECT_EXHAUSTED, NotificationEventType.DISCONNECTED ->
+                            NotificationPage.DETAIL
+                        else -> NotificationPage.DIAGNOSTIC
+                    },
+                deviceId = deviceId,
+            ),
         deviceId = deviceId,
     )
 
@@ -35,12 +36,14 @@ class NotificationCenterTest {
         val sent = mutableListOf<String>()
         val event = event()
 
-        val first = center.dispatch(event, enabled = true, canNotify = true) { _, body, _ ->
-            sent += body
-        }
-        val second = center.dispatch(event, enabled = true, canNotify = true) { _, body, _ ->
-            sent += body
-        }
+        val first =
+            center.dispatch(event, enabled = true, canNotify = true) { _, body, _ ->
+                sent += body
+            }
+        val second =
+            center.dispatch(event, enabled = true, canNotify = true) { _, body, _ ->
+                sent += body
+            }
 
         assertEquals(NotificationDecision.SHOW, first)
         assertEquals(NotificationDecision.DUPLICATE, second)
@@ -135,14 +138,15 @@ class NotificationCenterTest {
 
     @Test
     fun `通知策略受总开关约束`() {
-        val settings = com.valhalla.feature.settings.AppSettings(
-            notifyMasterEnabled = false,
-            notifyOtaEnabled = true,
-            notifyDisconnectEnabled = true,
-            notifyLowBatteryEnabled = true,
-            notifyReconnectEnabled = true,
-            notifyHealthEnabled = true,
-        )
+        val settings =
+            com.valhalla.feature.settings.AppSettings(
+                notifyMasterEnabled = false,
+                notifyOtaEnabled = true,
+                notifyDisconnectEnabled = true,
+                notifyLowBatteryEnabled = true,
+                notifyReconnectEnabled = true,
+                notifyHealthEnabled = true,
+            )
         assertFalse(NotificationPolicy.shouldNotifyOta(settings))
         assertFalse(NotificationPolicy.shouldNotifyDisconnect(settings))
         assertFalse(NotificationPolicy.shouldNotifyReconnectExhausted(settings))

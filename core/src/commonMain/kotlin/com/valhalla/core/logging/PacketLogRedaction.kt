@@ -28,7 +28,6 @@ import com.valhalla.core.protocol.Frame
  * [maskDeviceId]（可读截断）或 [hashDeviceId]（不可逆哈希）。
  */
 object PacketLogRedaction {
-
     /** 掩码字节：ASCII `*`，属于合法 UTF-8，长度不变。 */
     const val MASK_BYTE: Byte = 0x2A
 
@@ -60,7 +59,11 @@ object PacketLogRedaction {
      *
      * @return 脱敏后的新数组；没有敏感字段时返回 [payload] 本身。
      */
-    fun redactPayload(command: CommandType, isResponse: Boolean, payload: ByteArray): ByteArray {
+    fun redactPayload(
+        command: CommandType,
+        isResponse: Boolean,
+        payload: ByteArray,
+    ): ByteArray {
         if (payload.isEmpty()) return payload
         return when (command) {
             CommandType.AUTH ->
@@ -119,14 +122,20 @@ object PacketLogRedaction {
     }
 
     /** `str1`：1 字节长度 + 内容；返回下一个字段起点，越界返回 null。 */
-    private fun skipString1(payload: ByteArray, cursor: Int): Int? {
+    private fun skipString1(
+        payload: ByteArray,
+        cursor: Int,
+    ): Int? {
         val length = payload.getOrNull(cursor)?.toInt()?.and(0xFF) ?: return null
         val next = cursor + 1 + length
         return if (next <= payload.size) next else null
     }
 
     /** 掩码 `u16 长度 + 内容` 字段；返回下一个字段起点，越界返回 null。 */
-    private fun maskLengthPrefixed(payload: ByteArray, cursor: Int): Int? {
+    private fun maskLengthPrefixed(
+        payload: ByteArray,
+        cursor: Int,
+    ): Int? {
         if (cursor + 2 > payload.size) return null
         val length = readU16(payload, cursor)
         val start = cursor + 2
@@ -137,25 +146,33 @@ object PacketLogRedaction {
     }
 
     /** 协议的长度前缀为小端 u16。 */
-    private fun readU16(bytes: ByteArray, offset: Int): Int =
-        ((bytes[offset + 1].toInt() and 0xFF) shl 8) or (bytes[offset].toInt() and 0xFF)
+    private fun readU16(
+        bytes: ByteArray,
+        offset: Int,
+    ): Int = ((bytes[offset + 1].toInt() and 0xFF) shl 8) or (bytes[offset].toInt() and 0xFF)
 
-    private fun mask(bytes: ByteArray, from: Int, to: Int) {
+    private fun mask(
+        bytes: ByteArray,
+        from: Int,
+        to: Int,
+    ) {
         for (index in from until minOf(to, bytes.size)) {
             bytes[index] = MASK_BYTE
         }
     }
 
     /** 解析失败时的兜底：除首字节（命令相关状态/模式）外全部掩码。 */
-    private fun maskAll(payload: ByteArray): ByteArray =
-        payload.copyOf().also { mask(it, 1, it.size) }
+    private fun maskAll(payload: ByteArray): ByteArray = payload.copyOf().also { mask(it, 1, it.size) }
 
     /**
      * 设备标识可读截断：保留前 [keepPrefix] 个字符，其余替换为 `*`。
      *
      * 例：`AA:BB:CC:DD:EE:FF` → `AA:B**********`（长度不变）。
      */
-    fun maskDeviceId(deviceId: String, keepPrefix: Int = DEVICE_ID_PREFIX_BYTES): String {
+    fun maskDeviceId(
+        deviceId: String,
+        keepPrefix: Int = DEVICE_ID_PREFIX_BYTES,
+    ): String {
         if (deviceId.length <= keepPrefix) return deviceId.map { '*' }.joinToString("")
         return deviceId.take(keepPrefix) + "*".repeat(deviceId.length - keepPrefix)
     }

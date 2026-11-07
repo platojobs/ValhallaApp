@@ -13,7 +13,10 @@ actual fun rememberFirmwareSigningKeyPem(): String? {
     val context = LocalContext.current
     return remember(context) {
         runCatching {
-            context.assets.open(ASSET_PATH).bufferedReader().use { it.readText() }
+            context.assets
+                .open(ASSET_PATH)
+                .bufferedReader()
+                .use { it.readText() }
         }.getOrNull()?.takeIf { it.isNotBlank() }
             ?: BuildInjectedFirmwareKey.PEM.takeIf { it.isNotBlank() }
     }

@@ -6,7 +6,6 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class DeviceStateMachineTest {
-
     @Test
     fun `默认从未连接状态开始`() {
         val machine = DeviceStateMachine()

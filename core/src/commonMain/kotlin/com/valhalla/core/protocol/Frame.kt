@@ -23,7 +23,6 @@ class Frame(
     val isNotification: Boolean = false,
     val version: Byte = FrameCodec.PROTOCOL_VERSION,
 ) {
-
     init {
         require(sequence in 0..MAX_SEQUENCE) { "sequence 超出范围: $sequence" }
         require(payload.size <= FrameCodec.MAX_PAYLOAD_SIZE) {

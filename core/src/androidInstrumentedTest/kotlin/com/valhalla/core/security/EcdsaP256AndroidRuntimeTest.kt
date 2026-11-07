@@ -20,7 +20,6 @@ import org.junit.runner.RunWith
  */
 @RunWith(AndroidJUnit4::class)
 class EcdsaP256AndroidRuntimeTest {
-
     @Test
     fun sharedVectorsVerifyOnAndroidRuntime() {
         val verifier = EcdsaP256Verifier.fromPem(EcdsaTestVectors.PUBLIC_KEY_PEM)
@@ -40,10 +39,11 @@ class EcdsaP256AndroidRuntimeTest {
     fun tamperedDigestIsRejectedWithMismatch() {
         val verifier = EcdsaP256Verifier.fromPem(EcdsaTestVectors.PUBLIC_KEY_PEM)
         val vector = EcdsaTestVectors.VECTOR_1
-        val result = verifier.verifyDetailed(
-            EcdsaTestVectors.tamperedDigest(vector),
-            vector.signature(),
-        )
+        val result =
+            verifier.verifyDetailed(
+                EcdsaTestVectors.tamperedDigest(vector),
+                vector.signature(),
+            )
         val invalid = result as? EcdsaVerificationResult.Invalid
         if (invalid == null) {
             fail("篡改摘要不应验签通过")
@@ -56,10 +56,11 @@ class EcdsaP256AndroidRuntimeTest {
     fun tamperedSignatureIsRejected() {
         val verifier = EcdsaP256Verifier.fromPem(EcdsaTestVectors.PUBLIC_KEY_PEM)
         val vector = EcdsaTestVectors.VECTOR_1
-        val result = verifier.verifyDetailed(
-            vector.digest(),
-            EcdsaTestVectors.tamperedSignature(vector),
-        )
+        val result =
+            verifier.verifyDetailed(
+                vector.digest(),
+                EcdsaTestVectors.tamperedSignature(vector),
+            )
         assertTrue(result is EcdsaVerificationResult.Invalid)
     }
 
@@ -113,10 +114,11 @@ class EcdsaP256AndroidRuntimeTest {
                 FirmwareSignature(FirmwareSignatureAlgorithm.ECDSA_P256, vector.signature()),
             ),
         )
-        val mismatch = firmwareVerifier.verifyDetailed(
-            vector.digest(),
-            FirmwareSignature(FirmwareSignatureAlgorithm.HMAC_SHA256, vector.signature()),
-        )
+        val mismatch =
+            firmwareVerifier.verifyDetailed(
+                vector.digest(),
+                FirmwareSignature(FirmwareSignatureAlgorithm.HMAC_SHA256, vector.signature()),
+            )
         assertEquals(
             EcdsaFailureCode.ALGORITHM_MISMATCH,
             (mismatch as EcdsaVerificationResult.Invalid).code,

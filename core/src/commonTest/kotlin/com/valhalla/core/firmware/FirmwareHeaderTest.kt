@@ -8,7 +8,6 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class FirmwareHeaderTest {
-
     private val version = FirmwareVersion(1, 2, 3, 4, "release")
 
     private fun validHeader(
@@ -47,9 +46,10 @@ class FirmwareHeaderTest {
 
     @Test
     fun `文件头不足 104 字节视为截断`() {
-        val error = assertFailsWith<FirmwareException.Truncated> {
-            FirmwareHeader.decode(ByteArray(20))
-        }
+        val error =
+            assertFailsWith<FirmwareException.Truncated> {
+                FirmwareHeader.decode(ByteArray(20))
+            }
         assertEquals(FirmwareHeader.SIZE.toLong(), error.expectedBytes)
         assertEquals(20L, error.actualBytes)
     }
@@ -59,9 +59,10 @@ class FirmwareHeaderTest {
         val bytes = validHeader().encode()
         bytes[0] = 0x00
 
-        val error = assertFailsWith<FirmwareException.InvalidMagic> {
-            FirmwareHeader.decode(bytes)
-        }
+        val error =
+            assertFailsWith<FirmwareException.InvalidMagic> {
+                FirmwareHeader.decode(bytes)
+            }
         assertTrue(error.actual.contains("0x00"))
     }
 
@@ -79,13 +80,14 @@ class FirmwareHeaderTest {
 
     @Test
     fun `签名标志位可往返识别`() {
-        val header = FirmwareHeader(
-            version,
-            listOf("VH-100"),
-            payloadLength = 1024,
-            payloadCrc32 = 0x11223344,
-            hasSignature = true,
-        )
+        val header =
+            FirmwareHeader(
+                version,
+                listOf("VH-100"),
+                payloadLength = 1024,
+                payloadCrc32 = 0x11223344,
+                hasSignature = true,
+            )
         val decoded = FirmwareHeader.decode(header.encode())
 
         assertTrue(decoded.hasSignature)
@@ -158,7 +160,10 @@ class FirmwareHeaderTest {
         }
     }
 
-    private fun badField(offset: Int, value: Int): ByteArray {
+    private fun badField(
+        offset: Int,
+        value: Int,
+    ): ByteArray {
         val bytes = validHeader().encode()
         bytes[offset] = value.toByte()
         rewriteHeaderCrc(bytes)

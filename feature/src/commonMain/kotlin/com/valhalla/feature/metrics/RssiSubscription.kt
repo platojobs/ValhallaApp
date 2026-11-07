@@ -53,7 +53,6 @@ class RssiSubscriptionController(
     private val clockMillis: () -> Long = { Clock.System.now().toEpochMilliseconds() },
     private val failureThreshold: Int = DEFAULT_FAILURE_THRESHOLD,
 ) {
-
     init {
         require(failureThreshold > 0) { "failureThreshold 必须为正数" }
     }
@@ -65,13 +64,14 @@ class RssiSubscriptionController(
 
     /** 单次采样；返回 null 表示本次读取失败并已计入降级判断。 */
     suspend fun sampleOnce(): Int? {
-        val value = try {
-            readRssi()
-        } catch (cancellation: CancellationException) {
-            throw cancellation
-        } catch (_: Throwable) {
-            null
-        }
+        val value =
+            try {
+                readRssi()
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (_: Throwable) {
+                null
+            }
         if (value == null) {
             consecutiveFailures++
             val degraded = consecutiveFailures >= failureThreshold
@@ -103,7 +103,10 @@ class RssiSubscriptionController(
      *
      * @param periodMillis 采样周期，建议 1–10 秒；小于 1 秒按 1 秒执行，避免密集读取。
      */
-    suspend fun run(periodMillis: Long, shouldContinue: () -> Boolean) {
+    suspend fun run(
+        periodMillis: Long,
+        shouldContinue: () -> Boolean,
+    ) {
         val period = periodMillis.coerceAtLeast(MIN_PERIOD_MILLIS)
         mutableState.update { it.copy(enabled = true, active = true, degradedReason = null) }
         try {
@@ -120,13 +123,14 @@ class RssiSubscriptionController(
                     enabled = false,
                     active = false,
                     source = RssiSource.SNAPSHOT,
-                    degradedReason = when {
-                        current.degradedReason == RssiDegradedReason.READ_FAILED ->
-                            RssiDegradedReason.READ_FAILED
+                    degradedReason =
+                        when {
+                            current.degradedReason == RssiDegradedReason.READ_FAILED ->
+                                RssiDegradedReason.READ_FAILED
 
-                        disconnected -> RssiDegradedReason.DISCONNECTED
-                        else -> null
-                    },
+                            disconnected -> RssiDegradedReason.DISCONNECTED
+                            else -> null
+                        },
                 )
             }
         }

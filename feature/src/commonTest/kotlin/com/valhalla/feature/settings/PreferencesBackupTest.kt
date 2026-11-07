@@ -8,6 +8,7 @@ import com.valhalla.core.automation.InMemoryAutomationRuleStore
 import com.valhalla.core.config.ConfigPreset
 import com.valhalla.core.config.ConfigPresetRepository
 import com.valhalla.core.config.InMemoryConfigPresetStore
+import com.valhalla.core.storage.StorageMigrationStatus
 import com.valhalla.data.settings.AppSettingsStore
 import com.valhalla.data.settings.SettingsKeys
 import com.valhalla.feature.i18n.AppLanguageMode
@@ -22,13 +23,15 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class PreferencesBackupTest {
-
     private class MemorySettingsStore : AppSettingsStore {
         val values = mutableMapOf<String, String>()
 
         override fun read(key: String): String? = values[key]
 
-        override fun write(key: String, value: String?) {
+        override fun write(
+            key: String,
+            value: String?,
+        ) {
             if (value == null) values.remove(key) else values[key] = value
         }
     }
@@ -39,34 +42,37 @@ class PreferencesBackupTest {
         return presets to rules
     }
 
-    private fun backup() = PreferencesBackup(
-        language = AppLanguageMode.ENGLISH,
-        theme = ThemeMode.DARK,
-        reconnectMaxAttempts = 3,
-        reconnectMaxDelaySeconds = 20,
-        logCapacity = 300,
-        exportEntries = 100,
-        exportBytesKb = 256,
-        exportHexChars = 32,
-        presets = listOf(
-            ConfigPreset(
-                id = "p1",
-                name = "Daily",
-                values = mapOf("device_name" to "Valhalla", "led_enabled" to "true"),
-                createdAtMillis = 1,
-                lastUsedAtMillis = 2,
-            ),
-        ),
-        automationRules = listOf(
-            AutomationRule(
-                id = "r1",
-                trigger = AutomationTrigger.CONNECTED,
-                action = AutomationAction.READ_BATTERY,
-                order = 0,
-            ),
-        ),
-        onboardingCompleted = true,
-    )
+    private fun backup() =
+        PreferencesBackup(
+            language = AppLanguageMode.ENGLISH,
+            theme = ThemeMode.DARK,
+            reconnectMaxAttempts = 3,
+            reconnectMaxDelaySeconds = 20,
+            logCapacity = 300,
+            exportEntries = 100,
+            exportBytesKb = 256,
+            exportHexChars = 32,
+            presets =
+                listOf(
+                    ConfigPreset(
+                        id = "p1",
+                        name = "Daily",
+                        values = mapOf("device_name" to "Valhalla", "led_enabled" to "true"),
+                        createdAtMillis = 1,
+                        lastUsedAtMillis = 2,
+                    ),
+                ),
+            automationRules =
+                listOf(
+                    AutomationRule(
+                        id = "r1",
+                        trigger = AutomationTrigger.CONNECTED,
+                        action = AutomationAction.READ_BATTERY,
+                        order = 0,
+                    ),
+                ),
+            onboardingCompleted = true,
+        )
 
     @Test
     fun `导出只包含白名单字段且不含敏感项`() {
@@ -109,10 +115,12 @@ class PreferencesBackupTest {
 
     @Test
     fun `缺失字段回退默认并逐条提示`() {
-        val result = PreferencesBackupParser.parse(
-            """{"schema":"valhalla.preferences","schemaVersion":1}""",
-        )
+        val result =
+            PreferencesBackupParser.parse(
+                """{"schema":"valhalla.preferences","schemaVersion":1}""",
+            )
         assertIs<BackupParseResult.Success>(result)
+        assertEquals(StorageMigrationStatus.Migrated(1, 2), result.migrationStatus)
         val parsed = result.backup
         assertEquals(AppLanguageMode.SYSTEM, parsed.language)
         assertEquals(ThemeMode.SYSTEM, parsed.theme)
@@ -131,26 +139,27 @@ class PreferencesBackupTest {
 
     @Test
     fun `非法字段与非法预设规则条目被跳过`() {
-        val result = PreferencesBackupParser.parse(
-            """
-            {
-              "schema":"valhalla.preferences",
-              "schemaVersion":1,
-              "language":"KLINGON",
-              "theme":"DARK",
-              "reconnectMaxAttempts":99,
-              "logCapacity":12,
-              "exportEntries":100,
-              "exportBytesKb":256,
-              "exportHexChars":32,
-              "onboardingCompleted":true,
-              "presets":[{"id":"p1","name":"Daily","createdAtMillis":1,"lastUsedAtMillis":2,"values":{"device_name":"A"}},
-                         {"id":"","name":"bad"}],
-              "automationRules":[{"id":"r1","trigger":"CONNECTED","action":"READ_BATTERY","enabled":true,"order":0},
-                                 {"id":"r2","trigger":"UNKNOWN","action":"READ_BATTERY","enabled":true,"order":1}]
-            }
-            """.trimIndent(),
-        )
+        val result =
+            PreferencesBackupParser.parse(
+                """
+                {
+                  "schema":"valhalla.preferences",
+                  "schemaVersion":1,
+                  "language":"KLINGON",
+                  "theme":"DARK",
+                  "reconnectMaxAttempts":99,
+                  "logCapacity":12,
+                  "exportEntries":100,
+                  "exportBytesKb":256,
+                  "exportHexChars":32,
+                  "onboardingCompleted":true,
+                  "presets":[{"id":"p1","name":"Daily","createdAtMillis":1,"lastUsedAtMillis":2,"values":{"device_name":"A"}},
+                             {"id":"","name":"bad"}],
+                  "automationRules":[{"id":"r1","trigger":"CONNECTED","action":"READ_BATTERY","enabled":true,"order":0},
+                                     {"id":"r2","trigger":"UNKNOWN","action":"READ_BATTERY","enabled":true,"order":1}]
+                }
+                """.trimIndent(),
+            )
         assertIs<BackupParseResult.Success>(result)
         assertEquals(AppLanguageMode.SYSTEM, result.backup.language)
         assertEquals(ThemeMode.DARK, result.backup.theme)
@@ -170,14 +179,28 @@ class PreferencesBackupTest {
         )
         assertIs<BackupParseResult.Failure>(
             PreferencesBackupParser.parse(
-                """{"schema":"valhalla.preferences","schemaVersion":2}""",
+                """{"schema":"other","schemaVersion":1}""",
             ),
         )
         assertIs<BackupParseResult.Failure>(
             PreferencesBackupParser.parse(
-                """{"schema":"other","schemaVersion":1}""",
+                """{"schema":"valhalla.preferences"}""",
             ),
         )
+    }
+
+    @Test
+    fun `未来版本备份安全回退默认并禁止导入`() {
+        val result =
+            PreferencesBackupParser.parse(
+                """{"schema":"valhalla.preferences","schemaVersion":3}""",
+            )
+        assertIs<BackupParseResult.Success>(result)
+        assertFalse(result.canApply)
+        assertTrue(result.warning.orEmpty().contains("高于当前支持版本"))
+        assertEquals(StorageMigrationStatus.FutureVersion(3, 2), result.migrationStatus)
+        assertEquals(AppLanguageMode.SYSTEM, result.backup.language)
+        assertEquals(0, result.backup.presets.size)
     }
 
     @Test

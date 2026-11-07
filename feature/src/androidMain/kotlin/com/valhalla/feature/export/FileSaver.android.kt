@@ -21,12 +21,13 @@ private class PendingSave {
 actual fun rememberFileSaver(): FileSaver {
     val context = LocalContext.current
     val pending = remember { PendingSave() }
-    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        val deferred = pending.deferred
-        pending.deferred = null
-        val uri = if (result.resultCode == Activity.RESULT_OK) result.data?.data else null
-        deferred?.complete(uri)
-    }
+    val launcher =
+        rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            val deferred = pending.deferred
+            pending.deferred = null
+            val uri = if (result.resultCode == Activity.RESULT_OK) result.data?.data else null
+            deferred?.complete(uri)
+        }
 
     return remember(context, launcher, pending) {
         object : FileSaver {
@@ -36,14 +37,16 @@ actual fun rememberFileSaver(): FileSaver {
                 }
                 val deferred = CompletableDeferred<Uri?>()
                 pending.deferred = deferred
-                val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
-                    addCategory(Intent.CATEGORY_OPENABLE)
-                    type = file.mimeType
-                    putExtra(Intent.EXTRA_TITLE, file.fileName)
-                }
+                val intent =
+                    Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                        addCategory(Intent.CATEGORY_OPENABLE)
+                        type = file.mimeType
+                        putExtra(Intent.EXTRA_TITLE, file.fileName)
+                    }
                 launcher.launch(intent)
-                val uri = deferred.await()
-                    ?: return FileSaveResult(FileSaveStatus.CANCELLED)
+                val uri =
+                    deferred.await()
+                        ?: return FileSaveResult(FileSaveStatus.CANCELLED)
 
                 return withContext(Dispatchers.IO) {
                     try {

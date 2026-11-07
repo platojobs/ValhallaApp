@@ -7,8 +7,10 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class OtaQueueTest {
-
-    private fun target(deviceId: String, firmware: String = "fw-1") = OtaQueueTarget(
+    private fun target(
+        deviceId: String,
+        firmware: String = "fw-1",
+    ) = OtaQueueTarget(
         deviceId = deviceId,
         displayName = "设备 ${deviceId.takeLast(1)}",
         firmwareId = firmware,

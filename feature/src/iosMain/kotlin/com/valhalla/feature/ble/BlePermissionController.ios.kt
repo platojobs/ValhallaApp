@@ -9,12 +9,12 @@ import com.valhalla.data.ble.BleClient
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import platform.Foundation.NSNotificationCenter
+import platform.Foundation.NSOperationQueue
 import platform.Foundation.NSURL
 import platform.UIKit.UIApplication
 import platform.UIKit.UIApplicationDidBecomeActiveNotification
 import platform.UIKit.UIApplicationOpenSettingsURLString
-import platform.Foundation.NSNotificationCenter
-import platform.Foundation.NSOperationQueue
 
 /**
  * iOS CoreBluetooth 没有单独的「请求权限」API：首次创建 CBCentralManager 时系统自动弹窗，
@@ -30,13 +30,14 @@ actual fun rememberBlePermissionController(bleClient: BleClient): BlePermissionC
     }
 
     DisposableEffect(controller) {
-        val observer = NSNotificationCenter.defaultCenter.addObserverForName(
-            name = UIApplicationDidBecomeActiveNotification,
-            `object` = null,
-            queue = NSOperationQueue.mainQueue,
-        ) { _ ->
-            controller.refresh()
-        }
+        val observer =
+            NSNotificationCenter.defaultCenter.addObserverForName(
+                name = UIApplicationDidBecomeActiveNotification,
+                `object` = null,
+                queue = NSOperationQueue.mainQueue,
+            ) { _ ->
+                controller.refresh()
+            }
         onDispose {
             NSNotificationCenter.defaultCenter.removeObserver(observer)
         }
@@ -48,7 +49,6 @@ actual fun rememberBlePermissionController(bleClient: BleClient): BlePermissionC
 private class IosBlePermissionController(
     private val bleClient: BleClient,
 ) : BlePermissionController {
-
     private val mutableState = MutableStateFlow(toPermissionState(bleClient.adapterState.value))
     override val state: StateFlow<BlePermissionState> = mutableState.asStateFlow()
 
@@ -77,13 +77,14 @@ private class IosBlePermissionController(
     }
 }
 
-private fun toPermissionState(adapterState: BleAdapterState): BlePermissionState = when (adapterState) {
-    BleAdapterState.POWERED_ON,
-    BleAdapterState.POWERED_OFF,
-    BleAdapterState.RESETTING,
-    BleAdapterState.UNSUPPORTED,
-    -> BlePermissionState.GRANTED
+private fun toPermissionState(adapterState: BleAdapterState): BlePermissionState =
+    when (adapterState) {
+        BleAdapterState.POWERED_ON,
+        BleAdapterState.POWERED_OFF,
+        BleAdapterState.RESETTING,
+        BleAdapterState.UNSUPPORTED,
+        -> BlePermissionState.GRANTED
 
-    BleAdapterState.UNAUTHORIZED -> BlePermissionState.PERMANENTLY_DENIED
-    BleAdapterState.UNKNOWN -> BlePermissionState.NOT_REQUESTED
-}
+        BleAdapterState.UNAUTHORIZED -> BlePermissionState.PERMANENTLY_DENIED
+        BleAdapterState.UNKNOWN -> BlePermissionState.NOT_REQUESTED
+    }

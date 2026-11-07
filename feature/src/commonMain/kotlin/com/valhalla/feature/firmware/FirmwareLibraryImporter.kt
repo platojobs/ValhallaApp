@@ -12,12 +12,18 @@ import kotlinx.coroutines.withContext
 
 /** 一次固件库导入的用户可见结果。 */
 sealed interface FirmwareImportOutcome {
+    data class Imported(
+        val recordName: String,
+    ) : FirmwareImportOutcome
 
-    data class Imported(val recordName: String) : FirmwareImportOutcome
+    data class Duplicate(
+        val recordName: String,
+    ) : FirmwareImportOutcome
 
-    data class Duplicate(val recordName: String) : FirmwareImportOutcome
-
-    data class Rejected(val code: String, val detail: String?) : FirmwareImportOutcome
+    data class Rejected(
+        val code: String,
+        val detail: String?,
+    ) : FirmwareImportOutcome
 
     data object Cancelled : FirmwareImportOutcome
 }
@@ -33,32 +39,35 @@ class FirmwareLibraryImporter(
     private val picker: FirmwarePicker,
     private val library: FirmwareLibraryRepository,
 ) {
-
     suspend fun importOne(): FirmwareImportOutcome {
-        val picked = try {
-            picker.pickFirmware()
-        } catch (cancellation: CancellationException) {
-            throw cancellation
-        } catch (error: Throwable) {
-            return FirmwareImportOutcome.Rejected(
-                code = "LIBRARY_PICK_FAILED",
-                detail = error.message,
-            )
-        } ?: return FirmwareImportOutcome.Cancelled
+        val picked =
+            try {
+                picker.pickFirmware()
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (error: Throwable) {
+                return FirmwareImportOutcome.Rejected(
+                    code = "LIBRARY_PICK_FAILED",
+                    detail = error.message,
+                )
+            } ?: return FirmwareImportOutcome.Cancelled
 
-        val sourcePath = picked.sourcePath
-            ?: return FirmwareImportOutcome.Rejected(
-                code = "LIBRARY_REFERENCE_UNSUPPORTED",
-                detail = picked.name,
-            ).also { runCatching { picked.source.close() } }
+        val sourcePath =
+            picked.sourcePath
+                ?: return FirmwareImportOutcome
+                    .Rejected(
+                        code = "LIBRARY_REFERENCE_UNSUPPORTED",
+                        detail = picked.name,
+                    ).also { runCatching { picked.source.close() } }
 
         var parsed: FirmwarePackage? = null
         return try {
-            val checksums = withContext(Dispatchers.Default) {
-                val packageUnderTest = FirmwareParser.parse(picked.name, picked.source)
-                parsed = packageUnderTest
-                packageUnderTest to packageUnderTest.scanPayload()
-            }
+            val checksums =
+                withContext(Dispatchers.Default) {
+                    val packageUnderTest = FirmwareParser.parse(picked.name, picked.source)
+                    parsed = packageUnderTest
+                    packageUnderTest to packageUnderTest.scanPayload()
+                }
             val (firmware, scan) = checksums
             if (scan.crc32 != firmware.payloadCrc32) {
                 FirmwareImportOutcome.Rejected(
@@ -67,17 +76,18 @@ class FirmwareLibraryImporter(
                 )
             } else {
                 when (
-                    val result = library.import(
-                        FirmwareLibraryImportCandidate(
-                            fileName = picked.name,
-                            version = firmware.version.toString(),
-                            channel = firmware.version.channel,
-                            modelWhitelist = firmware.header.targetModels,
-                            totalBytes = firmware.payloadLength,
-                            crc32 = scan.crc32,
-                            sourcePath = sourcePath,
-                        ),
-                    )
+                    val result =
+                        library.import(
+                            FirmwareLibraryImportCandidate(
+                                fileName = picked.name,
+                                version = firmware.version.toString(),
+                                channel = firmware.version.channel,
+                                modelWhitelist = firmware.header.targetModels,
+                                totalBytes = firmware.payloadLength,
+                                crc32 = scan.crc32,
+                                sourcePath = sourcePath,
+                            ),
+                        )
                 ) {
                     is FirmwareLibraryImportResult.Imported ->
                         FirmwareImportOutcome.Imported(result.record.displayName)

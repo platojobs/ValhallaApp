@@ -26,7 +26,6 @@ actual fun rememberFileSaver(): FileSaver = remember { IosFileSaver() }
  */
 @OptIn(ExperimentalForeignApi::class)
 private class IosFileSaver : FileSaver {
-
     private var delegate: ExportDelegate? = null
 
     override suspend fun save(file: SaveableFile): FileSaveResult {
@@ -61,8 +60,8 @@ private class IosFileSaver : FileSaver {
 /** `UIDocumentPickerViewController` 回调包装；选中文档位置即视为保存成功。 */
 private class ExportDelegate(
     private val onResult: (Boolean) -> Unit,
-) : NSObject(), UIDocumentPickerDelegateProtocol {
-
+) : NSObject(),
+    UIDocumentPickerDelegateProtocol {
     override fun documentPicker(
         controller: UIDocumentPickerViewController,
         didPickDocumentsAtURLs: List<*>,
@@ -86,14 +85,18 @@ private fun topViewController(): UIViewController? {
 
 /** 把 UTF-8 文本写成 NSData 再落盘（Kotlin String 不能直接调用 NSString 的 writeToFile）。 */
 @OptIn(ExperimentalForeignApi::class)
-private fun writeTextFile(content: String, path: String): Boolean {
+private fun writeTextFile(
+    content: String,
+    path: String,
+): Boolean {
     val bytes = content.encodeToByteArray()
-    val data = if (bytes.isEmpty()) {
-        NSData()
-    } else {
-        bytes.usePinned { pinned ->
-            NSData.dataWithBytes(pinned.addressOf(0), bytes.size.toULong())
+    val data =
+        if (bytes.isEmpty()) {
+            NSData()
+        } else {
+            bytes.usePinned { pinned ->
+                NSData.dataWithBytes(pinned.addressOf(0), bytes.size.toULong())
+            }
         }
-    }
     return data.writeToFile(path, atomically = true)
 }

@@ -17,9 +17,13 @@ import java.security.spec.X509EncodedKeySpec
  * 不使用 `SHA256withECDSA`，避免对已是 SHA-256 的摘要再次哈希。
  * Android 的 `KeyFactory("EC")` 与 `CertificateFactory("X.509")` 自 API 1 起可用。
  */
-private class AndroidEcdsaPublicKey(private val key: PublicKey) : PlatformEcdsaKey {
-
-    override fun verify(digest: ByteArray, signatureDer: ByteArray): Boolean {
+private class AndroidEcdsaPublicKey(
+    private val key: PublicKey,
+) : PlatformEcdsaKey {
+    override fun verify(
+        digest: ByteArray,
+        signatureDer: ByteArray,
+    ): Boolean {
         val verifier = Signature.getInstance("NONEwithECDSA")
         verifier.initVerify(key)
         verifier.update(digest)
@@ -28,41 +32,45 @@ private class AndroidEcdsaPublicKey(private val key: PublicKey) : PlatformEcdsaK
 }
 
 internal actual fun platformLoadEcdsaKeyFromSpki(der: ByteArray): PlatformEcdsaKey {
-    val key = try {
-        KeyFactory.getInstance("EC").generatePublic(X509EncodedKeySpec(der))
-    } catch (error: GeneralSecurityException) {
-        throw EcdsaKeyException(
-            EcdsaFailureCode.PUBLIC_KEY_PARSE,
-            "SPKI 公钥解析失败：${error.message ?: error::class.simpleName}",
-            error,
-        )
-    }
+    val key =
+        try {
+            KeyFactory.getInstance("EC").generatePublic(X509EncodedKeySpec(der))
+        } catch (error: GeneralSecurityException) {
+            throw EcdsaKeyException(
+                EcdsaFailureCode.PUBLIC_KEY_PARSE,
+                "SPKI 公钥解析失败：${error.message ?: error::class.simpleName}",
+                error,
+            )
+        }
     requireP256(key)
     return AndroidEcdsaPublicKey(key)
 }
 
 internal actual fun platformLoadEcdsaKeyFromCertificate(der: ByteArray): PlatformEcdsaKey {
-    val certificate = try {
-        CertificateFactory.getInstance("X.509")
-            .generateCertificate(ByteArrayInputStream(der)) as X509Certificate
-    } catch (error: GeneralSecurityException) {
-        throw EcdsaKeyException(
-            EcdsaFailureCode.PUBLIC_KEY_PARSE,
-            "X.509 证书解析失败：${error.message ?: error::class.simpleName}",
-            error,
-        )
-    }
+    val certificate =
+        try {
+            CertificateFactory
+                .getInstance("X.509")
+                .generateCertificate(ByteArrayInputStream(der)) as X509Certificate
+        } catch (error: GeneralSecurityException) {
+            throw EcdsaKeyException(
+                EcdsaFailureCode.PUBLIC_KEY_PARSE,
+                "X.509 证书解析失败：${error.message ?: error::class.simpleName}",
+                error,
+            )
+        }
     val key = certificate.publicKey
     requireP256(key)
     return AndroidEcdsaPublicKey(key)
 }
 
 private fun requireP256(key: PublicKey) {
-    val params = (key as? ECPublicKey)?.params
-        ?: throw EcdsaKeyException(
-            EcdsaFailureCode.PUBLIC_KEY_UNSUPPORTED,
-            "公钥不是 EC 类型：${key.algorithm}",
-        )
+    val params =
+        (key as? ECPublicKey)?.params
+            ?: throw EcdsaKeyException(
+                EcdsaFailureCode.PUBLIC_KEY_UNSUPPORTED,
+                "公钥不是 EC 类型：${key.algorithm}",
+            )
     val fieldBits = params.curve.field.fieldSize
     val orderBits = params.order.bitLength()
     if (fieldBits != 256 || orderBits != 256) {

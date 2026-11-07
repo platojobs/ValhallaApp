@@ -9,7 +9,6 @@ import com.valhalla.core.protocol.CommandType
  * 对应指令的应答模型见 [MessageCodec.decodeResponse]。
  */
 sealed class DeviceRequest {
-
     abstract val command: CommandType
 
     fun encode(): ByteArray {
@@ -25,7 +24,6 @@ sealed class DeviceRequest {
  * 强类型应答模型。payload 第 0 字节固定为状态码，其后为各指令自定义的应答字段。
  */
 sealed class DeviceResponse {
-
     abstract val command: CommandType
 
     abstract val status: DeviceStatus
@@ -53,7 +51,6 @@ class ErrorResponse(
     override val status: DeviceStatus,
     val detail: String? = null,
 ) : DeviceResponse() {
-
     override fun encodeBody(writer: PayloadWriter) {
         if (!detail.isNullOrEmpty()) {
             writer.bytes(detail.encodeToByteArray())
@@ -67,7 +64,6 @@ class ErrorResponse(
  * 设备主动通知帧。通知没有状态码字节，payload 全部为业务字段。
  */
 sealed class DeviceNotification {
-
     abstract val command: CommandType
 
     fun encode(): ByteArray {

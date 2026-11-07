@@ -7,7 +7,6 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class NotificationPolicyTest {
-
     @Test
     fun `提醒开关默认全部关闭`() {
         val defaults = AppSettings.DEFAULTS

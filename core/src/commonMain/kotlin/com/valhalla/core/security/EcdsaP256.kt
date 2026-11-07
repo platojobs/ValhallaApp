@@ -9,7 +9,9 @@ import kotlin.io.encoding.ExperimentalEncodingApi
  * 分类粒度按「可诊断原因」划分，调用方可以据此展示不同的排障建议，
  * 而不是笼统的「验签失败」。
  */
-enum class EcdsaFailureCode(val label: String) {
+enum class EcdsaFailureCode(
+    val label: String,
+) {
     /** PEM/DER 信封无法解析（Base64 损坏、PEM 头尾缺失、ASN.1 结构错误）。 */
     PUBLIC_KEY_PARSE("公钥解析失败"),
 
@@ -41,7 +43,6 @@ class EcdsaKeyException(
 
 /** 验签结果：成功或带分类的失败。 */
 sealed interface EcdsaVerificationResult {
-
     data object Valid : EcdsaVerificationResult
 
     data class Invalid(
@@ -51,7 +52,9 @@ sealed interface EcdsaVerificationResult {
 }
 
 /** 签名在 DER（X9.62）与原始 `r || s` 之间的转换。 */
-class EcdsaSignatureFormatException(message: String) : IllegalArgumentException(message)
+class EcdsaSignatureFormatException(
+    message: String,
+) : IllegalArgumentException(message)
 
 /**
  * P-256 签名编解码。
@@ -63,7 +66,6 @@ class EcdsaSignatureFormatException(message: String) : IllegalArgumentException(
  * P-256 的 r、s 各最多 32 字节；DER 中允许 33 字节（首位是 0x00 正号补位）。
  */
 object EcdsaSignatureCodec {
-
     const val COORDINATE_BYTES: Int = 32
 
     /** 结构是否合法；不抛异常，供失败分类使用。 */
@@ -117,7 +119,10 @@ object EcdsaSignatureCodec {
     }
 
     /** 读取长度字段，返回 (内容长度, 内容起点)。 */
-    private fun readLength(bytes: ByteArray, offset: Int): Pair<Int, Int> {
+    private fun readLength(
+        bytes: ByteArray,
+        offset: Int,
+    ): Pair<Int, Int> {
         if (offset >= bytes.size) throw EcdsaSignatureFormatException("长度字段缺失")
         val first = bytes[offset].toInt() and 0xFF
         if (first < 0x80) return first to (offset + 1)
@@ -132,7 +137,11 @@ object EcdsaSignatureCodec {
     }
 
     /** 读取 INTEGER，返回 (去前导零后的坐标字节, 下一个字段起点)。 */
-    private fun readInteger(bytes: ByteArray, offset: Int, limit: Int): Pair<ByteArray, Int> {
+    private fun readInteger(
+        bytes: ByteArray,
+        offset: Int,
+        limit: Int,
+    ): Pair<ByteArray, Int> {
         if (offset + 2 > limit) throw EcdsaSignatureFormatException("INTEGER 头不完整")
         if (bytes[offset].toInt() != INTEGER_TAG) {
             throw EcdsaSignatureFormatException("预期 INTEGER，实际 0x${bytes[offset].toString(16)}")
@@ -146,20 +155,21 @@ object EcdsaSignatureCodec {
         if (content.size > COORDINATE_BYTES + 1) {
             throw EcdsaSignatureFormatException("坐标长度 ${content.size} 超过 P-256 上限")
         }
-        val coordinate = when {
-            content[0].toInt() == 0 -> {
-                if (content.size == 1) {
-                    throw EcdsaSignatureFormatException("INTEGER 为零")
+        val coordinate =
+            when {
+                content[0].toInt() == 0 -> {
+                    if (content.size == 1) {
+                        throw EcdsaSignatureFormatException("INTEGER 为零")
+                    }
+                    if (content[1].toInt() and 0x80 == 0) {
+                        throw EcdsaSignatureFormatException("INTEGER 存在非最小前导零")
+                    }
+                    content.copyOfRange(1, content.size)
                 }
-                if (content[1].toInt() and 0x80 == 0) {
-                    throw EcdsaSignatureFormatException("INTEGER 存在非最小前导零")
-                }
-                content.copyOfRange(1, content.size)
-            }
 
-            content[0].toInt() and 0x80 != 0 -> throw EcdsaSignatureFormatException("INTEGER 为负")
-            else -> content
-        }
+                content[0].toInt() and 0x80 != 0 -> throw EcdsaSignatureFormatException("INTEGER 为负")
+                else -> content
+            }
         if (coordinate.size > COORDINATE_BYTES) {
             throw EcdsaSignatureFormatException("坐标长度 ${coordinate.size} 超过 32 字节")
         }
@@ -175,11 +185,12 @@ object EcdsaSignatureCodec {
         return byteArrayOf(INTEGER_TAG.toByte()) + encodeLength(content.size) + content
     }
 
-    private fun encodeLength(length: Int): ByteArray = when {
-        length < 0x80 -> byteArrayOf(length.toByte())
-        length < 0x100 -> byteArrayOf(0x81.toByte(), length.toByte())
-        else -> byteArrayOf(0x82.toByte(), (length shr 8).toByte(), (length and 0xFF).toByte())
-    }
+    private fun encodeLength(length: Int): ByteArray =
+        when {
+            length < 0x80 -> byteArrayOf(length.toByte())
+            length < 0x100 -> byteArrayOf(0x81.toByte(), length.toByte())
+            else -> byteArrayOf(0x82.toByte(), (length shr 8).toByte(), (length and 0xFF).toByte())
+        }
 }
 
 /**
@@ -190,7 +201,6 @@ object EcdsaSignatureCodec {
  * 供 iOS actual 使用；JVM/Android 直接交给 `KeyFactory`，不需要该结果。
  */
 object EcdsaPublicKeyEncoding {
-
     /** P-256 公钥原始点长度：0x04 + 32 字节 X + 32 字节 Y。 */
     const val P256_POINT_BYTES: Int = 65
 
@@ -212,7 +222,11 @@ object EcdsaPublicKeyEncoding {
     }
 
     /** 返回 (内容长度, 内容起点, 内容终点)。 */
-    private fun readSequence(bytes: ByteArray, offset: Int, limit: Int): Triple<Int, Int, Int>? {
+    private fun readSequence(
+        bytes: ByteArray,
+        offset: Int,
+        limit: Int,
+    ): Triple<Int, Int, Int>? {
         if (offset >= limit || bytes[offset].toInt() != 0x30) return null
         val lengthInfo = readLength(bytes, offset + 1, limit) ?: return null
         val start = lengthInfo.second
@@ -221,7 +235,11 @@ object EcdsaPublicKeyEncoding {
         return Triple(lengthInfo.first, start, end)
     }
 
-    private fun readLength(bytes: ByteArray, offset: Int, limit: Int): Pair<Int, Int>? {
+    private fun readLength(
+        bytes: ByteArray,
+        offset: Int,
+        limit: Int,
+    ): Pair<Int, Int>? {
         if (offset >= limit) return null
         val first = bytes[offset].toInt() and 0xFF
         if (first < 0x80) return first to (offset + 1)
@@ -241,8 +259,10 @@ object EcdsaPublicKeyEncoding {
  * 只暴露「用已加载的公钥验签」，密钥解析与曲线校验在各平台 actual 内完成。
  */
 internal interface PlatformEcdsaKey {
-
-    fun verify(digest: ByteArray, signatureDer: ByteArray): Boolean
+    fun verify(
+        digest: ByteArray,
+        signatureDer: ByteArray,
+    ): Boolean
 }
 
 /** 从 SPKI（X.509 SubjectPublicKeyInfo）DER 加载公钥。 */
@@ -262,7 +282,6 @@ class EcdsaP256Verifier private constructor(
     /** 注入来源，仅用于日志/诊断，不包含密钥内容。 */
     val source: Source,
 ) {
-
     enum class Source {
         PEM_PUBLIC_KEY,
         PEM_CERTIFICATE,
@@ -273,7 +292,10 @@ class EcdsaP256Verifier private constructor(
     /** 算法标识；与协议中的 `ECDSA_P256`（0x02）对应。 */
     val algorithm: String = ALGORITHM
 
-    fun verifyDetailed(digest: ByteArray, signatureDer: ByteArray): EcdsaVerificationResult {
+    fun verifyDetailed(
+        digest: ByteArray,
+        signatureDer: ByteArray,
+    ): EcdsaVerificationResult {
         if (digest.size != 32) {
             return EcdsaVerificationResult.Invalid(
                 EcdsaFailureCode.DIGEST_LENGTH,
@@ -304,8 +326,10 @@ class EcdsaP256Verifier private constructor(
     }
 
     /** 便捷布尔入口；需要失败原因时用 [verifyDetailed]。 */
-    fun verify(digest: ByteArray, signatureDer: ByteArray): Boolean =
-        verifyDetailed(digest, signatureDer) is EcdsaVerificationResult.Valid
+    fun verify(
+        digest: ByteArray,
+        signatureDer: ByteArray,
+    ): Boolean = verifyDetailed(digest, signatureDer) is EcdsaVerificationResult.Valid
 
     companion object {
         const val ALGORITHM: String = "ECDSA-P256"
@@ -322,17 +346,19 @@ class EcdsaP256Verifier private constructor(
          * 私钥 PEM（`PRIVATE KEY`）会被明确拒绝，避免误把私钥打进客户端。
          */
         fun fromPem(pem: String): EcdsaP256Verifier {
-            val block = PemBlock.parse(pem)
-                ?: throw EcdsaKeyException(EcdsaFailureCode.PUBLIC_KEY_PARSE, "未找到 PEM 头尾")
-            val der = try {
-                Base64.decode(block.body)
-            } catch (error: IllegalArgumentException) {
-                throw EcdsaKeyException(
-                    EcdsaFailureCode.PUBLIC_KEY_PARSE,
-                    "PEM Base64 解码失败：${error.message}",
-                    error,
-                )
-            }
+            val block =
+                PemBlock.parse(pem)
+                    ?: throw EcdsaKeyException(EcdsaFailureCode.PUBLIC_KEY_PARSE, "未找到 PEM 头尾")
+            val der =
+                try {
+                    Base64.decode(block.body)
+                } catch (error: IllegalArgumentException) {
+                    throw EcdsaKeyException(
+                        EcdsaFailureCode.PUBLIC_KEY_PARSE,
+                        "PEM Base64 解码失败：${error.message}",
+                        error,
+                    )
+                }
             return when (block.label) {
                 "PUBLIC KEY" -> fromDer(der, Source.PEM_PUBLIC_KEY)
                 "CERTIFICATE" -> fromCertificateDer(der, Source.PEM_CERTIFICATE)
@@ -350,11 +376,12 @@ class EcdsaP256Verifier private constructor(
 
         /** DER 自动识别：优先 SPKI，失败后按 X.509 证书重试。 */
         fun fromDer(der: ByteArray): EcdsaP256Verifier {
-            val spkiError = try {
-                return fromDer(der, Source.DER_PUBLIC_KEY)
-            } catch (error: EcdsaKeyException) {
-                error
-            }
+            val spkiError =
+                try {
+                    return fromDer(der, Source.DER_PUBLIC_KEY)
+                } catch (error: EcdsaKeyException) {
+                    error
+                }
             return try {
                 fromCertificateDer(der, Source.DER_CERTIFICATE)
             } catch (certificate: EcdsaKeyException) {
@@ -366,43 +393,52 @@ class EcdsaP256Verifier private constructor(
             }
         }
 
-        fun fromDer(der: ByteArray, source: Source): EcdsaP256Verifier {
-            val key = try {
-                platformLoadEcdsaKeyFromSpki(der)
-            } catch (error: EcdsaKeyException) {
-                throw error
-            } catch (error: Throwable) {
-                throw EcdsaKeyException(
-                    EcdsaFailureCode.PUBLIC_KEY_PARSE,
-                    "公钥加载失败：${error.message ?: error::class.simpleName}",
-                    error,
-                )
-            }
+        fun fromDer(
+            der: ByteArray,
+            source: Source,
+        ): EcdsaP256Verifier {
+            val key =
+                try {
+                    platformLoadEcdsaKeyFromSpki(der)
+                } catch (error: EcdsaKeyException) {
+                    throw error
+                } catch (error: Throwable) {
+                    throw EcdsaKeyException(
+                        EcdsaFailureCode.PUBLIC_KEY_PARSE,
+                        "公钥加载失败：${error.message ?: error::class.simpleName}",
+                        error,
+                    )
+                }
             return EcdsaP256Verifier(key, source)
         }
 
-        fun fromCertificateDer(der: ByteArray, source: Source): EcdsaP256Verifier {
-            val key = try {
-                platformLoadEcdsaKeyFromCertificate(der)
-            } catch (error: EcdsaKeyException) {
-                throw error
-            } catch (error: Throwable) {
-                throw EcdsaKeyException(
-                    EcdsaFailureCode.PUBLIC_KEY_PARSE,
-                    "证书加载失败：${error.message ?: error::class.simpleName}",
-                    error,
-                )
-            }
+        fun fromCertificateDer(
+            der: ByteArray,
+            source: Source,
+        ): EcdsaP256Verifier {
+            val key =
+                try {
+                    platformLoadEcdsaKeyFromCertificate(der)
+                } catch (error: EcdsaKeyException) {
+                    throw error
+                } catch (error: Throwable) {
+                    throw EcdsaKeyException(
+                        EcdsaFailureCode.PUBLIC_KEY_PARSE,
+                        "证书加载失败：${error.message ?: error::class.simpleName}",
+                        error,
+                    )
+                }
             return EcdsaP256Verifier(key, source)
         }
     }
 }
 
 /** PEM 单块解析：只接受一个头尾完整、标签一致的块。 */
-internal data class PemBlock(val label: String, val body: String) {
-
+internal data class PemBlock(
+    val label: String,
+    val body: String,
+) {
     companion object {
-
         @OptIn(ExperimentalEncodingApi::class)
         fun parse(pem: String): PemBlock? {
             val normalized = pem.replace("\r\n", "\n").replace('\r', '\n')
@@ -414,12 +450,17 @@ internal data class PemBlock(val label: String, val body: String) {
             val label = beginLine.removePrefix(BEGIN_PREFIX).removeSuffix(DASHES).trim()
             val endIndex = lines.indexOfFirst { it.trim() == "$END_PREFIX$label$DASHES" }
             if (endIndex <= beginIndex) return null
-            val body = lines.subList(beginIndex + 1, endIndex)
-                .joinToString(separator = "")
-                .filterNot { it.isWhitespace() }
+            val body =
+                lines
+                    .subList(beginIndex + 1, endIndex)
+                    .joinToString(separator = "")
+                    .filterNot { it.isWhitespace() }
             if (body.isEmpty()) return null
             // 只做「是否可解码」校验，真正的 DER 解析交给平台。
-            return runCatching { Base64.decode(body); PemBlock(label, body) }.getOrNull()
+            return runCatching {
+                Base64.decode(body)
+                PemBlock(label, body)
+            }.getOrNull()
         }
 
         private const val BEGIN_PREFIX = "-----BEGIN "

@@ -7,7 +7,6 @@ import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
 class StringsCompletenessTest {
-
     private val placeholder = Regex("\\{([a-zA-Z0-9_]+)}")
     private val cjk = Regex("[\\u4e00-\\u9fff]")
 
@@ -80,8 +79,7 @@ class StringsCompletenessTest {
             .filter {
                 (it.name.endsWith("_FAILED") && it != StringKey.OTA_OUTCOME_FAILED) ||
                     it.name.startsWith("OTA_REASON")
-            }
-            .forEach { key ->
+            }.forEach { key ->
                 val zh = AppStrings.get(ResolvedLanguage.CHINESE, key)
                 assertTrue(
                     actionable.any { zh.contains(it) },
@@ -103,10 +101,11 @@ class StringsCompletenessTest {
 
     @Test
     fun `嵌套消息会先本地化再填充`() {
-        val message = UiMessage(
-            StringKey.ERROR_PREFIX,
-            nested = mapOf("detail" to UiMessage.of(StringKey.DASH)),
-        )
+        val message =
+            UiMessage(
+                StringKey.ERROR_PREFIX,
+                nested = mapOf("detail" to UiMessage.of(StringKey.DASH)),
+            )
         assertEquals("错误：—", StringResolver(ResolvedLanguage.CHINESE).render(message))
         assertEquals("Error: —", StringResolver(ResolvedLanguage.ENGLISH).render(message))
     }

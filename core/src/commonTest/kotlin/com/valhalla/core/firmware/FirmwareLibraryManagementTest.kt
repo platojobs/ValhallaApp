@@ -9,7 +9,6 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class FirmwareLibraryManagementTest {
-
     private fun record(
         version: String = "1.0.0 (build 0, release)",
         model: List<String> = listOf("V-1"),
@@ -93,32 +92,36 @@ class FirmwareLibraryManagementTest {
     fun `适用性复用既有型号与版本规则`() {
         val current = FirmwareVersion(major = 1, minor = 0, patch = 0, build = 0, channel = "release")
 
-        val applicable = FirmwareApplicabilityEvaluator.evaluate(
-            record(version = "2.0.0 (build 0, release)"),
-            currentModel = "V-1",
-            currentVersion = current,
-        )
+        val applicable =
+            FirmwareApplicabilityEvaluator.evaluate(
+                record(version = "2.0.0 (build 0, release)"),
+                currentModel = "V-1",
+                currentVersion = current,
+            )
         assertTrue(applicable.applicable)
 
-        val rollback = FirmwareApplicabilityEvaluator.evaluate(
-            record(version = "0.9.0 (build 0, release)"),
-            currentModel = "V-1",
-            currentVersion = current,
-        )
+        val rollback =
+            FirmwareApplicabilityEvaluator.evaluate(
+                record(version = "0.9.0 (build 0, release)"),
+                currentModel = "V-1",
+                currentVersion = current,
+            )
         assertEquals(FirmwareApplicabilityReason.VERSION_ROLLBACK, rollback.reason)
 
-        val wrongModel = FirmwareApplicabilityEvaluator.evaluate(
-            record(version = "2.0.0 (build 0, release)"),
-            currentModel = "X-9",
-            currentVersion = current,
-        )
+        val wrongModel =
+            FirmwareApplicabilityEvaluator.evaluate(
+                record(version = "2.0.0 (build 0, release)"),
+                currentModel = "X-9",
+                currentVersion = current,
+            )
         assertEquals(FirmwareApplicabilityReason.MODEL_MISMATCH, wrongModel.reason)
 
-        val unknownVersionFormat = FirmwareApplicabilityEvaluator.evaluate(
-            record(version = "nightly"),
-            currentModel = "V-1",
-            currentVersion = current,
-        )
+        val unknownVersionFormat =
+            FirmwareApplicabilityEvaluator.evaluate(
+                record(version = "nightly"),
+                currentModel = "V-1",
+                currentVersion = current,
+            )
         assertEquals(FirmwareApplicabilityReason.VERSION_UNPARSEABLE, unknownVersionFormat.reason)
     }
 
@@ -145,6 +148,5 @@ class FirmwareLibraryManagementTest {
         assertEquals(0, repo.count())
     }
 
-    private fun FirmwareLibraryImportResult.recordId(): String =
-        (this as FirmwareLibraryImportResult.Imported).record.id
+    private fun FirmwareLibraryImportResult.recordId(): String = (this as FirmwareLibraryImportResult.Imported).record.id
 }

@@ -17,11 +17,11 @@ class PacketRecordingFrameLink(
     private val delegate: FrameLink,
     private val packetLog: InMemoryPacketLog,
 ) : FrameLink {
-
-    override val incoming: Flow<Frame> = delegate.incoming.map { frame ->
-        packetLog.record(FrameDirection.RX, frame)
-        frame
-    }
+    override val incoming: Flow<Frame> =
+        delegate.incoming.map { frame ->
+            packetLog.record(FrameDirection.RX, frame)
+            frame
+        }
 
     override suspend fun send(frame: Frame) {
         packetLog.record(FrameDirection.TX, frame)

@@ -1,5 +1,6 @@
 package com.valhalla.core.profile
 
+import com.valhalla.core.storage.StorageMigrationStatus
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
 
@@ -24,13 +25,16 @@ class DeviceProfileRepository(
     private val maxOtaHistory: Int = DEFAULT_MAX_OTA_HISTORY,
     private val clockMillis: () -> Long = { Clock.System.now().toEpochMilliseconds() },
 ) {
-
     init {
         require(maxProfiles > 0) { "maxProfiles 必须大于 0" }
         require(maxOtaHistory > 0) { "maxOtaHistory 必须大于 0" }
     }
 
     private var cache: MutableList<DeviceProfile>? = null
+
+    /** 最近一次解码的 schema 状态；未来版本/损坏时为空档案。 */
+    var lastMigrationStatus: StorageMigrationStatus = StorageMigrationStatus.Current
+        private set
 
     /** 按最近连接时间倒序返回全部档案；时间相同按设备 id 升序，保证结果稳定。 */
     fun list(): List<DeviceProfile> = all().sortedWith(PROFILE_ORDER)
@@ -66,17 +70,18 @@ class DeviceProfileRepository(
         lastConnectedAtEpochMillis: Long = clockMillis(),
     ): DeviceProfile {
         val existing = all().firstOrNull { it.deviceId == deviceId }
-        val updated = DeviceProfile(
-            deviceId = deviceId,
-            displayName = displayName ?: existing?.displayName,
-            vendor = vendor ?: existing?.vendor,
-            model = model ?: existing?.model,
-            lastConnectedAtEpochMillis = lastConnectedAtEpochMillis,
-            lastKnownFirmwareVersion = existing?.lastKnownFirmwareVersion,
-            lastKnownBatteryPercent = existing?.lastKnownBatteryPercent,
-            lastKnownCharging = existing?.lastKnownCharging,
-            otaHistory = existing?.otaHistory.orEmpty(),
-        )
+        val updated =
+            DeviceProfile(
+                deviceId = deviceId,
+                displayName = displayName ?: existing?.displayName,
+                vendor = vendor ?: existing?.vendor,
+                model = model ?: existing?.model,
+                lastConnectedAtEpochMillis = lastConnectedAtEpochMillis,
+                lastKnownFirmwareVersion = existing?.lastKnownFirmwareVersion,
+                lastKnownBatteryPercent = existing?.lastKnownBatteryPercent,
+                lastKnownCharging = existing?.lastKnownCharging,
+                otaHistory = existing?.otaHistory.orEmpty(),
+            )
         replace(updated)
         persist()
         return updated
@@ -97,37 +102,43 @@ class DeviceProfileRepository(
         charging: Boolean? = null,
     ): DeviceProfile {
         val existing = all().firstOrNull { it.deviceId == deviceId }
-        val updated = DeviceProfile(
-            deviceId = deviceId,
-            displayName = displayName ?: existing?.displayName,
-            vendor = vendor ?: existing?.vendor,
-            model = model ?: existing?.model,
-            lastConnectedAtEpochMillis = existing?.lastConnectedAtEpochMillis ?: clockMillis(),
-            lastKnownFirmwareVersion = firmwareVersion ?: existing?.lastKnownFirmwareVersion,
-            lastKnownBatteryPercent = batteryPercent ?: existing?.lastKnownBatteryPercent,
-            lastKnownCharging = charging ?: existing?.lastKnownCharging,
-            otaHistory = existing?.otaHistory.orEmpty(),
-        )
+        val updated =
+            DeviceProfile(
+                deviceId = deviceId,
+                displayName = displayName ?: existing?.displayName,
+                vendor = vendor ?: existing?.vendor,
+                model = model ?: existing?.model,
+                lastConnectedAtEpochMillis = existing?.lastConnectedAtEpochMillis ?: clockMillis(),
+                lastKnownFirmwareVersion = firmwareVersion ?: existing?.lastKnownFirmwareVersion,
+                lastKnownBatteryPercent = batteryPercent ?: existing?.lastKnownBatteryPercent,
+                lastKnownCharging = charging ?: existing?.lastKnownCharging,
+                otaHistory = existing?.otaHistory.orEmpty(),
+            )
         replace(updated)
         persist()
         return updated
     }
 
     /** 追加一条 OTA 历史记录，返回更新后的档案。 */
-    fun recordOta(deviceId: String, record: OtaHistoryRecord): DeviceProfile {
+    fun recordOta(
+        deviceId: String,
+        record: OtaHistoryRecord,
+    ): DeviceProfile {
         val existing = all().firstOrNull { it.deviceId == deviceId }
-        val updated = DeviceProfile(
-            deviceId = deviceId,
-            displayName = existing?.displayName,
-            vendor = existing?.vendor,
-            model = existing?.model,
-            lastConnectedAtEpochMillis = existing?.lastConnectedAtEpochMillis
-                ?: record.finishedAtEpochMillis,
-            lastKnownFirmwareVersion = existing?.lastKnownFirmwareVersion,
-            lastKnownBatteryPercent = existing?.lastKnownBatteryPercent,
-            lastKnownCharging = existing?.lastKnownCharging,
-            otaHistory = (listOf(record) + existing?.otaHistory.orEmpty()).take(maxOtaHistory),
-        )
+        val updated =
+            DeviceProfile(
+                deviceId = deviceId,
+                displayName = existing?.displayName,
+                vendor = existing?.vendor,
+                model = existing?.model,
+                lastConnectedAtEpochMillis =
+                    existing?.lastConnectedAtEpochMillis
+                        ?: record.finishedAtEpochMillis,
+                lastKnownFirmwareVersion = existing?.lastKnownFirmwareVersion,
+                lastKnownBatteryPercent = existing?.lastKnownBatteryPercent,
+                lastKnownCharging = existing?.lastKnownCharging,
+                otaHistory = (listOf(record) + existing?.otaHistory.orEmpty()).take(maxOtaHistory),
+            )
         replace(updated)
         persist()
         return updated
@@ -138,8 +149,15 @@ class DeviceProfileRepository(
         cache = null
     }
 
-    private fun all(): MutableList<DeviceProfile> =
-        cache ?: DeviceProfileCodec.decode(store.loadRaw()).toMutableList().also { cache = it }
+    private fun all(): MutableList<DeviceProfile> {
+        cache?.let { return it }
+        val decoded = DeviceProfileCodec.decodeWithStatus(store.loadRaw())
+        lastMigrationStatus = decoded.status
+        if (decoded.status is StorageMigrationStatus.Migrated) {
+            store.saveRaw(DeviceProfileCodec.encode(decoded.profiles))
+        }
+        return decoded.profiles.toMutableList().also { cache = it }
+    }
 
     private fun replace(profile: DeviceProfile) {
         val list = all()

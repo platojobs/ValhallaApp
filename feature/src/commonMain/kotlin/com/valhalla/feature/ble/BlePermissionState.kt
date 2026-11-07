@@ -40,13 +40,14 @@ data class BleGuidance(
     val action: BleGuidanceAction = BleGuidanceAction.NONE,
 ) {
     val actionLabel: UiMessage?
-        get() = when (action) {
-            BleGuidanceAction.NONE -> null
-            BleGuidanceAction.REQUEST_PERMISSION -> UiMessage(StringKey.ACTION_GRANT_PERMISSION)
-            BleGuidanceAction.OPEN_SETTINGS -> UiMessage(StringKey.ACTION_OPEN_SETTINGS)
-            BleGuidanceAction.ENABLE_BLUETOOTH -> UiMessage(StringKey.ACTION_ENABLE_BLUETOOTH)
-            BleGuidanceAction.RETRY -> UiMessage(StringKey.RETRY)
-        }
+        get() =
+            when (action) {
+                BleGuidanceAction.NONE -> null
+                BleGuidanceAction.REQUEST_PERMISSION -> UiMessage(StringKey.ACTION_GRANT_PERMISSION)
+                BleGuidanceAction.OPEN_SETTINGS -> UiMessage(StringKey.ACTION_OPEN_SETTINGS)
+                BleGuidanceAction.ENABLE_BLUETOOTH -> UiMessage(StringKey.ACTION_ENABLE_BLUETOOTH)
+                BleGuidanceAction.RETRY -> UiMessage(StringKey.RETRY)
+            }
 }
 
 /**
@@ -60,7 +61,6 @@ data class BleGuidance(
 class BlePermissionStateMachine(
     initialState: BlePermissionState = BlePermissionState.NOT_REQUESTED,
 ) {
-
     var state: BlePermissionState = initialState
         private set
 
@@ -68,8 +68,9 @@ class BlePermissionStateMachine(
 
     /** 是否可以再次发起系统权限请求。 */
     val canRequest: Boolean
-        get() = !requestInFlight &&
-            (state == BlePermissionState.NOT_REQUESTED || state == BlePermissionState.DENIED)
+        get() =
+            !requestInFlight &&
+                (state == BlePermissionState.NOT_REQUESTED || state == BlePermissionState.DENIED)
 
     /**
      * 尝试发起一次权限请求。
@@ -82,13 +83,17 @@ class BlePermissionStateMachine(
     }
 
     /** 平台权限弹窗返回结果。 */
-    fun onRequestResult(granted: Boolean, canAskAgain: Boolean): BlePermissionState {
+    fun onRequestResult(
+        granted: Boolean,
+        canAskAgain: Boolean,
+    ): BlePermissionState {
         requestInFlight = false
-        state = when {
-            granted -> BlePermissionState.GRANTED
-            canAskAgain -> BlePermissionState.DENIED
-            else -> BlePermissionState.PERMANENTLY_DENIED
-        }
+        state =
+            when {
+                granted -> BlePermissionState.GRANTED
+                canAskAgain -> BlePermissionState.DENIED
+                else -> BlePermissionState.PERMANENTLY_DENIED
+            }
         return state
     }
 
@@ -104,12 +109,13 @@ class BlePermissionStateMachine(
         hasRequestedBefore: Boolean,
     ): BlePermissionState {
         requestInFlight = false
-        state = when {
-            granted -> BlePermissionState.GRANTED
-            !hasRequestedBefore -> BlePermissionState.NOT_REQUESTED
-            canAskAgain -> BlePermissionState.DENIED
-            else -> BlePermissionState.PERMANENTLY_DENIED
-        }
+        state =
+            when {
+                granted -> BlePermissionState.GRANTED
+                !hasRequestedBefore -> BlePermissionState.NOT_REQUESTED
+                canAskAgain -> BlePermissionState.DENIED
+                else -> BlePermissionState.PERMANENTLY_DENIED
+            }
         return state
     }
 
@@ -140,66 +146,76 @@ enum class BleAvailability {
 fun resolveBleAvailability(
     adapterState: BleAdapterState,
     permissionState: BlePermissionState,
-): BleAvailability = when (permissionState) {
-    BlePermissionState.NOT_REQUESTED -> BleAvailability.PERMISSION_NOT_REQUESTED
-    BlePermissionState.DENIED -> BleAvailability.PERMISSION_DENIED
-    BlePermissionState.PERMANENTLY_DENIED -> BleAvailability.PERMISSION_PERMANENTLY_DENIED
+): BleAvailability =
+    when (permissionState) {
+        BlePermissionState.NOT_REQUESTED -> BleAvailability.PERMISSION_NOT_REQUESTED
+        BlePermissionState.DENIED -> BleAvailability.PERMISSION_DENIED
+        BlePermissionState.PERMANENTLY_DENIED -> BleAvailability.PERMISSION_PERMANENTLY_DENIED
 
-    BlePermissionState.GRANTED -> when (adapterState) {
-        BleAdapterState.POWERED_ON -> BleAvailability.READY
-        BleAdapterState.POWERED_OFF -> BleAvailability.BLUETOOTH_OFF
-        BleAdapterState.RESETTING -> BleAvailability.BLUETOOTH_RESETTING
-        BleAdapterState.UNAUTHORIZED -> BleAvailability.PERMISSION_PERMANENTLY_DENIED
-        BleAdapterState.UNSUPPORTED -> BleAvailability.UNSUPPORTED
-        BleAdapterState.UNKNOWN -> BleAvailability.UNKNOWN
+        BlePermissionState.GRANTED ->
+            when (adapterState) {
+                BleAdapterState.POWERED_ON -> BleAvailability.READY
+                BleAdapterState.POWERED_OFF -> BleAvailability.BLUETOOTH_OFF
+                BleAdapterState.RESETTING -> BleAvailability.BLUETOOTH_RESETTING
+                BleAdapterState.UNAUTHORIZED -> BleAvailability.PERMISSION_PERMANENTLY_DENIED
+                BleAdapterState.UNSUPPORTED -> BleAvailability.UNSUPPORTED
+                BleAdapterState.UNKNOWN -> BleAvailability.UNKNOWN
+            }
     }
-}
 
 /** 该可用状态是否允许扫描/连接。 */
 fun BleAvailability.allowsConnection(): Boolean = this == BleAvailability.READY
 
 /** 不可用时的引导文案；可用时返回 null。 */
-fun BleAvailability.guidance(): BleGuidance? = when (this) {
-    BleAvailability.READY -> null
+fun BleAvailability.guidance(): BleGuidance? =
+    when (this) {
+        BleAvailability.READY -> null
 
-    BleAvailability.PERMISSION_NOT_REQUESTED -> BleGuidance(
-        title = UiMessage(StringKey.GUIDANCE_NEED_PERMISSION_TITLE),
-        message = UiMessage(StringKey.GUIDANCE_NEED_PERMISSION_MESSAGE),
-        action = BleGuidanceAction.REQUEST_PERMISSION,
-    )
+        BleAvailability.PERMISSION_NOT_REQUESTED ->
+            BleGuidance(
+                title = UiMessage(StringKey.GUIDANCE_NEED_PERMISSION_TITLE),
+                message = UiMessage(StringKey.GUIDANCE_NEED_PERMISSION_MESSAGE),
+                action = BleGuidanceAction.REQUEST_PERMISSION,
+            )
 
-    BleAvailability.PERMISSION_DENIED -> BleGuidance(
-        title = UiMessage(StringKey.GUIDANCE_PERMISSION_DENIED_TITLE),
-        message = UiMessage(StringKey.GUIDANCE_PERMISSION_DENIED_MESSAGE),
-        action = BleGuidanceAction.REQUEST_PERMISSION,
-    )
+        BleAvailability.PERMISSION_DENIED ->
+            BleGuidance(
+                title = UiMessage(StringKey.GUIDANCE_PERMISSION_DENIED_TITLE),
+                message = UiMessage(StringKey.GUIDANCE_PERMISSION_DENIED_MESSAGE),
+                action = BleGuidanceAction.REQUEST_PERMISSION,
+            )
 
-    BleAvailability.PERMISSION_PERMANENTLY_DENIED -> BleGuidance(
-        title = UiMessage(StringKey.GUIDANCE_PERMISSION_PERMANENT_TITLE),
-        message = UiMessage(StringKey.GUIDANCE_PERMISSION_PERMANENT_MESSAGE),
-        action = BleGuidanceAction.OPEN_SETTINGS,
-    )
+        BleAvailability.PERMISSION_PERMANENTLY_DENIED ->
+            BleGuidance(
+                title = UiMessage(StringKey.GUIDANCE_PERMISSION_PERMANENT_TITLE),
+                message = UiMessage(StringKey.GUIDANCE_PERMISSION_PERMANENT_MESSAGE),
+                action = BleGuidanceAction.OPEN_SETTINGS,
+            )
 
-    BleAvailability.BLUETOOTH_OFF -> BleGuidance(
-        title = UiMessage(StringKey.GUIDANCE_BLUETOOTH_OFF_TITLE),
-        message = UiMessage(StringKey.GUIDANCE_BLUETOOTH_OFF_MESSAGE),
-        action = BleGuidanceAction.ENABLE_BLUETOOTH,
-    )
+        BleAvailability.BLUETOOTH_OFF ->
+            BleGuidance(
+                title = UiMessage(StringKey.GUIDANCE_BLUETOOTH_OFF_TITLE),
+                message = UiMessage(StringKey.GUIDANCE_BLUETOOTH_OFF_MESSAGE),
+                action = BleGuidanceAction.ENABLE_BLUETOOTH,
+            )
 
-    BleAvailability.BLUETOOTH_RESETTING -> BleGuidance(
-        title = UiMessage(StringKey.GUIDANCE_BLUETOOTH_RESETTING_TITLE),
-        message = UiMessage(StringKey.GUIDANCE_BLUETOOTH_RESETTING_MESSAGE),
-        action = BleGuidanceAction.RETRY,
-    )
+        BleAvailability.BLUETOOTH_RESETTING ->
+            BleGuidance(
+                title = UiMessage(StringKey.GUIDANCE_BLUETOOTH_RESETTING_TITLE),
+                message = UiMessage(StringKey.GUIDANCE_BLUETOOTH_RESETTING_MESSAGE),
+                action = BleGuidanceAction.RETRY,
+            )
 
-    BleAvailability.UNSUPPORTED -> BleGuidance(
-        title = UiMessage(StringKey.GUIDANCE_UNSUPPORTED_TITLE),
-        message = UiMessage(StringKey.GUIDANCE_UNSUPPORTED_MESSAGE),
-    )
+        BleAvailability.UNSUPPORTED ->
+            BleGuidance(
+                title = UiMessage(StringKey.GUIDANCE_UNSUPPORTED_TITLE),
+                message = UiMessage(StringKey.GUIDANCE_UNSUPPORTED_MESSAGE),
+            )
 
-    BleAvailability.UNKNOWN -> BleGuidance(
-        title = UiMessage(StringKey.GUIDANCE_UNKNOWN_TITLE),
-        message = UiMessage(StringKey.GUIDANCE_UNKNOWN_MESSAGE),
-        action = BleGuidanceAction.RETRY,
-    )
-}
+        BleAvailability.UNKNOWN ->
+            BleGuidance(
+                title = UiMessage(StringKey.GUIDANCE_UNKNOWN_TITLE),
+                message = UiMessage(StringKey.GUIDANCE_UNKNOWN_MESSAGE),
+                action = BleGuidanceAction.RETRY,
+            )
+    }

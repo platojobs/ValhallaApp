@@ -12,7 +12,10 @@ import kotlin.math.roundToInt
 import kotlin.math.roundToLong
 
 /** 报告输出格式；两者都走既有保存/分享通道。 */
-enum class DiagnosticReportFormat(val extension: String, val mimeType: String) {
+enum class DiagnosticReportFormat(
+    val extension: String,
+    val mimeType: String,
+) {
     MARKDOWN("md", "text/markdown"),
     TEXT("txt", "text/plain"),
 }
@@ -124,7 +127,6 @@ data class DiagnosticReportResult(
  * - 生成是 suspend 的，逐小节检查协程取消，UI 可显示进度并中途取消；取消不返回部分结果。
  */
 object DiagnosticReportComposer {
-
     suspend fun build(
         input: DiagnosticReportInput,
         options: DiagnosticReportOptions = DiagnosticReportOptions(),
@@ -166,7 +168,11 @@ object DiagnosticReportComposer {
         val total = DiagnosticReportSection.entries.size
         var processed = 0
         val sections = linkedMapOf<DiagnosticReportSection, Int>()
-        fun mark(section: DiagnosticReportSection, count: Int) {
+
+        fun mark(
+            section: DiagnosticReportSection,
+            count: Int,
+        ) {
             sections[section] = count
             processed++
             onProgress(DiagnosticReportProgress(DiagnosticReportProgressPhase.RENDERING, processed, total))
@@ -221,7 +227,10 @@ object DiagnosticReportComposer {
         )
     }
 
-    private fun renderSync(input: DiagnosticReportInput, options: DiagnosticReportOptions): Rendered {
+    private fun renderSync(
+        input: DiagnosticReportInput,
+        options: DiagnosticReportOptions,
+    ): Rendered {
         val sections = linkedMapOf<DiagnosticReportSection, Int>()
         val packetEntries = selectedPacketLog(input, options)
         val errors = input.recentErrors.take(options.recentErrorLimit)
@@ -269,7 +278,8 @@ object DiagnosticReportComposer {
         } else {
             text.append("Valhalla 设备诊断报告\n\n")
         }
-        text.append("- 生成时间：")
+        text
+            .append("- 生成时间：")
             .append(formatAbsoluteTime(input.generatedAtEpochMillis, input.zoneOffsetMinutes))
             .append('\n')
         text.append("- App 版本：").append(redact(input.appVersion)).append('\n')
@@ -278,18 +288,27 @@ object DiagnosticReportComposer {
         text.append("- 数据来源：本机日志（报文、设备档案与本次会话）\n\n")
     }
 
-    private fun appendDevice(text: StringBuilder, input: DiagnosticReportInput) {
+    private fun appendDevice(
+        text: StringBuilder,
+        input: DiagnosticReportInput,
+    ) {
         heading(text, "设备信息")
         line(text, "设备 ID（脱敏）", PacketLogRedaction.hashDeviceId(input.deviceId))
         line(text, "设备名称 / 型号", input.deviceModel ?: "暂无数据")
     }
 
-    private fun appendFirmware(text: StringBuilder, input: DiagnosticReportInput) {
+    private fun appendFirmware(
+        text: StringBuilder,
+        input: DiagnosticReportInput,
+    ) {
         heading(text, "固件版本")
         line(text, "当前固件", input.firmwareVersion ?: "暂无数据（本次会话未读取）")
     }
 
-    private fun appendBattery(text: StringBuilder, input: DiagnosticReportInput) {
+    private fun appendBattery(
+        text: StringBuilder,
+        input: DiagnosticReportInput,
+    ) {
         heading(text, "电量与充电状态")
         val percent = input.batteryPercent
         if (percent == null) {
@@ -339,14 +358,23 @@ object DiagnosticReportComposer {
         errors.forEach { error ->
             val time = formatAbsoluteTime(error.timestampMillis, input.zoneOffsetMinutes)
             val code = error.errorCode?.let { "（$it）" }.orEmpty()
-            text.append("- ").append(time).append("  ")
-                .append(redact(error.command)).append(code).append("：")
-                .append(redactInline(error.detail)).append('\n')
+            text
+                .append("- ")
+                .append(time)
+                .append("  ")
+                .append(redact(error.command))
+                .append(code)
+                .append("：")
+                .append(redactInline(error.detail))
+                .append('\n')
         }
         text.append('\n')
     }
 
-    private fun appendQuality(text: StringBuilder, input: DiagnosticReportInput) {
+    private fun appendQuality(
+        text: StringBuilder,
+        input: DiagnosticReportInput,
+    ) {
         heading(text, "连接质量摘要")
         val quality = input.quality
         if (quality == null) {
@@ -386,16 +414,25 @@ object DiagnosticReportComposer {
         ota.forEach { record ->
             val time = formatAbsoluteTime(record.finishedAtEpochMillis, input.zoneOffsetMinutes)
             val code = record.errorCode?.let { " $it" }.orEmpty()
-            val progress = if (record.totalBytes > 0) {
-                " ${(record.sentBytes * 100 / record.totalBytes)}%"
-            } else {
-                ""
-            }
-            text.append("- ").append(time).append("  ")
-                .append(redactInline(record.firmwareVersion)).append("  ")
-                .append(record.outcome).append(code)
-                .append("  耗时 ").append(record.durationMillis).append(" ms")
-                .append(progress).append('\n')
+            val progress =
+                if (record.totalBytes > 0) {
+                    " ${(record.sentBytes * 100 / record.totalBytes)}%"
+                } else {
+                    ""
+                }
+            text
+                .append("- ")
+                .append(time)
+                .append("  ")
+                .append(redactInline(record.firmwareVersion))
+                .append("  ")
+                .append(record.outcome)
+                .append(code)
+                .append("  耗时 ")
+                .append(record.durationMillis)
+                .append(" ms")
+                .append(progress)
+                .append('\n')
         }
         text.append('\n')
     }
@@ -416,13 +453,24 @@ object DiagnosticReportComposer {
         }
     }
 
-    private fun heading(text: StringBuilder, title: String) {
+    private fun heading(
+        text: StringBuilder,
+        title: String,
+    ) {
         text.append("## ").append(title).append("\n\n")
     }
 
-    private fun line(text: StringBuilder, label: String, value: String) {
-        text.append("- ").append(redactInline(label)).append("：")
-            .append(redactInline(value)).append('\n')
+    private fun line(
+        text: StringBuilder,
+        label: String,
+        value: String,
+    ) {
+        text
+            .append("- ")
+            .append(redactInline(label))
+            .append("：")
+            .append(redactInline(value))
+            .append('\n')
     }
 
     private fun redact(value: String): String = SensitiveTextRedaction.redact(value)

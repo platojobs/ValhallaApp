@@ -14,12 +14,17 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class PacketLogTest {
+    private fun txFrame(
+        command: CommandType,
+        payload: ByteArray,
+        sequence: Int = 0,
+    ): Frame = Frame(type = command, sequence = sequence, payload = payload)
 
-    private fun txFrame(command: CommandType, payload: ByteArray, sequence: Int = 0): Frame =
-        Frame(type = command, sequence = sequence, payload = payload)
-
-    private fun responseFrame(command: CommandType, payload: ByteArray, sequence: Int = 0): Frame =
-        Frame(type = command, sequence = sequence, payload = payload, isResponse = true)
+    private fun responseFrame(
+        command: CommandType,
+        payload: ByteArray,
+        sequence: Int = 0,
+    ): Frame = Frame(type = command, sequence = sequence, payload = payload, isResponse = true)
 
     @Test
     fun `环形缓冲只保留最新容量并分配自增 id`() {
@@ -33,16 +38,23 @@ class PacketLogTest {
 
         assertEquals(3, log.entries.value.size)
         assertEquals(listOf(2L, 3L, 4L), log.entries.value.map { it.id })
-        assertEquals("key4", log.entries.value.last().summary.substringAfter("key="))
+        assertEquals(
+            "key4",
+            log.entries.value
+                .last()
+                .summary
+                .substringAfter("key="),
+        )
     }
 
     @Test
     fun `摘要包含方向命令名与 HEX`() {
         val log = InMemoryPacketLog(clockMillis = { 0L })
-        val entry = log.record(
-            FrameDirection.TX,
-            txFrame(CommandType.SET_CONFIG, SetConfigRequest("device_name", byteArrayOf(1, 2)).encode()),
-        )
+        val entry =
+            log.record(
+                FrameDirection.TX,
+                txFrame(CommandType.SET_CONFIG, SetConfigRequest("device_name", byteArrayOf(1, 2)).encode()),
+            )
 
         assertTrue(entry.summary.contains("SET_CONFIG"))
         assertTrue(entry.summary.contains("device_name"))
@@ -84,7 +96,7 @@ class PacketLogTest {
         val log = InMemoryPacketLog(clockMillis = { 0L })
         log.record(FrameDirection.TX, txFrame(CommandType.GET_CONFIG, GetConfigRequest("alpha").encode(), 11))
         log.record(FrameDirection.TX, txFrame(CommandType.SET_CONFIG, SetConfigRequest("beta", byteArrayOf(1)).encode(), 22))
-        log.record(FrameDirection.RX, responseFrame(CommandType.SET_CONFIG, SetConfigResponseOk().encode(), 777))
+        log.record(FrameDirection.RX, responseFrame(CommandType.SET_CONFIG, setConfigResponseOk().encode(), 777))
 
         val filtered = log.filter(PacketLogFilter(command = CommandType.SET_CONFIG))
         assertEquals(2, filtered.size)
@@ -102,10 +114,11 @@ class PacketLogTest {
     @Test
     fun `解析失败的请求保留原始报文并记录错误`() {
         val log = InMemoryPacketLog(clockMillis = { 0L })
-        val entry = log.record(
-            FrameDirection.TX,
-            txFrame(CommandType.UNKNOWN, byteArrayOf(1, 2, 3)),
-        )
+        val entry =
+            log.record(
+                FrameDirection.TX,
+                txFrame(CommandType.UNKNOWN, byteArrayOf(1, 2, 3)),
+            )
 
         assertNotNull(entry.error)
         assertTrue(entry.hex.startsWith("A55A"))
@@ -115,25 +128,27 @@ class PacketLogTest {
     @Test
     fun `OTA 分片与进度通知可被解析`() {
         val log = InMemoryPacketLog(clockMillis = { 0L })
-        val data = log.record(
-            FrameDirection.RX,
-            responseFrame(
-                CommandType.OTA_DATA,
-                OtaDataResponse(DeviceStatus.OK, receivedBytes = 128).encode(),
-                3,
-            ),
-        )
+        val data =
+            log.record(
+                FrameDirection.RX,
+                responseFrame(
+                    CommandType.OTA_DATA,
+                    OtaDataResponse(DeviceStatus.OK, receivedBytes = 128).encode(),
+                    3,
+                ),
+            )
         assertTrue(data.summary.contains("received=128"))
 
-        val progress = log.record(
-            FrameDirection.RX,
-            Frame(
-                type = CommandType.OTA_PROGRESS_NOTIFY,
-                sequence = 0,
-                payload = byteArrayOf(0, 0, 0, 42, 64, 0, 0, 0, 100, 0, 0, 0, 1),
-                isNotification = true,
-            ),
-        )
+        val progress =
+            log.record(
+                FrameDirection.RX,
+                Frame(
+                    type = CommandType.OTA_PROGRESS_NOTIFY,
+                    sequence = 0,
+                    payload = byteArrayOf(0, 0, 0, 42, 64, 0, 0, 0, 100, 0, 0, 0, 1),
+                    isNotification = true,
+                ),
+            )
         assertTrue(progress.summary.contains("OTA_PROGRESS"))
         assertEquals(null, progress.error)
     }
@@ -146,6 +161,7 @@ class PacketLogTest {
         assertTrue(log.entries.value.isEmpty())
     }
 
-    private fun SetConfigResponseOk() =
-        com.valhalla.core.protocol.message.SetConfigResponse(DeviceStatus.OK)
+    private fun setConfigResponseOk() =
+        com.valhalla.core.protocol.message
+            .SetConfigResponse(DeviceStatus.OK)
 }

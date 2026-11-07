@@ -8,7 +8,6 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class ConnectionQualityStatsTest {
-
     private var nextId = 1L
 
     private fun entry(
@@ -34,12 +33,13 @@ class ConnectionQualityStatsTest {
 
     @Test
     fun `正常序列统计成功率与时延`() {
-        val entries = listOf(
-            entry(1, FrameDirection.TX, timestamp = 100),
-            entry(1, FrameDirection.RX, isResponse = true, timestamp = 150),
-            entry(2, FrameDirection.TX, timestamp = 200),
-            entry(2, FrameDirection.RX, isResponse = true, timestamp = 300),
-        )
+        val entries =
+            listOf(
+                entry(1, FrameDirection.TX, timestamp = 100),
+                entry(1, FrameDirection.RX, isResponse = true, timestamp = 150),
+                entry(2, FrameDirection.TX, timestamp = 200),
+                entry(2, FrameDirection.RX, isResponse = true, timestamp = 300),
+            )
         val stats = ConnectionQualityAnalyzer.analyze(entries)
 
         assertEquals(2, stats.requests)
@@ -58,11 +58,12 @@ class ConnectionQualityStatsTest {
 
     @Test
     fun `超时请求计入无应答且不出现在成功率分子中`() {
-        val entries = listOf(
-            entry(1, FrameDirection.TX, timestamp = 100),
-            entry(1, FrameDirection.RX, isResponse = true, timestamp = 200),
-            entry(2, FrameDirection.TX, timestamp = 300),
-        )
+        val entries =
+            listOf(
+                entry(1, FrameDirection.TX, timestamp = 100),
+                entry(1, FrameDirection.RX, isResponse = true, timestamp = 200),
+                entry(2, FrameDirection.TX, timestamp = 300),
+            )
         val stats = ConnectionQualityAnalyzer.analyze(entries)
 
         assertEquals(2, stats.requests)
@@ -76,12 +77,13 @@ class ConnectionQualityStatsTest {
 
     @Test
     fun `乱序应答被计数但不影响成功判定`() {
-        val entries = listOf(
-            entry(1, FrameDirection.TX, timestamp = 100),
-            entry(2, FrameDirection.TX, timestamp = 120),
-            entry(2, FrameDirection.RX, isResponse = true, timestamp = 180),
-            entry(1, FrameDirection.RX, isResponse = true, timestamp = 200),
-        )
+        val entries =
+            listOf(
+                entry(1, FrameDirection.TX, timestamp = 100),
+                entry(2, FrameDirection.TX, timestamp = 120),
+                entry(2, FrameDirection.RX, isResponse = true, timestamp = 180),
+                entry(1, FrameDirection.RX, isResponse = true, timestamp = 200),
+            )
         val stats = ConnectionQualityAnalyzer.analyze(entries)
 
         assertEquals(2, stats.successes)
@@ -91,11 +93,12 @@ class ConnectionQualityStatsTest {
 
     @Test
     fun `同一 sequence 重复发送计为重传且时延取最后一次发送`() {
-        val entries = listOf(
-            entry(1, FrameDirection.TX, timestamp = 100),
-            entry(1, FrameDirection.TX, timestamp = 200),
-            entry(1, FrameDirection.RX, isResponse = true, timestamp = 260),
-        )
+        val entries =
+            listOf(
+                entry(1, FrameDirection.TX, timestamp = 100),
+                entry(1, FrameDirection.TX, timestamp = 200),
+                entry(1, FrameDirection.RX, isResponse = true, timestamp = 260),
+            )
         val stats = ConnectionQualityAnalyzer.analyze(entries)
 
         assertEquals(1, stats.requests)
@@ -121,14 +124,15 @@ class ConnectionQualityStatsTest {
 
     @Test
     fun `错误码按次数聚合并带标题`() {
-        val entries = listOf(
-            entry(1, FrameDirection.TX, timestamp = 100),
-            entry(1, FrameDirection.RX, isResponse = true, timestamp = 150, error = "0x05 鉴权失败"),
-            entry(2, FrameDirection.TX, timestamp = 200),
-            entry(2, FrameDirection.RX, isResponse = true, timestamp = 250, error = "0x05 鉴权失败"),
-            entry(3, FrameDirection.TX, timestamp = 300),
-            entry(3, FrameDirection.RX, isResponse = true, timestamp = 350, error = "0x03 参数越界"),
-        )
+        val entries =
+            listOf(
+                entry(1, FrameDirection.TX, timestamp = 100),
+                entry(1, FrameDirection.RX, isResponse = true, timestamp = 150, error = "0x05 鉴权失败"),
+                entry(2, FrameDirection.TX, timestamp = 200),
+                entry(2, FrameDirection.RX, isResponse = true, timestamp = 250, error = "0x05 鉴权失败"),
+                entry(3, FrameDirection.TX, timestamp = 300),
+                entry(3, FrameDirection.RX, isResponse = true, timestamp = 350, error = "0x03 参数越界"),
+            )
         val stats = ConnectionQualityAnalyzer.analyze(entries)
 
         assertEquals(3, stats.deviceErrors)
@@ -136,20 +140,32 @@ class ConnectionQualityStatsTest {
         assertEquals(2, stats.errorCodes.size)
         assertEquals("0x05", stats.errorCodes.first().code)
         assertEquals(2, stats.errorCodes.first().count)
-        assertTrue(stats.errorCodes.first().title.isNotBlank())
+        assertTrue(
+            stats.errorCodes
+                .first()
+                .title
+                .isNotBlank(),
+        )
         assertEquals(3, stats.recentFailures.size)
         assertFalse(stats.recentFailures.first().noResponse)
     }
 
     @Test
     fun `通知帧与无配对应答不进入请求统计`() {
-        val entries = listOf(
-            entry(1, FrameDirection.TX, timestamp = 100),
-            entry(1, FrameDirection.RX, isResponse = true, timestamp = 150),
-            entry(0, FrameDirection.RX, command = CommandType.HEARTBEAT_REPLY,
-                isResponse = false, isNotification = true, timestamp = 160),
-            entry(99, FrameDirection.RX, isResponse = true, timestamp = 170),
-        )
+        val entries =
+            listOf(
+                entry(1, FrameDirection.TX, timestamp = 100),
+                entry(1, FrameDirection.RX, isResponse = true, timestamp = 150),
+                entry(
+                    0,
+                    FrameDirection.RX,
+                    command = CommandType.HEARTBEAT_REPLY,
+                    isResponse = false,
+                    isNotification = true,
+                    timestamp = 160,
+                ),
+                entry(99, FrameDirection.RX, isResponse = true, timestamp = 170),
+            )
         val stats = ConnectionQualityAnalyzer.analyze(entries)
 
         assertEquals(1, stats.requests)
@@ -160,15 +176,22 @@ class ConnectionQualityStatsTest {
 
     @Test
     fun `按命令维度拆分请求与错误`() {
-        val entries = listOf(
-            entry(1, FrameDirection.TX, CommandType.GET_CONFIG, timestamp = 100),
-            entry(1, FrameDirection.RX, CommandType.GET_CONFIG, isResponse = true, timestamp = 160),
-            entry(2, FrameDirection.TX, CommandType.GET_CONFIG, timestamp = 200),
-            entry(2, FrameDirection.RX, CommandType.GET_CONFIG, isResponse = true, timestamp = 260),
-            entry(3, FrameDirection.TX, CommandType.SET_PARAM, timestamp = 300),
-            entry(3, FrameDirection.RX, CommandType.SET_PARAM, isResponse = true,
-                timestamp = 380, error = "0x03 参数越界"),
-        )
+        val entries =
+            listOf(
+                entry(1, FrameDirection.TX, CommandType.GET_CONFIG, timestamp = 100),
+                entry(1, FrameDirection.RX, CommandType.GET_CONFIG, isResponse = true, timestamp = 160),
+                entry(2, FrameDirection.TX, CommandType.GET_CONFIG, timestamp = 200),
+                entry(2, FrameDirection.RX, CommandType.GET_CONFIG, isResponse = true, timestamp = 260),
+                entry(3, FrameDirection.TX, CommandType.SET_PARAM, timestamp = 300),
+                entry(
+                    3,
+                    FrameDirection.RX,
+                    CommandType.SET_PARAM,
+                    isResponse = true,
+                    timestamp = 380,
+                    error = "0x03 参数越界",
+                ),
+            )
         val stats = ConnectionQualityAnalyzer.analyze(entries)
 
         assertEquals(2, stats.commands.size)
@@ -185,12 +208,13 @@ class ConnectionQualityStatsTest {
 
     @Test
     fun `样本达到阈值后不再标记样本不足`() {
-        val entries = (1..20).flatMap { index ->
-            listOf(
-                entry(index, FrameDirection.TX, timestamp = index * 100L),
-                entry(index, FrameDirection.RX, isResponse = true, timestamp = index * 100L + 50),
-            )
-        }
+        val entries =
+            (1..20).flatMap { index ->
+                listOf(
+                    entry(index, FrameDirection.TX, timestamp = index * 100L),
+                    entry(index, FrameDirection.RX, isResponse = true, timestamp = index * 100L + 50),
+                )
+            }
         val stats = ConnectionQualityAnalyzer.analyze(entries)
 
         assertEquals(20, stats.requests)

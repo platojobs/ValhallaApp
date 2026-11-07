@@ -40,7 +40,6 @@ data class ParamSpec(
     val readOnlyReason: String? = null,
     val confirmedByFirmware: Boolean = false,
 ) {
-
     init {
         require(id in 0..0xFFFF) { "paramId 超出范围: $id" }
         require(displayName.isNotBlank()) { "参数名称不能为空" }
@@ -58,13 +57,14 @@ data class ParamSpec(
 }
 
 sealed interface ParamValidation {
-
     data class Valid(
         val bytes: ByteArray,
         val canonicalText: String,
     ) : ParamValidation
 
-    data class Invalid(val message: String) : ParamValidation
+    data class Invalid(
+        val message: String,
+    ) : ParamValidation
 }
 
 /**
@@ -75,83 +75,102 @@ sealed interface ParamValidation {
  */
 object ParamCatalog {
     /** 0x0001 上报间隔，与配置项 `sample_interval_ms` 的边界一致。 */
-    private val reportingInterval = ParamSpec(
-        id = 0x0001,
-        displayName = "上报间隔",
-        type = ParamValueType.INTEGER,
-        writable = true,
-        intRange = 100..60_000,
-        unit = "毫秒",
-    )
+    private val reportingInterval =
+        ParamSpec(
+            id = 0x0001,
+            displayName = "上报间隔",
+            type = ParamValueType.INTEGER,
+            writable = true,
+            intRange = 100..60_000,
+            unit = "毫秒",
+        )
 
-    private val workMode = ParamSpec(
-        id = 0x0002,
-        displayName = "工作模式",
-        type = ParamValueType.ENUM,
-        writable = true,
-        enumValues = mapOf(0 to "待机", 1 to "采集", 2 to "调试"),
-    )
+    private val workMode =
+        ParamSpec(
+            id = 0x0002,
+            displayName = "工作模式",
+            type = ParamValueType.ENUM,
+            writable = true,
+            enumValues = mapOf(0 to "待机", 1 to "采集", 2 to "调试"),
+        )
 
-    private val sensitivity = ParamSpec(
-        id = 0x0003,
-        displayName = "灵敏度等级",
-        type = ParamValueType.INTEGER,
-        writable = true,
-        intRange = 1..5,
-    )
+    private val sensitivity =
+        ParamSpec(
+            id = 0x0003,
+            displayName = "灵敏度等级",
+            type = ParamValueType.INTEGER,
+            writable = true,
+            intRange = 1..5,
+        )
 
-    private val deviceTag = ParamSpec(
-        id = 0x0004,
-        displayName = "设备标识",
-        type = ParamValueType.STRING,
-        writable = false,
-        maxLength = 16,
-        readOnlyReason = "设备只读参数",
-    )
+    private val deviceTag =
+        ParamSpec(
+            id = 0x0004,
+            displayName = "设备标识",
+            type = ParamValueType.STRING,
+            writable = false,
+            maxLength = 16,
+            readOnlyReason = "设备只读参数",
+        )
 
-    private val memoryUsed = ParamSpec(
-        id = 0x0005,
-        displayName = "内存占用",
-        type = ParamValueType.INTEGER,
-        writable = false,
-        intRange = 0..16_777_215,
-        unit = "字节",
-        readOnlyReason = "设备只读参数",
-    )
+    private val memoryUsed =
+        ParamSpec(
+            id = 0x0005,
+            displayName = "内存占用",
+            type = ParamValueType.INTEGER,
+            writable = false,
+            intRange = 0..16_777_215,
+            unit = "字节",
+            readOnlyReason = "设备只读参数",
+        )
 
-    val params: List<ParamSpec> = listOf(
-        reportingInterval,
-        workMode,
-        sensitivity,
-        deviceTag,
-        memoryUsed,
-    )
+    val params: List<ParamSpec> =
+        listOf(
+            reportingInterval,
+            workMode,
+            sensitivity,
+            deviceTag,
+            memoryUsed,
+        )
 
     fun find(paramId: Int): ParamSpec? = params.firstOrNull { it.id == paramId }
 
     /** 把设备返回的原始字节转换为编辑框文本；无法识别时退化为十六进制。 */
-    fun format(spec: ParamSpec, raw: ByteArray): String = when (spec.type) {
-        ParamValueType.INTEGER -> {
-            val value = decodeInt(raw)
-            value?.toString() ?: raw.joinToString("") { byte ->
-                (byte.toInt() and 0xFF).toString(16).padStart(2, '0')
+    fun format(
+        spec: ParamSpec,
+        raw: ByteArray,
+    ): String =
+        when (spec.type) {
+            ParamValueType.INTEGER -> {
+                val value = decodeInt(raw)
+                value?.toString() ?: raw.joinToString("") { byte ->
+                    (byte.toInt() and 0xFF).toString(16).padStart(2, '0')
+                }
             }
+
+            ParamValueType.BOOLEAN ->
+                when (raw.firstOrNull()?.toInt()?.and(0xFF)) {
+                    1, '1'.code, 't'.code, 'T'.code -> "true"
+                    0, '0'.code, 'f'.code, 'F'.code -> "false"
+                    else -> raw.decodeToString()
+                }
+
+            ParamValueType.ENUM ->
+                raw
+                    .firstOrNull()
+                    ?.toInt()
+                    ?.and(0xFF)
+                    ?.toString()
+                    ?: raw.decodeToString()
+
+            ParamValueType.STRING -> raw.decodeToString()
         }
-
-        ParamValueType.BOOLEAN -> when (raw.firstOrNull()?.toInt()?.and(0xFF)) {
-            1, '1'.code, 't'.code, 'T'.code -> "true"
-            0, '0'.code, 'f'.code, 'F'.code -> "false"
-            else -> raw.decodeToString()
-        }
-
-        ParamValueType.ENUM -> raw.firstOrNull()?.toInt()?.and(0xFF)?.toString()
-            ?: raw.decodeToString()
-
-        ParamValueType.STRING -> raw.decodeToString()
-    }
 
     /** 枚举码的可读名称；未知码返回 null，由界面决定如何展示。 */
-    fun enumLabel(spec: ParamSpec, code: Int): String? = spec.enumValues[code]
+    fun enumLabel(
+        spec: ParamSpec,
+        code: Int,
+    ): String? = spec.enumValues[code]
 
     /**
      * 本地校验并编码参数值；校验失败时不会产生请求。
@@ -163,7 +182,10 @@ object ParamCatalog {
      * - BOOLEAN 接受 true/false、1/0、on/off；
      * - STRING 非空且 UTF-8 字节长度不超过 [ParamSpec.maxLength]。
      */
-    fun validate(spec: ParamSpec, text: String): ParamValidation {
+    fun validate(
+        spec: ParamSpec,
+        text: String,
+    ): ParamValidation {
         if (!spec.writable) {
             return ParamValidation.Invalid(spec.readOnlyReason ?: "该参数只读")
         }
@@ -176,12 +198,13 @@ object ParamCatalog {
     }
 
     /** 大端 u32 编码；位数不足时补零。 */
-    fun encodeInt(value: Int): ByteArray = byteArrayOf(
-        ((value ushr 24) and 0xFF).toByte(),
-        ((value ushr 16) and 0xFF).toByte(),
-        ((value ushr 8) and 0xFF).toByte(),
-        (value and 0xFF).toByte(),
-    )
+    fun encodeInt(value: Int): ByteArray =
+        byteArrayOf(
+            ((value ushr 24) and 0xFF).toByte(),
+            ((value ushr 16) and 0xFF).toByte(),
+            ((value ushr 8) and 0xFF).toByte(),
+            (value and 0xFF).toByte(),
+        )
 
     /** 大端解码 1..4 字节整数；空值或超长返回 null。 */
     fun decodeInt(raw: ByteArray): Int? {
@@ -193,9 +216,13 @@ object ParamCatalog {
         return value
     }
 
-    private fun validateInteger(spec: ParamSpec, text: String): ParamValidation {
-        val value = text.trim().toLongOrNull()
-            ?: return ParamValidation.Invalid("必须为十进制整数")
+    private fun validateInteger(
+        spec: ParamSpec,
+        text: String,
+    ): ParamValidation {
+        val value =
+            text.trim().toLongOrNull()
+                ?: return ParamValidation.Invalid("必须为十进制整数")
         if (value < spec.intRange.first || value > spec.intRange.last) {
             return ParamValidation.Invalid(
                 "取值需在 ${spec.intRange.first}..${spec.intRange.last} 之间",
@@ -208,9 +235,13 @@ object ParamCatalog {
         return ParamValidation.Valid(encodeInt(intValue), intValue.toString())
     }
 
-    private fun validateEnum(spec: ParamSpec, text: String): ParamValidation {
-        val code = text.trim().toIntOrNull()
-            ?: return ParamValidation.Invalid("请选择有效的枚举码")
+    private fun validateEnum(
+        spec: ParamSpec,
+        text: String,
+    ): ParamValidation {
+        val code =
+            text.trim().toIntOrNull()
+                ?: return ParamValidation.Invalid("请选择有效的枚举码")
         if (code !in spec.enumValues) {
             return ParamValidation.Invalid(
                 "枚举码需为 ${spec.enumValues.keys.sorted().joinToString("/")}",
@@ -226,7 +257,10 @@ object ParamCatalog {
             else -> ParamValidation.Invalid("布尔值仅支持 true/false、1/0、on/off")
         }
 
-    private fun validateString(spec: ParamSpec, text: String): ParamValidation {
+    private fun validateString(
+        spec: ParamSpec,
+        text: String,
+    ): ParamValidation {
         if (text.isBlank()) return ParamValidation.Invalid("值不能为空")
         val bytes = text.encodeToByteArray()
         if (bytes.size > spec.maxLength) {

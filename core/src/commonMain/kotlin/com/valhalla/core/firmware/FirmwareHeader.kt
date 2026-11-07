@@ -37,7 +37,6 @@ class FirmwareHeader(
     /** 标志位 bit0 是否置位：payload 之后是否追加签名段。 */
     val hasSignature: Boolean = false,
 ) {
-
     init {
         require(firmwareVersion.channel.length <= CHANNEL_FIELD_SIZE) {
             "渠道名超过 $CHANNEL_FIELD_SIZE 字节: ${firmwareVersion.channel}"
@@ -145,9 +144,10 @@ class FirmwareHeader(
             if (channelLength > CHANNEL_FIELD_SIZE) {
                 throw FirmwareException.InvalidHeaderField("channelLength", "超出 0..$CHANNEL_FIELD_SIZE: $channelLength")
             }
-            val channel = readFixedString(bytes, 13, CHANNEL_FIELD_SIZE, channelLength) { char ->
-                isSafeChar(char, allowWildcard = false)
-            }
+            val channel =
+                readFixedString(bytes, 13, CHANNEL_FIELD_SIZE, channelLength) { char ->
+                    isSafeChar(char, allowWildcard = false)
+                }
             if (hasNonZeroTail(bytes, 13 + channelLength, 13 + CHANNEL_FIELD_SIZE)) {
                 throw FirmwareException.InvalidHeaderField("channel", "长度之外的填充字节非零")
             }
@@ -160,8 +160,9 @@ class FirmwareHeader(
             repeat(MAX_MODELS) { index ->
                 val fieldStart = 30 + index * MODEL_FIELD_SIZE
                 if (index < modelCount) {
-                    val length = firstZeroIndex(bytes, fieldStart, fieldStart + MODEL_FIELD_SIZE)
-                        .let { zero -> zero - fieldStart }
+                    val length =
+                        firstZeroIndex(bytes, fieldStart, fieldStart + MODEL_FIELD_SIZE)
+                            .let { zero -> zero - fieldStart }
                     if (length == 0) {
                         throw FirmwareException.InvalidHeaderField("model[$index]", "型号为空")
                     }
@@ -214,23 +215,39 @@ class FirmwareHeader(
             return builder.toString()
         }
 
-        private fun firstZeroIndex(bytes: ByteArray, start: Int, end: Int): Int {
+        private fun firstZeroIndex(
+            bytes: ByteArray,
+            start: Int,
+            end: Int,
+        ): Int {
             for (index in start until end) {
                 if (bytes[index].toInt() == 0) return index
             }
             return end
         }
 
-        private fun hasNonZeroTail(bytes: ByteArray, start: Int, end: Int): Boolean {
+        private fun hasNonZeroTail(
+            bytes: ByteArray,
+            start: Int,
+            end: Int,
+        ): Boolean {
             for (index in start until end) {
                 if (bytes[index].toInt() != 0) return true
             }
             return false
         }
 
-        private fun isSafeChar(char: Char, allowWildcard: Boolean): Boolean =
-            char in 'A'..'Z' || char in 'a'..'z' || char in '0'..'9' ||
-                char == '.' || char == '_' || char == '-' || (allowWildcard && char == '*')
+        private fun isSafeChar(
+            char: Char,
+            allowWildcard: Boolean,
+        ): Boolean =
+            char in 'A'..'Z' ||
+                char in 'a'..'z' ||
+                char in '0'..'9' ||
+                char == '.' ||
+                char == '_' ||
+                char == '-' ||
+                (allowWildcard && char == '*')
 
         private fun isModelValidChar(char: Char): Boolean = isSafeChar(char, allowWildcard = true)
 
@@ -240,13 +257,21 @@ class FirmwareHeader(
             return model.all { isSafeChar(it, allowWildcard = false) }
         }
 
-        private fun writeU16(bytes: ByteArray, offset: Int, value: Int) {
+        private fun writeU16(
+            bytes: ByteArray,
+            offset: Int,
+            value: Int,
+        ) {
             require(value in 0..0xFFFF) { "u16 超出范围: $value" }
             bytes[offset] = (value and 0xFF).toByte()
             bytes[offset + 1] = ((value shr 8) and 0xFF).toByte()
         }
 
-        private fun writeU32(bytes: ByteArray, offset: Int, value: Long) {
+        private fun writeU32(
+            bytes: ByteArray,
+            offset: Int,
+            value: Long,
+        ) {
             require(value in 0..0xFFFFFFFFL) { "u32 超出范围: $value" }
             bytes[offset] = (value and 0xFF).toByte()
             bytes[offset + 1] = ((value shr 8) and 0xFF).toByte()
@@ -254,10 +279,15 @@ class FirmwareHeader(
             bytes[offset + 3] = ((value shr 24) and 0xFF).toByte()
         }
 
-        private fun readU16(bytes: ByteArray, offset: Int): Int =
-            (bytes[offset].toInt() and 0xFF) or ((bytes[offset + 1].toInt() and 0xFF) shl 8)
+        private fun readU16(
+            bytes: ByteArray,
+            offset: Int,
+        ): Int = (bytes[offset].toInt() and 0xFF) or ((bytes[offset + 1].toInt() and 0xFF) shl 8)
 
-        private fun readU32(bytes: ByteArray, offset: Int): Long {
+        private fun readU32(
+            bytes: ByteArray,
+            offset: Int,
+        ): Long {
             val low = readU16(bytes, offset).toLong()
             val high = readU16(bytes, offset + 2).toLong()
             return low or (high shl 16)

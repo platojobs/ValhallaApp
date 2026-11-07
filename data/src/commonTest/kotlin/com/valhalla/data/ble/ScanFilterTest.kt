@@ -5,7 +5,6 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class ScanFilterTest {
-
     @Test
     fun `空过滤条件匹配任意设备`() {
         val filter = ScanFilter()

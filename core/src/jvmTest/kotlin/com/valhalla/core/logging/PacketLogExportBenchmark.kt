@@ -38,7 +38,7 @@ fun main(args: Array<String>) {
         val warmup = index == 0
         val sample = measure(entryCount)
         samples += sample
-        val prefix = if (warmup) "预热" else "第 ${index} 轮"
+        val prefix = if (warmup) "预热" else "第 $index 轮"
         println(
             "$prefix：生成 ${sample.generateMillis}ms | 导出 ${sample.exportMillis}ms | " +
                 "条目 ${sample.entryCount} | 输出 ${formatBytes(sample.byteSize)} | " +
@@ -61,7 +61,7 @@ fun main(args: Array<String>) {
     println("| --- | --- |")
     println("| 样本 | $entryCount 条 / ${formatBytes(outputBytes)} 输出 |")
     println("| 生成耗时（平均） | ${"%.1f".format(avgGenerate)} ms |")
-    println("| 导出耗时（平均 / 最小） | ${"%.1f".format(avgExport)} ms / ${minExport} ms |")
+    println("| 导出耗时（平均 / 最小） | ${"%.1f".format(avgExport)} ms / $minExport ms |")
     println("| 导出吞吐 | ${"%.1f".format(throughput)} MiB/s |")
     println("| 实际导出条目 | ${measured.first().entryCount} |")
     println("| 峰值单块缓冲 | ${measured.maxOf { it.peakBufferChars }} 字符（上限 ${PacketLogExporter.STREAM_CHUNK_CHARS}） |")
@@ -82,19 +82,21 @@ private fun measure(entryCount: Int): Sample {
     val heapBefore = usedHeapBytes()
 
     val exportStart = System.nanoTime()
-    val result = runBlocking {
-        PacketLogExporter.build(
-            entries = entries,
-            nowMillis = NOW,
-            zoneOffsetMinutes = 480,
-            options = PacketLogExportOptions(
-                maxEntries = PacketLogExportOptions.MAX_ENTRIES,
-                maxBytes = PacketLogExportOptions.MAX_BYTES,
-                maxHexCharsPerEntry = 4096,
-            ),
-            format = PacketLogExportFormat.JSON,
-        )
-    }
+    val result =
+        runBlocking {
+            PacketLogExporter.build(
+                entries = entries,
+                nowMillis = NOW,
+                zoneOffsetMinutes = 480,
+                options =
+                    PacketLogExportOptions(
+                        maxEntries = PacketLogExportOptions.MAX_ENTRIES,
+                        maxBytes = PacketLogExportOptions.MAX_BYTES,
+                        maxHexCharsPerEntry = 4096,
+                    ),
+                format = PacketLogExportFormat.JSON,
+            )
+        }
     val exportMillis = (System.nanoTime() - exportStart) / 1_000_000
     val heapAfterExport = usedHeapBytes()
     System.gc()
@@ -141,13 +143,16 @@ private fun usedHeapBytes(): Long {
 
 private fun formatBytes(bytes: Int): String = formatBytes(bytes.toLong())
 
-private fun formatBytes(bytes: Long): String = when {
-    bytes >= 1024 * 1024 -> "${"%.2f".format(bytes / 1024.0 / 1024.0)} MiB"
-    bytes >= 1024 -> "${"%.1f".format(bytes / 1024.0)} KiB"
-    else -> "$bytes B"
-}
+private fun formatBytes(bytes: Long): String =
+    when {
+        bytes >= 1024 * 1024 -> "${"%.2f".format(bytes / 1024.0 / 1024.0)} MiB"
+        bytes >= 1024 -> "${"%.1f".format(bytes / 1024.0)} KiB"
+        else -> "$bytes B"
+    }
 
-private fun argValue(args: Array<String>, name: String): String? =
-    args.firstOrNull { it.startsWith("$name=") }?.substringAfter('=')
+private fun argValue(
+    args: Array<String>,
+    name: String,
+): String? = args.firstOrNull { it.startsWith("$name=") }?.substringAfter('=')
 
 private const val NOW = 1_793_809_800_000L

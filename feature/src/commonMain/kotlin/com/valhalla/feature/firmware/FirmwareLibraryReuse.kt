@@ -11,14 +11,16 @@ import com.valhalla.core.firmware.FirmwareReuseReason
  * 不复用预检结果，也不相信内存里的旧包：文件可能已被系统清理、移动或被替换。
  * 只有「能打开 + CRC 与记录一致」才允许直接进入升级流程；任何异常都返回不可用。
  */
-class FirmwareLibraryReuse(private val picker: FirmwarePicker) {
-
+class FirmwareLibraryReuse(
+    private val picker: FirmwarePicker,
+) {
     suspend fun check(record: FirmwareLibraryRecord): FirmwareReuseCheck {
-        val picked = try {
-            picker.openFirmware(record.sourcePath)
-        } catch (_: Throwable) {
-            null
-        } ?: return FirmwareReuseCheck.Missing(record, FirmwareReuseReason.ACCESS_DENIED)
+        val picked =
+            try {
+                picker.openFirmware(record.sourcePath)
+            } catch (_: Throwable) {
+                null
+            } ?: return FirmwareReuseCheck.Missing(record, FirmwareReuseReason.ACCESS_DENIED)
 
         return try {
             val parsed = FirmwareParser.parse(picked.name, picked.source)

@@ -1,0 +1,16 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+indent_size = 4
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.{kt,kts}]
+ktlint_code_style = ktlint_official
+max_line_length = 160
+# Compose 的官方命名约定是 PascalCase；该设置为 ktlint 官方支持的注解豁免，
+# 仅对 @Composable 函数生效，普通函数仍执行 lowercase/camelCase 校验。
+ktlint_function_naming_ignore_when_annotated_with = Composable

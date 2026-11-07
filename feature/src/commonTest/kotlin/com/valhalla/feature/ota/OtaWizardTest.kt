@@ -8,7 +8,6 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class OtaWizardTest {
-
     @Test
     fun stepsOnlyAdvanceWhenTheCurrentStepIsSatisfied() {
         assertEquals(
@@ -80,18 +79,23 @@ class OtaWizardTest {
 
     @Test
     fun precheckRulesMapEveryErrorToExactlyOneRule() {
-        val result = FirmwarePrecheckResult(
-            errors = listOf(
-                FirmwareException.HardwareModelMismatch("VX-1", listOf("VX-2")),
-                FirmwareException.PayloadChecksumMismatch(1, 2),
-            ),
-        )
+        val result =
+            FirmwarePrecheckResult(
+                errors =
+                    listOf(
+                        FirmwareException.HardwareModelMismatch("VX-1", listOf("VX-2")),
+                        FirmwareException.PayloadChecksumMismatch(1, 2),
+                    ),
+            )
         val rules = OtaPrecheckRuleEvaluator.evaluate(result)
         assertEquals(OtaPrecheckRule.ordered, rules.map { it.rule })
         assertEquals(OtaPrecheckRuleStatus.BLOCKING, rules.first { it.rule == OtaPrecheckRule.DEVICE_MODEL }.status)
         assertEquals(OtaPrecheckRuleStatus.BLOCKING, rules.first { it.rule == OtaPrecheckRule.PAYLOAD_CRC }.status)
-        assertTrue(rules.filterNot { it.rule == OtaPrecheckRule.DEVICE_MODEL || it.rule == OtaPrecheckRule.PAYLOAD_CRC }
-            .all { it.status == OtaPrecheckRuleStatus.PASSED })
+        assertTrue(
+            rules
+                .filterNot { it.rule == OtaPrecheckRule.DEVICE_MODEL || it.rule == OtaPrecheckRule.PAYLOAD_CRC }
+                .all { it.status == OtaPrecheckRuleStatus.PASSED },
+        )
     }
 
     @Test

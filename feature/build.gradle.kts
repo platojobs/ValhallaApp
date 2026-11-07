@@ -5,6 +5,9 @@ plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.compose.multiplatform)
     alias(libs.plugins.compose.compiler)
+    alias(libs.plugins.detekt)
+    alias(libs.plugins.ktlint)
+    alias(libs.plugins.kover)
 }
 
 /**
@@ -37,16 +40,18 @@ val generateFirmwareKey by tasks.registering {
         val envValue = firmwareKeyEnv.orNull?.takeIf { it.isNotBlank() }
         val propertyValue = firmwareKeyProperty.orNull?.takeIf { it.isNotBlank() }
         val selected = envValue ?: propertyValue
-        val source = when {
-            envValue != null -> "environment"
-            propertyValue != null -> "gradle-property"
-            else -> "none"
-        }
+        val source =
+            when {
+                envValue != null -> "environment"
+                propertyValue != null -> "gradle-property"
+                else -> "none"
+            }
 
-        val normalized = selected
-            ?.replace("\\n", "\n")
-            ?.trim()
-            ?.takeIf { it.isNotEmpty() }
+        val normalized =
+            selected
+                ?.replace("\\n", "\n")
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() }
 
         val resourcesDir = outputDir.resolve("resources/firmware").apply { mkdirs() }
         val kotlinDir = outputDir.resolve("kotlin/com/valhalla/feature/firmware").apply { mkdirs() }
@@ -55,12 +60,13 @@ val generateFirmwareKey by tasks.registering {
             resourcesDir.resolve("signing-key.pem").writeText(normalized + "\n")
         }
 
-        val escaped = normalized
-            ?.replace("\\", "\\\\")
-            ?.replace("\"", "\\\"")
-            ?.replace("\r", "")
-            ?.replace("\n", "\\n")
-            .orEmpty()
+        val escaped =
+            normalized
+                ?.replace("\\", "\\\\")
+                ?.replace("\"", "\\\"")
+                ?.replace("\r", "")
+                ?.replace("\n", "\\n")
+                .orEmpty()
 
         kotlinDir.resolve("BuildInjectedFirmwareKey.kt").writeText(
             """
@@ -126,12 +132,18 @@ kotlin {
 
 android {
     namespace = "com.valhalla.feature"
-    compileSdk = libs.versions.androidCompileSdk.get().toInt()
+    compileSdk =
+        libs.versions.androidCompileSdk
+            .get()
+            .toInt()
 
     sourceSets.getByName("main").assets.srcDir(firmwareKeyResourcesDir)
 
     defaultConfig {
-        minSdk = libs.versions.androidMinSdk.get().toInt()
+        minSdk =
+            libs.versions.androidMinSdk
+                .get()
+                .toInt()
     }
 
     compileOptions {
@@ -143,9 +155,33 @@ android {
 tasks.matching { it.name.startsWith("compile") && it.name.contains("Kotlin") }.configureEach {
     dependsOn(generateFirmwareKey)
 }
-tasks.matching {
-    it.name.endsWith("ProcessResources") ||
-        (it.name.startsWith("merge") && it.name.endsWith("Assets"))
-}.configureEach {
+tasks
+    .matching {
+        it.name.endsWith("ProcessResources") ||
+            (it.name.startsWith("merge") && it.name.endsWith("Assets"))
+    }.configureEach {
+        dependsOn(generateFirmwareKey)
+    }
+
+// ktlint 会读取 commonMain 源集（含生成的公钥常量），需与生成任务建立显式依赖。
+tasks.matching { it.name.contains("ktlint", ignoreCase = true) }.configureEach {
     dependsOn(generateFirmwareKey)
+}
+
+// 只统计 JVM 单元测试覆盖率，不含 Android instrumented；行覆盖阈值 60%。
+// Compose UI 包依赖 Android/iOS 渲染环境，JVM 单测无法执行，按可测逻辑范围统计
+// （ui 包排除；其余逻辑仍按 60% 硬阈值校验，见 docs/static-analysis-baseline.md）。
+kover {
+    reports {
+        filters {
+            excludes {
+                packages("com.valhalla.feature.ui")
+            }
+        }
+        verify {
+            rule {
+                minBound(60)
+            }
+        }
+    }
 }

@@ -35,7 +35,6 @@ data class RemoteErrorPayload(
  * 接入时只需替换实现并在应用入口注入（见 `docs/architecture.md`）。
  */
 interface RemoteErrorReporter {
-
     /** 是否启用；false 时调度器直接丢弃，不产生网络请求。 */
     val enabled: Boolean get() = true
 
@@ -46,7 +45,6 @@ interface RemoteErrorReporter {
 
 /** 默认空实现：不做任何网络请求，也不保留数据。 */
 object NoopRemoteErrorReporter : RemoteErrorReporter {
-
     override val enabled: Boolean = false
 
     override suspend fun report(batch: List<RemoteErrorPayload>) = Unit
@@ -67,7 +65,6 @@ class RemoteErrorDispatcher(
     private val batchSize: Int = DEFAULT_BATCH_SIZE,
     private val flushIntervalMillis: Long = DEFAULT_FLUSH_INTERVAL_MILLIS,
 ) {
-
     init {
         require(batchSize > 0) { "batchSize 必须大于 0" }
         require(flushIntervalMillis >= 0) { "flushIntervalMillis 不能为负" }
@@ -76,37 +73,38 @@ class RemoteErrorDispatcher(
     private val queue = Channel<AppError>(Channel.UNLIMITED)
     private var closed = false
 
-    private val job: Job = scope.launch {
-        val buffer = mutableListOf<AppError>()
-        while (isActive) {
-            val first = queue.receiveCatching().getOrNull() ?: break
-            buffer.add(first)
-            while (buffer.size < batchSize) {
-                val next = queue.tryReceive().getOrNull() ?: break
-                buffer.add(next)
-            }
-            if (buffer.size < batchSize && flushIntervalMillis > 0) {
-                delay(flushIntervalMillis)
+    private val job: Job =
+        scope.launch {
+            val buffer = mutableListOf<AppError>()
+            while (isActive) {
+                val first = queue.receiveCatching().getOrNull() ?: break
+                buffer.add(first)
                 while (buffer.size < batchSize) {
                     val next = queue.tryReceive().getOrNull() ?: break
                     buffer.add(next)
                 }
-            }
-            flush(buffer)
-            buffer.clear()
-        }
-        // 关闭后把剩余条目全部投递，保证不丢最后一批。
-        while (true) {
-            val next = queue.tryReceive().getOrNull() ?: break
-            buffer.add(next)
-            if (buffer.size >= batchSize) {
+                if (buffer.size < batchSize && flushIntervalMillis > 0) {
+                    delay(flushIntervalMillis)
+                    while (buffer.size < batchSize) {
+                        val next = queue.tryReceive().getOrNull() ?: break
+                        buffer.add(next)
+                    }
+                }
                 flush(buffer)
                 buffer.clear()
             }
+            // 关闭后把剩余条目全部投递，保证不丢最后一批。
+            while (true) {
+                val next = queue.tryReceive().getOrNull() ?: break
+                buffer.add(next)
+                if (buffer.size >= batchSize) {
+                    flush(buffer)
+                    buffer.clear()
+                }
+            }
+            flush(buffer)
+            reporter.close()
         }
-        flush(buffer)
-        reporter.close()
-    }
 
     /** 提交一条错误；上报关闭后静默丢弃，不影响本地环形记录。 */
     fun submit(error: AppError) {
@@ -131,14 +129,15 @@ class RemoteErrorDispatcher(
         runCatching { reporter.report(buffer.map(::toPayload)) }
     }
 
-    private fun toPayload(error: AppError): RemoteErrorPayload = RemoteErrorPayload(
-        timestampMillis = error.timestampMillis,
-        kind = error.kind.name,
-        origin = SensitiveTextRedaction.redactInline(error.origin),
-        type = SensitiveTextRedaction.redactInline(error.type),
-        message = SensitiveTextRedaction.redactInline(error.message),
-        stackTrace = SensitiveTextRedaction.redact(error.stackTrace),
-    )
+    private fun toPayload(error: AppError): RemoteErrorPayload =
+        RemoteErrorPayload(
+            timestampMillis = error.timestampMillis,
+            kind = error.kind.name,
+            origin = SensitiveTextRedaction.redactInline(error.origin),
+            type = SensitiveTextRedaction.redactInline(error.type),
+            message = SensitiveTextRedaction.redactInline(error.message),
+            stackTrace = SensitiveTextRedaction.redact(error.stackTrace),
+        )
 
     companion object {
         const val DEFAULT_BATCH_SIZE: Int = 20

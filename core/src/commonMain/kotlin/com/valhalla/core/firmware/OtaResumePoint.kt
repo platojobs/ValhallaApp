@@ -1,6 +1,9 @@
 package com.valhalla.core.firmware
 
 import com.valhalla.core.protocol.message.FirmwareVersion
+import com.valhalla.core.storage.StorageKind
+import com.valhalla.core.storage.StorageMigrationStatus
+import com.valhalla.core.storage.StorageSchemaMigrator
 
 /**
  * OTA 断点锚点。
@@ -27,7 +30,6 @@ data class OtaResumePoint(
     val firmwareVersion: FirmwareVersion,
     val crc32: Long,
 ) {
-
     fun isValid(): Boolean =
         sessionId in 0..0xFFFFFFFFL &&
             totalBytes in 1..Int.MAX_VALUE &&
@@ -42,8 +44,10 @@ data class OtaResumePoint(
             crc32 == firmware.payloadCrc32
 
     /** 同一固件内容的完整校验（含协议层 CRC-16）。 */
-    fun matchesFirmwarePayload(firmware: FirmwarePackage, crc16: Int): Boolean =
-        matchesFirmware(firmware) && this.crc16 == crc16
+    fun matchesFirmwarePayload(
+        firmware: FirmwarePackage,
+        crc16: Int,
+    ): Boolean = matchesFirmware(firmware) && this.crc16 == crc16
 
     /** 与内存中的 payload（无文件头）比对：版本 + 总长 + CRC-32 + CRC-16。版本号忽略渠道名。 */
     fun matchesPayload(
@@ -60,18 +64,29 @@ data class OtaResumePoint(
     fun progress(): Float = if (totalBytes == 0) 0f else (sentBytes.toFloat() / totalBytes).coerceIn(0f, 1f)
 }
 
+/** 断点读取结果：有效断点（或 null）+ schema 迁移状态。 */
+data class OtaCheckpointDecodeResult(
+    val point: OtaResumePoint?,
+    val status: StorageMigrationStatus,
+)
+
 /**
  * 断点字符串编码，供 SharedPreferences / NSUserDefaults 等键值存储使用：
  *
  * `v1|sessionId|major.minor.patch.build|channel|totalBytes|sentBytes|crc16|crc32`
  *
  * 渠道名与版本字段只允许 `A-Z a-z 0-9 . _ -`，因此无需转义；解码失败一律返回 null。
+ * 版本判断与未来版本回退统一经过 [StorageSchemaMigrator]。
  */
 object OtaResumePointCodec {
-
     private const val VERSION = "v1"
     private const val SEPARATOR = "|"
     private const val PARTS = 8
+
+    private data class ParsedOtaCheckpoint(
+        val point: OtaResumePoint?,
+        val reason: String?,
+    )
 
     fun encode(point: OtaResumePoint): String {
         require(point.isValid()) { "断点数据非法，拒绝编码: $point" }
@@ -88,30 +103,65 @@ object OtaResumePointCodec {
         ).joinToString(SEPARATOR)
     }
 
-    fun decode(raw: String?): OtaResumePoint? {
-        if (raw.isNullOrBlank()) return null
-        val parts = raw.split(SEPARATOR)
-        if (parts.size != PARTS || parts[0] != VERSION) return null
+    fun decode(raw: String?): OtaResumePoint? = decodeWithStatus(raw).point
 
-        val sessionId = parts[1].toLongOrNull() ?: return null
-        val version = decodeVersion(parts[2], parts[3]) ?: return null
-        val totalBytes = parts[4].toIntOrNull() ?: return null
-        val sentBytes = parts[5].toIntOrNull() ?: return null
-        val crc16 = parts[6].toIntOrNull() ?: return null
-        val crc32 = parts[7].toLongOrNull() ?: return null
-
-        val point = OtaResumePoint(
-            sessionId = sessionId,
-            sentBytes = sentBytes,
-            totalBytes = totalBytes,
-            crc16 = crc16,
-            firmwareVersion = version,
-            crc32 = crc32,
-        )
-        return point.takeIf { it.isValid() }
+    fun decodeWithStatus(raw: String?): OtaCheckpointDecodeResult {
+        val migration = StorageSchemaMigrator.migrate(StorageKind.OTA_CHECKPOINT, raw, ::readVersion)
+        val usable = migration.raw ?: return OtaCheckpointDecodeResult(null, migration.status)
+        val parsed = parse(usable)
+        return if (parsed.point != null) {
+            OtaCheckpointDecodeResult(parsed.point, migration.status)
+        } else {
+            OtaCheckpointDecodeResult(null, StorageMigrationStatus.Corrupted(parsed.reason.orEmpty()))
+        }
     }
 
-    private fun decodeVersion(versionPart: String, channel: String): FirmwareVersion? {
+    private fun parse(usable: String): ParsedOtaCheckpoint {
+        val parts = usable.split(SEPARATOR)
+        if (parts.size != PARTS) {
+            return ParsedOtaCheckpoint(null, "断点字段数量异常")
+        }
+        val sessionId =
+            parts[1].toLongOrNull()
+                ?: return ParsedOtaCheckpoint(null, "sessionId 无法解析")
+        val version =
+            decodeVersion(parts[2], parts[3])
+                ?: return ParsedOtaCheckpoint(null, "固件版本字段无法解析")
+        val totalBytes =
+            parts[4].toIntOrNull()
+                ?: return ParsedOtaCheckpoint(null, "totalBytes 无法解析")
+        val sentBytes =
+            parts[5].toIntOrNull()
+                ?: return ParsedOtaCheckpoint(null, "sentBytes 无法解析")
+        val crc16 =
+            parts[6].toIntOrNull()
+                ?: return ParsedOtaCheckpoint(null, "crc16 无法解析")
+        val crc32 =
+            parts[7].toLongOrNull()
+                ?: return ParsedOtaCheckpoint(null, "crc32 无法解析")
+
+        val point =
+            OtaResumePoint(
+                sessionId = sessionId,
+                sentBytes = sentBytes,
+                totalBytes = totalBytes,
+                crc16 = crc16,
+                firmwareVersion = version,
+                crc32 = crc32,
+            )
+        return if (point.isValid()) {
+            ParsedOtaCheckpoint(point, null)
+        } else {
+            ParsedOtaCheckpoint(null, "断点数据校验失败")
+        }
+    }
+
+    private fun readVersion(raw: String): Int? = raw.substringBefore(SEPARATOR).removePrefix("v").toIntOrNull()
+
+    private fun decodeVersion(
+        versionPart: String,
+        channel: String,
+    ): FirmwareVersion? {
         val fields = versionPart.split('.')
         if (fields.size != 4) return null
         val major = fields[0].toIntOrNull() ?: return null

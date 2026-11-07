@@ -7,9 +7,9 @@ package com.valhalla.core.security
 
 import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.usePinned
+import platform.CoreFoundation.CFDataRef
 import platform.CoreFoundation.CFDictionaryAddValue
 import platform.CoreFoundation.CFDictionaryCreateMutable
-import platform.CoreFoundation.CFDataRef
 import platform.CoreFoundation.CFRelease
 import platform.CoreFoundation.kCFAllocatorDefault
 import platform.Foundation.CFBridgingRetain
@@ -38,9 +38,13 @@ import platform.Security.kSecKeyAlgorithmECDSASignatureDigestX962SHA256
  * 2. **公钥格式**：`SecKeyCreateWithData` 的 EC 公钥要求 X9.63 原始点，
  *    因此先从 SPKI 中提取 `04 || X || Y`；证书则用 `SecCertificateCopyKey` 直接取公钥。
  */
-private class AppleEcdsaPublicKey(private val key: SecKeyRef) : PlatformEcdsaKey {
-
-    override fun verify(digest: ByteArray, signatureDer: ByteArray): Boolean {
+private class AppleEcdsaPublicKey(
+    private val key: SecKeyRef,
+) : PlatformEcdsaKey {
+    override fun verify(
+        digest: ByteArray,
+        signatureDer: ByteArray,
+    ): Boolean {
         val digestData = digest.toNSData()
         val signatureData = signatureDer.toNSData()
         val retainedDigest = CFBridgingRetain(digestData)
@@ -65,11 +69,12 @@ internal actual fun platformLoadEcdsaKeyFromSpki(der: ByteArray): PlatformEcdsaK
     if (point == null) {
         // 合法但非 P-256 的 EC 公钥（如 P-384/P-521）应归类为「不支持」而非「解析失败」，
         // 与 JVM/Android 的 KeyFactory + 曲线校验保持同一失败语义。
-        val code = if (der.containsAny(NON_P256_CURVE_OIDS)) {
-            EcdsaFailureCode.PUBLIC_KEY_UNSUPPORTED
-        } else {
-            EcdsaFailureCode.PUBLIC_KEY_PARSE
-        }
+        val code =
+            if (der.containsAny(NON_P256_CURVE_OIDS)) {
+                EcdsaFailureCode.PUBLIC_KEY_UNSUPPORTED
+            } else {
+                EcdsaFailureCode.PUBLIC_KEY_PARSE
+            }
         throw EcdsaKeyException(
             code,
             "SPKI 中未找到 P-256 公钥点（需 65 字节 04||X||Y）",
@@ -78,15 +83,15 @@ internal actual fun platformLoadEcdsaKeyFromSpki(der: ByteArray): PlatformEcdsaK
     return loadKey(point, "SPKI 公钥")
 }
 
-private val NON_P256_CURVE_OIDS = listOf(
-    // 1.3.132.0.34 = secp384r1
-    byteArrayOf(0x06, 0x05, 0x2B, 0x81.toByte(), 0x04, 0x00, 0x22),
-    // 1.3.132.0.35 = secp521r1
-    byteArrayOf(0x06, 0x05, 0x2B, 0x81.toByte(), 0x04, 0x00, 0x23),
-)
+private val NON_P256_CURVE_OIDS =
+    listOf(
+        // 1.3.132.0.34 = secp384r1
+        byteArrayOf(0x06, 0x05, 0x2B, 0x81.toByte(), 0x04, 0x00, 0x22),
+        // 1.3.132.0.35 = secp521r1
+        byteArrayOf(0x06, 0x05, 0x2B, 0x81.toByte(), 0x04, 0x00, 0x23),
+    )
 
-private fun ByteArray.containsAny(patterns: List<ByteArray>): Boolean =
-    patterns.any { pattern -> containsSubArray(pattern) }
+private fun ByteArray.containsAny(patterns: List<ByteArray>): Boolean = patterns.any { pattern -> containsSubArray(pattern) }
 
 private fun ByteArray.containsSubArray(pattern: ByteArray): Boolean {
     if (pattern.isEmpty() || pattern.size > size) return false
@@ -106,42 +111,52 @@ private fun ByteArray.containsSubArray(pattern: ByteArray): Boolean {
 internal actual fun platformLoadEcdsaKeyFromCertificate(der: ByteArray): PlatformEcdsaKey {
     val certificateData = der.toNSData()
     val retained = CFBridgingRetain(certificateData)
-    val key = try {
-        val certificate = SecCertificateCreateWithData(null, retained as CFDataRef)
-            ?: throw EcdsaKeyException(EcdsaFailureCode.PUBLIC_KEY_PARSE, "X.509 证书解析失败")
+    val key =
         try {
-            SecCertificateCopyKey(certificate)
-                ?: throw EcdsaKeyException(EcdsaFailureCode.PUBLIC_KEY_PARSE, "证书未包含可用公钥")
+            val certificate =
+                SecCertificateCreateWithData(null, retained as CFDataRef)
+                    ?: throw EcdsaKeyException(EcdsaFailureCode.PUBLIC_KEY_PARSE, "X.509 证书解析失败")
+            try {
+                SecCertificateCopyKey(certificate)
+                    ?: throw EcdsaKeyException(EcdsaFailureCode.PUBLIC_KEY_PARSE, "证书未包含可用公钥")
+            } finally {
+                CFRelease(certificate)
+            }
         } finally {
-            CFRelease(certificate)
+            CFRelease(retained)
         }
-    } finally {
-        CFRelease(retained)
-    }
     return checkAndWrap(key, "证书公钥")
 }
 
-private fun loadKey(rawPoint: ByteArray, label: String): PlatformEcdsaKey {
+private fun loadKey(
+    rawPoint: ByteArray,
+    label: String,
+): PlatformEcdsaKey {
     val data = rawPoint.toNSData()
     val retainedData = CFBridgingRetain(data)
-    val dictionary = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, null, null)
-        ?: throw EcdsaKeyException(EcdsaFailureCode.PLATFORM_ERROR, "无法创建公钥属性字典")
+    val dictionary =
+        CFDictionaryCreateMutable(kCFAllocatorDefault, 0, null, null)
+            ?: throw EcdsaKeyException(EcdsaFailureCode.PLATFORM_ERROR, "无法创建公钥属性字典")
     val retainedSize = CFBridgingRetain(NSNumber(int = P256_SIZE_BITS))
-    val key = try {
-        CFDictionaryAddValue(dictionary, kSecAttrKeyType, kSecAttrKeyTypeECSECPrimeRandom)
-        CFDictionaryAddValue(dictionary, kSecAttrKeyClass, kSecAttrKeyClassPublic)
-        CFDictionaryAddValue(dictionary, kSecAttrKeySizeInBits, retainedSize)
-        SecKeyCreateWithData(retainedData as CFDataRef, dictionary, null)
-            ?: throw EcdsaKeyException(EcdsaFailureCode.PUBLIC_KEY_PARSE, "$label 无法导入 Security.framework")
-    } finally {
-        CFRelease(retainedSize)
-        CFRelease(dictionary)
-        CFRelease(retainedData)
-    }
+    val key =
+        try {
+            CFDictionaryAddValue(dictionary, kSecAttrKeyType, kSecAttrKeyTypeECSECPrimeRandom)
+            CFDictionaryAddValue(dictionary, kSecAttrKeyClass, kSecAttrKeyClassPublic)
+            CFDictionaryAddValue(dictionary, kSecAttrKeySizeInBits, retainedSize)
+            SecKeyCreateWithData(retainedData as CFDataRef, dictionary, null)
+                ?: throw EcdsaKeyException(EcdsaFailureCode.PUBLIC_KEY_PARSE, "$label 无法导入 Security.framework")
+        } finally {
+            CFRelease(retainedSize)
+            CFRelease(dictionary)
+            CFRelease(retainedData)
+        }
     return checkAndWrap(key, label)
 }
 
-private fun checkAndWrap(key: SecKeyRef, label: String): PlatformEcdsaKey {
+private fun checkAndWrap(
+    key: SecKeyRef,
+    label: String,
+): PlatformEcdsaKey {
     val blockSize = SecKeyGetBlockSize(key)
     if (blockSize != P256_BLOCK_BYTES.toULong()) {
         CFRelease(key)
@@ -156,6 +171,7 @@ private fun checkAndWrap(key: SecKeyRef, label: String): PlatformEcdsaKey {
 private const val P256_SIZE_BITS = 256
 private const val P256_BLOCK_BYTES = 32
 
-private fun ByteArray.toNSData(): NSData = usePinned { pinned ->
-    NSData.create(bytes = pinned.addressOf(0), length = size.toULong())
-}
+private fun ByteArray.toNSData(): NSData =
+    usePinned { pinned ->
+        NSData.create(bytes = pinned.addressOf(0), length = size.toULong())
+    }

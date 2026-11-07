@@ -68,10 +68,10 @@ class ParamEditorController(
     private val clockMillis: () -> Long = { Clock.System.now().toEpochMilliseconds() },
     private val onError: (Throwable) -> Unit = {},
 ) {
-
-    private val mutableState = MutableStateFlow(
-        ParamEditorState(fields = catalog.params.map { ParamFieldState(spec = it) }),
-    )
+    private val mutableState =
+        MutableStateFlow(
+            ParamEditorState(fields = catalog.params.map { ParamFieldState(spec = it) }),
+        )
     val state: StateFlow<ParamEditorState> = mutableState.asStateFlow()
 
     /** 串行读取全部参数；已有读取或写入在途时返回 false。 */
@@ -94,10 +94,11 @@ class ParamEditorController(
             onError(error)
             mutableState.update {
                 it.copy(
-                    error = UiMessage(
-                        StringKey.PARAM_LOAD_FAILED,
-                        mapOf("detail" to (error.message ?: StringKey.UNKNOWN.name)),
-                    ),
+                    error =
+                        UiMessage(
+                            StringKey.PARAM_LOAD_FAILED,
+                            mapOf("detail" to (error.message ?: StringKey.UNKNOWN.name)),
+                        ),
                 )
             }
         } finally {
@@ -107,7 +108,10 @@ class ParamEditorController(
     }
 
     /** 更新编辑框文本；输入时清除上一次的校验/保存提示。 */
-    fun updateText(paramId: Int, text: String) {
+    fun updateText(
+        paramId: Int,
+        text: String,
+    ) {
         updateField(paramId) { it.copy(text = text, validationError = null) }
     }
 
@@ -118,8 +122,9 @@ class ParamEditorController(
      */
     suspend fun save(paramId: Int): Boolean {
         val snapshot = mutableState.value
-        val field = snapshot.fields.firstOrNull { it.spec.id == paramId }
-            ?: return fail(UiMessage(StringKey.PARAM_UNKNOWN_ITEM, mapOf("id" to paramId.toString())))
+        val field =
+            snapshot.fields.firstOrNull { it.spec.id == paramId }
+                ?: return fail(UiMessage(StringKey.PARAM_UNKNOWN_ITEM, mapOf("id" to paramId.toString())))
         if (!field.spec.writable) {
             return fail(UiMessage(StringKey.PARAM_READ_ONLY_ITEM, mapOf("name" to field.spec.displayName)))
         }
@@ -127,8 +132,11 @@ class ParamEditorController(
             return fail(UiMessage(StringKey.PARAM_BUSY))
         }
         if (snapshot.savingId != null) {
-            val busyName = snapshot.fields.firstOrNull { it.spec.id == snapshot.savingId }
-                ?.spec?.displayName ?: snapshot.savingId.toString()
+            val busyName =
+                snapshot.fields
+                    .firstOrNull { it.spec.id == snapshot.savingId }
+                    ?.spec
+                    ?.displayName ?: snapshot.savingId.toString()
             return fail(UiMessage(StringKey.PARAM_SAVING_BUSY, mapOf("name" to busyName)))
         }
         val validation = catalog.validate(field.spec, field.text)
@@ -144,46 +152,49 @@ class ParamEditorController(
                 message = null,
                 error = null,
                 errorCode = null,
-                fields = it.fields.map { item ->
-                    if (item.spec.id == paramId) {
-                        item.copy(saving = true, validationError = null)
-                    } else {
-                        item
-                    }
-                },
+                fields =
+                    it.fields.map { item ->
+                        if (item.spec.id == paramId) {
+                            item.copy(saving = true, validationError = null)
+                        } else {
+                            item
+                        }
+                    },
             )
         }
 
         return try {
             val response = dispatcher.execute(SetParamRequest(paramId, valid.bytes))
             if (response !is SetParamResponse) {
-                throw IllegalStateException("写参数应答类型异常: ${response::class.simpleName}")
+                error("写参数应答类型异常: ${response::class.simpleName}")
             }
             val now = clockMillis()
             mutableState.update {
                 it.copy(
                     savingId = null,
-                    message = UiMessage(
-                        StringKey.PARAM_SAVED_FIELD,
-                        mapOf("name" to field.spec.displayName),
-                    ),
+                    message =
+                        UiMessage(
+                            StringKey.PARAM_SAVED_FIELD,
+                            mapOf("name" to field.spec.displayName),
+                        ),
                     error = null,
                     errorCode = null,
-                    fields = it.fields.map { item ->
-                        if (item.spec.id == paramId) {
-                            item.copy(
-                                text = valid.canonicalText,
-                                originalText = valid.canonicalText,
-                                loaded = true,
-                                saving = false,
-                                validationError = null,
-                                loadError = null,
-                                lastSavedAtEpochMillis = now,
-                            )
-                        } else {
-                            item
-                        }
-                    },
+                    fields =
+                        it.fields.map { item ->
+                            if (item.spec.id == paramId) {
+                                item.copy(
+                                    text = valid.canonicalText,
+                                    originalText = valid.canonicalText,
+                                    loaded = true,
+                                    saving = false,
+                                    validationError = null,
+                                    loadError = null,
+                                    lastSavedAtEpochMillis = now,
+                                )
+                            } else {
+                                item
+                            }
+                        },
                 )
             }
             true
@@ -194,15 +205,17 @@ class ParamEditorController(
             mutableState.update {
                 it.copy(
                     savingId = null,
-                    error = UiMessage(
-                        StringKey.PARAM_SAVE_FAILED,
-                        args = mapOf("name" to field.spec.displayName),
-                        nested = mapOf("detail" to info.ui),
-                    ),
+                    error =
+                        UiMessage(
+                            StringKey.PARAM_SAVE_FAILED,
+                            args = mapOf("name" to field.spec.displayName),
+                            nested = mapOf("detail" to info.ui),
+                        ),
                     errorCode = info.status,
-                    fields = it.fields.map { item ->
-                        if (item.spec.id == paramId) item.copy(saving = false) else item
-                    },
+                    fields =
+                        it.fields.map { item ->
+                            if (item.spec.id == paramId) item.copy(saving = false) else item
+                        },
                 )
             }
             false
@@ -218,7 +231,7 @@ class ParamEditorController(
         try {
             val response = dispatcher.execute(GetParamRequest(spec.id))
             if (response !is ParamResponse) {
-                throw IllegalStateException("参数应答类型异常: ${response::class.simpleName}")
+                error("参数应答类型异常: ${response::class.simpleName}")
             }
             val text = catalog.format(spec, response.value)
             updateField(spec.id) {
@@ -246,12 +259,16 @@ class ParamEditorController(
         return false
     }
 
-    private fun updateField(paramId: Int, transform: (ParamFieldState) -> ParamFieldState) {
+    private fun updateField(
+        paramId: Int,
+        transform: (ParamFieldState) -> ParamFieldState,
+    ) {
         mutableState.update { state ->
             state.copy(
-                fields = state.fields.map { field ->
-                    if (field.spec.id == paramId) transform(field) else field
-                },
+                fields =
+                    state.fields.map { field ->
+                        if (field.spec.id == paramId) transform(field) else field
+                    },
             )
         }
     }

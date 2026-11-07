@@ -10,17 +10,20 @@ import kotlin.math.roundToLong
  * 时间统一复用 [formatAbsoluteTime]（绝对时间）与 [formatRelativeTime]（相对时间），
  * 只把标签传给 core，避免 UI 层再写一套时间计算。
  */
-class LocaleFormat(val language: ResolvedLanguage) {
-
+class LocaleFormat(
+    val language: ResolvedLanguage,
+) {
     private val strings = StringResolver(language)
 
     /** 整数：英文使用千位分隔符，中文不使用（中文界面习惯直接展示原始数字）。 */
-    fun number(value: Long): String =
-        if (language == ResolvedLanguage.ENGLISH) groupDigits(value.toString()) else value.toString()
+    fun number(value: Long): String = if (language == ResolvedLanguage.ENGLISH) groupDigits(value.toString()) else value.toString()
 
     fun number(value: Int): String = number(value.toLong())
 
-    fun percent(current: Long, total: Long): String {
+    fun percent(
+        current: Long,
+        total: Long,
+    ): String {
         if (total <= 0L) return "0%"
         return "${(current * 100.0 / total).roundToLong()}%"
     }
@@ -45,17 +48,23 @@ class LocaleFormat(val language: ResolvedLanguage) {
     }
 
     /** 相对时间，标签按语言切换，时长计算仍走 core。 */
-    fun relativeTime(entryMillis: Long, nowMillis: Long): String = formatRelativeTime(
-        entryMillis = entryMillis,
-        nowMillis = nowMillis,
-        justNow = strings.t(StringKey.TIME_JUST_NOW),
-        agoSuffix = strings.t(StringKey.TIME_AGO_SUFFIX),
-        futurePrefix = strings.t(StringKey.TIME_FUTURE_PREFIX),
-    )
+    fun relativeTime(
+        entryMillis: Long,
+        nowMillis: Long,
+    ): String =
+        formatRelativeTime(
+            entryMillis = entryMillis,
+            nowMillis = nowMillis,
+            justNow = strings.t(StringKey.TIME_JUST_NOW),
+            agoSuffix = strings.t(StringKey.TIME_AGO_SUFFIX),
+            futurePrefix = strings.t(StringKey.TIME_FUTURE_PREFIX),
+        )
 
     /** 绝对时间，复用 core 的本地时间格式化。 */
-    fun absoluteTime(epochMillis: Long, zoneOffsetMinutes: Int): String =
-        formatAbsoluteTime(epochMillis, zoneOffsetMinutes)
+    fun absoluteTime(
+        epochMillis: Long,
+        zoneOffsetMinutes: Int,
+    ): String = formatAbsoluteTime(epochMillis, zoneOffsetMinutes)
 
     private fun oneDecimal(value: Double): String {
         val scaled = (value * 10.0).roundToLong()

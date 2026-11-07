@@ -1,6 +1,9 @@
 package com.valhalla.core.profile
 
 import com.valhalla.core.logging.SensitiveTextRedaction
+import com.valhalla.core.storage.StorageKind
+import com.valhalla.core.storage.StorageMigrationStatus
+import com.valhalla.core.storage.StorageSchemaMigrator
 
 /** OTA 一次执行的结果。 */
 enum class OtaOutcome {
@@ -27,7 +30,6 @@ data class OtaHistoryRecord(
     val sentBytes: Int = 0,
     val totalBytes: Int = 0,
 ) {
-
     init {
         require(firmwareVersion.isNotEmpty()) { "固件版本不能为空" }
         require(finishedAtEpochMillis >= 0) { "完成时间不能为负" }
@@ -59,7 +61,6 @@ data class DeviceProfile(
     /** 最近一次 OTA 记录在前；受仓储层 [DeviceProfileRepository.maxOtaHistory] 限制。 */
     val otaHistory: List<OtaHistoryRecord> = emptyList(),
 ) {
-
     init {
         require(deviceId.isNotBlank()) { "设备 id 不能为空" }
         require(lastConnectedAtEpochMillis >= 0) { "最后连接时间不能为负" }
@@ -73,7 +74,6 @@ data class DeviceProfile(
 
 /** 设备档案的原始字符串存储。平台实现由 data 模块提供，JVM 测试使用内存实现。 */
 interface DeviceProfileStore {
-
     fun loadRaw(): String?
 
     fun saveRaw(raw: String)
@@ -82,8 +82,9 @@ interface DeviceProfileStore {
 }
 
 /** 内存实现：用于 JVM / 单元测试，进程退出即丢失。 */
-class InMemoryDeviceProfileStore(private var raw: String? = null) : DeviceProfileStore {
-
+class InMemoryDeviceProfileStore(
+    private var raw: String? = null,
+) : DeviceProfileStore {
     override fun loadRaw(): String? = raw
 
     override fun saveRaw(raw: String) {
@@ -94,6 +95,12 @@ class InMemoryDeviceProfileStore(private var raw: String? = null) : DeviceProfil
         raw = null
     }
 }
+
+/** 设备档案解码结果：档案内容 + schema 迁移状态。 */
+data class DeviceProfileDecodeResult(
+    val profiles: List<DeviceProfile>,
+    val status: StorageMigrationStatus,
+)
 
 /**
  * 设备档案的版本化行式编码。
@@ -113,9 +120,9 @@ class InMemoryDeviceProfileStore(private var raw: String? = null) : DeviceProfil
  *
  * 字段使用 UTF-8 百分号转义（仅保留 `A-Z a-z 0-9 . _ ~ -`），空字符串表示 null。
  * 任何结构损坏或版本不匹配的记录都会被跳过，读取不会抛出异常。
+ * 版本判断与未来版本回退统一经过 [StorageSchemaMigrator]。
  */
 object DeviceProfileCodec {
-
     private const val VERSION = "v1"
     private const val PROFILE = "P"
     private const val OTA = "O"
@@ -124,60 +131,63 @@ object DeviceProfileCodec {
     private const val OTA_PARTS = 9
     private const val HEX_DIGITS = "0123456789ABCDEF"
 
-    fun encode(profiles: List<DeviceProfile>): String = buildString {
-        append(VERSION)
-        append('\n')
-        profiles.forEach { profile ->
-            append(PROFILE)
-            append(SEPARATOR)
-            // deviceId 是档案主键，必须保留原值用于匹配；
-            // 其余自由文本在落盘/导出前统一脱敏（见 docs/privacy.md 字段级规则）。
-            append(escape(profile.deviceId))
-            append(SEPARATOR)
-            append(escape(redactInline(profile.displayName)))
-            append(SEPARATOR)
-            append(escape(redactInline(profile.vendor)))
-            append(SEPARATOR)
-            append(escape(redactInline(profile.model)))
-            append(SEPARATOR)
-            append(profile.lastConnectedAtEpochMillis)
-            append(SEPARATOR)
-            append(escape(redactInline(profile.lastKnownFirmwareVersion)))
-            append(SEPARATOR)
-            append(profile.lastKnownBatteryPercent?.toString().orEmpty())
-            append(SEPARATOR)
-            append(profile.lastKnownCharging?.let { if (it) "1" else "0" }.orEmpty())
+    fun encode(profiles: List<DeviceProfile>): String =
+        buildString {
+            append(VERSION)
             append('\n')
-            profile.otaHistory.forEach { record ->
-                append(OTA)
+            profiles.forEach { profile ->
+                append(PROFILE)
                 append(SEPARATOR)
-                append(escape(redactInline(record.firmwareVersion)))
+                // deviceId 是档案主键，必须保留原值用于匹配；
+                // 其余自由文本在落盘/导出前统一脱敏（见 docs/privacy.md 字段级规则）。
+                append(escape(profile.deviceId))
                 append(SEPARATOR)
-                append(record.finishedAtEpochMillis)
+                append(escape(redactInline(profile.displayName)))
                 append(SEPARATOR)
-                append(record.durationMillis)
+                append(escape(redactInline(profile.vendor)))
                 append(SEPARATOR)
-                append(record.outcome.name)
+                append(escape(redactInline(profile.model)))
                 append(SEPARATOR)
-                append(escape(redactInline(record.errorCode)))
+                append(profile.lastConnectedAtEpochMillis)
                 append(SEPARATOR)
-                append(escape(redactInline(record.detail)))
+                append(escape(redactInline(profile.lastKnownFirmwareVersion)))
                 append(SEPARATOR)
-                append(record.sentBytes)
+                append(profile.lastKnownBatteryPercent?.toString().orEmpty())
                 append(SEPARATOR)
-                append(record.totalBytes)
+                append(profile.lastKnownCharging?.let { if (it) "1" else "0" }.orEmpty())
                 append('\n')
+                profile.otaHistory.forEach { record ->
+                    append(OTA)
+                    append(SEPARATOR)
+                    append(escape(redactInline(record.firmwareVersion)))
+                    append(SEPARATOR)
+                    append(record.finishedAtEpochMillis)
+                    append(SEPARATOR)
+                    append(record.durationMillis)
+                    append(SEPARATOR)
+                    append(record.outcome.name)
+                    append(SEPARATOR)
+                    append(escape(redactInline(record.errorCode)))
+                    append(SEPARATOR)
+                    append(escape(redactInline(record.detail)))
+                    append(SEPARATOR)
+                    append(record.sentBytes)
+                    append(SEPARATOR)
+                    append(record.totalBytes)
+                    append('\n')
+                }
             }
         }
-    }
 
-    private fun redactInline(value: String?): String? =
-        value?.let { SensitiveTextRedaction.redactInline(it) }
+    private fun redactInline(value: String?): String? = value?.let { SensitiveTextRedaction.redactInline(it) }
 
-    fun decode(raw: String?): List<DeviceProfile> {
-        if (raw.isNullOrBlank()) return emptyList()
-        val lines = raw.split('\n')
-        if (lines.firstOrNull()?.trim() != VERSION) return emptyList()
+    fun decode(raw: String?): List<DeviceProfile> = decodeWithStatus(raw).profiles
+
+    /** 读取并暴露 schema 迁移状态；未来版本/损坏数据回退为空列表，不丢其它存储。 */
+    fun decodeWithStatus(raw: String?): DeviceProfileDecodeResult {
+        val migration = StorageSchemaMigrator.migrate(StorageKind.DEVICE_PROFILES, raw, ::readVersion)
+        val usable = migration.raw ?: return DeviceProfileDecodeResult(emptyList(), migration.status)
+        val lines = usable.split('\n')
 
         val result = mutableListOf<DeviceProfile>()
         var current: DeviceProfile? = null
@@ -199,7 +209,12 @@ object DeviceProfileCodec {
             }
         }
         current?.let(result::add)
-        return result
+        return DeviceProfileDecodeResult(result, migration.status)
+    }
+
+    private fun readVersion(raw: String): Int? {
+        val header = raw.lineSequence().firstOrNull()?.trim() ?: return null
+        return header.removePrefix("v").toIntOrNull()
     }
 
     private fun parseProfile(parts: List<String>): DeviceProfile? {
@@ -207,12 +222,13 @@ object DeviceProfileCodec {
         val deviceId = unescape(parts[1]) ?: return null
         val lastConnectedAt = parts[5].toLongOrNull() ?: return null
         val battery = if (parts[7].isEmpty()) null else parts[7].toIntOrNull() ?: return null
-        val charging = when (parts[8]) {
-            "" -> null
-            "0" -> false
-            "1" -> true
-            else -> return null
-        }
+        val charging =
+            when (parts[8]) {
+                "" -> null
+                "0" -> false
+                "1" -> true
+                else -> return null
+            }
         return runCatching {
             DeviceProfile(
                 deviceId = deviceId,

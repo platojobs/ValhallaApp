@@ -16,16 +16,16 @@ class FakeBleClient(
     private val scanFlow: Flow<BleDevice> = emptyFlow(),
     private val scanFlowProvider: ((ScanFilter) -> Flow<BleDevice>)? = null,
 ) : BleClient {
-
     override val adapterState = MutableStateFlow(BleAdapterState.POWERED_ON)
 
     override fun refreshAdapterState() = Unit
 
-    override fun scan(filter: ScanFilter): Flow<BleDevice> =
-        scanFlowProvider?.invoke(filter) ?: scanFlow
+    override fun scan(filter: ScanFilter): Flow<BleDevice> = scanFlowProvider?.invoke(filter) ?: scanFlow
 
-    override suspend fun connect(deviceId: String, timeoutMillis: Long): BleConnection =
-        throw BleException("测试环境不建立真实连接")
+    override suspend fun connect(
+        deviceId: String,
+        timeoutMillis: Long,
+    ): BleConnection = throw BleException("测试环境不建立真实连接")
 
     override fun close() = Unit
 
@@ -48,7 +48,6 @@ class FakeBleConnection(
     private val writeHandler: (WriteRecord) -> Unit = {},
     private val rssiReader: suspend () -> Int? = { null },
 ) : BleConnection {
-
     override val connected = MutableStateFlow(true)
 
     val writes: MutableList<WriteRecord> = mutableListOf()
@@ -64,10 +63,15 @@ class FakeBleConnection(
         writeHandler(record)
     }
 
-    override suspend fun read(serviceUuid: String, characteristicUuid: String): ByteArray =
-        readHandler(serviceUuid, characteristicUuid)
+    override suspend fun read(
+        serviceUuid: String,
+        characteristicUuid: String,
+    ): ByteArray = readHandler(serviceUuid, characteristicUuid)
 
-    override fun observe(serviceUuid: String, characteristicUuid: String): Flow<ByteArray> = emptyFlow()
+    override fun observe(
+        serviceUuid: String,
+        characteristicUuid: String,
+    ): Flow<ByteArray> = emptyFlow()
 
     override suspend fun readRssi(): Int? = rssiReader()
 

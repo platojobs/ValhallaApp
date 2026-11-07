@@ -48,7 +48,6 @@ class AutomationContext(
     val isLinkAlive: () -> Boolean,
     val platformDisplayName: String,
 ) {
-
     val target: DeviceConfigTarget
         get() {
             val state = detail.state.value
@@ -74,7 +73,6 @@ data class AutomationRunReport(
     val executions: List<AutomationExecution>,
     val skippedBecauseNotForeground: Boolean = false,
 ) {
-
     val failedCount: Int get() = executions.count { !it.success }
 }
 
@@ -97,8 +95,10 @@ class AutomationRuleRunner(
     private val clockMillis: () -> Long = { Clock.System.now().toEpochMilliseconds() },
     private val onDiagnosticReport: (String) -> Unit = {},
 ) {
-
-    suspend fun run(trigger: AutomationTrigger, context: AutomationContext): AutomationRunReport {
+    suspend fun run(
+        trigger: AutomationTrigger,
+        context: AutomationContext,
+    ): AutomationRunReport {
         if (!isForeground()) {
             return AutomationRunReport(trigger, emptyList(), skippedBecauseNotForeground = true)
         }
@@ -108,12 +108,13 @@ class AutomationRuleRunner(
         val executions = mutableListOf<AutomationExecution>()
         active.forEach { rule ->
             if (!context.isLinkAlive()) {
-                val failure = AutomationExecution(
-                    ruleId = rule.id,
-                    action = rule.action,
-                    success = false,
-                    detail = "链路已断开，跳过该规则",
-                )
+                val failure =
+                    AutomationExecution(
+                        ruleId = rule.id,
+                        action = rule.action,
+                        success = false,
+                        detail = "链路已断开，跳过该规则",
+                    )
                 executions += failure
                 record(context, rule, failure)
                 return@forEach
@@ -125,7 +126,10 @@ class AutomationRuleRunner(
         return AutomationRunReport(trigger, executions)
     }
 
-    private suspend fun execute(rule: AutomationRule, context: AutomationContext): AutomationExecution =
+    private suspend fun execute(
+        rule: AutomationRule,
+        context: AutomationContext,
+    ): AutomationExecution =
         try {
             when (rule.action) {
                 AutomationAction.READ_DEVICE_INFO -> {
@@ -142,7 +146,7 @@ class AutomationRuleRunner(
                 AutomationAction.READ_BATTERY -> {
                     val response = context.dispatcher.execute(GetBatteryRequest())
                     if (response !is BatteryResponse) {
-                        throw IllegalStateException("电量应答类型异常")
+                        error("电量应答类型异常")
                     }
                     AutomationExecution(rule.id, rule.action, true, "${response.percent}%")
                 }
@@ -155,13 +159,15 @@ class AutomationRuleRunner(
                                 deviceId = context.deviceId,
                                 type = DeviceEventType.HEALTH,
                                 summary = eventSummary(rule),
-                                result = if (result.abortedByLinkLoss) {
-                                    DeviceEventResult.FAILURE
-                                } else {
-                                    DeviceEventResult.SUCCESS
-                                },
-                                detail = "ok=${result.okCount}, abnormal=${result.abnormalCount}, " +
-                                    "failed=${result.failedCount}, skipped=${result.skippedCount}",
+                                result =
+                                    if (result.abortedByLinkLoss) {
+                                        DeviceEventResult.FAILURE
+                                    } else {
+                                        DeviceEventResult.SUCCESS
+                                    },
+                                detail =
+                                    "ok=${result.okCount}, abnormal=${result.abnormalCount}, " +
+                                        "failed=${result.failedCount}, skipped=${result.skippedCount}",
                             )
                         }
                     }
@@ -169,9 +175,10 @@ class AutomationRuleRunner(
                         ruleId = rule.id,
                         action = rule.action,
                         success = result != null && !result.abortedByLinkLoss,
-                        detail = result?.let {
-                            "异常 ${result.abnormalCount}，失败 ${result.failedCount}，跳过 ${result.skippedCount}"
-                        } ?: "体检未启动",
+                        detail =
+                            result?.let {
+                                "异常 ${result.abnormalCount}，失败 ${result.failedCount}，跳过 ${result.skippedCount}"
+                            } ?: "体检未启动",
                     )
                 }
 
@@ -180,7 +187,7 @@ class AutomationRuleRunner(
                 AutomationAction.READ_FIRMWARE_VERSION -> {
                     val response = context.dispatcher.execute(GetFirmwareVersionRequest())
                     if (response !is FirmwareVersionResponse) {
-                        throw IllegalStateException("固件版本应答类型异常")
+                        error("固件版本应答类型异常")
                     }
                     AutomationExecution(rule.id, rule.action, true, response.version.toString())
                 }
@@ -196,9 +203,10 @@ class AutomationRuleRunner(
                 action = rule.action,
                 success = false,
                 detail = error.message,
-                errorCode = rejected?.let {
-                    "0x${it.status.code.toString(16).uppercase().padStart(2, '0')}"
-                },
+                errorCode =
+                    rejected?.let {
+                        "0x${it.status.code.toString(16).uppercase().padStart(2, '0')}"
+                    },
             )
         }
 
@@ -206,8 +214,9 @@ class AutomationRuleRunner(
         rule: AutomationRule,
         context: AutomationContext,
     ): AutomationExecution {
-        val preset = presets.find(rule.presetId.orEmpty())
-            ?: return AutomationExecution(rule.id, rule.action, false, "预设不存在或已删除")
+        val preset =
+            presets.find(rule.presetId.orEmpty())
+                ?: return AutomationExecution(rule.id, rule.action, false, "预设不存在或已删除")
         val current = readVisibleConfigValues(context)
         val diffs = ConfigPresetDiffer.diff(preset, context.target, current, catalog)
         val report = presetApplier.apply(diffs)
@@ -217,10 +226,15 @@ class AutomationRuleRunner(
             ruleId = rule.id,
             action = rule.action,
             success = report.failedCount == 0 && !report.cancelled,
-            detail = "已写入 ${report.writtenCount}，已是目标 ${report.alreadyCount}，" +
-                "跳过 $skipped，失败 ${report.failedCount}" +
-                if (failures.isEmpty()) "" else "：" +
-                failures.joinToString("；") { "${it.key} ${it.errorCode ?: ""} ${it.detail.orEmpty()}" },
+            detail =
+                "已写入 ${report.writtenCount}，已是目标 ${report.alreadyCount}，" +
+                    "跳过 $skipped，失败 ${report.failedCount}" +
+                    if (failures.isEmpty()) {
+                        ""
+                    } else {
+                        "：" +
+                            failures.joinToString("；") { "${it.key} ${it.errorCode ?: ""} ${it.detail.orEmpty()}" }
+                    },
             errorCode = failures.firstOrNull()?.errorCode,
         )
     }
@@ -253,43 +267,47 @@ class AutomationRuleRunner(
         val profile = context.profileProvider()
         val now = clockMillis()
         val recentEvents = runCatching { events.list(context.deviceId) }.getOrDefault(emptyList())
-        val input = DiagnosticReportInput(
-            generatedAtEpochMillis = now,
-            zoneOffsetMinutes = currentTimeZoneOffsetMinutes(now),
-            appVersion = AppBuildInfo.VERSION_NAME,
-            platform = context.platformDisplayName,
-            deviceId = context.deviceId,
-            deviceModel = state.deviceInfo?.model ?: profile?.model,
-            firmwareVersion = state.firmwareVersion,
-            batteryPercent = state.batteryPercent,
-            charging = state.charging,
-            recentErrors = recentEvents
-                .filter { it.result == DeviceEventResult.FAILURE }
-                .takeLast(5)
-                .map { event ->
-                    DiagnosticReportError(
-                        timestampMillis = event.timestampMillis,
-                        command = event.summary,
-                        detail = event.detail.orEmpty(),
-                        errorCode = event.errorCode,
-                    )
-                },
-            otaHistory = profile?.otaHistory.orEmpty().takeLast(5).map { record ->
-                DiagnosticReportOta(
-                    firmwareVersion = record.firmwareVersion,
-                    finishedAtEpochMillis = record.finishedAtEpochMillis,
-                    outcome = record.outcome.name,
-                    durationMillis = record.durationMillis,
-                    errorCode = record.errorCode,
-                    sentBytes = record.sentBytes,
-                    totalBytes = record.totalBytes,
-                )
-            },
-        )
-        val result = DiagnosticReportComposer.build(
-            input = input,
-            options = DiagnosticReportOptions(format = DiagnosticReportFormat.TEXT),
-        )
+        val input =
+            DiagnosticReportInput(
+                generatedAtEpochMillis = now,
+                zoneOffsetMinutes = currentTimeZoneOffsetMinutes(now),
+                appVersion = AppBuildInfo.VERSION_NAME,
+                platform = context.platformDisplayName,
+                deviceId = context.deviceId,
+                deviceModel = state.deviceInfo?.model ?: profile?.model,
+                firmwareVersion = state.firmwareVersion,
+                batteryPercent = state.batteryPercent,
+                charging = state.charging,
+                recentErrors =
+                    recentEvents
+                        .filter { it.result == DeviceEventResult.FAILURE }
+                        .takeLast(5)
+                        .map { event ->
+                            DiagnosticReportError(
+                                timestampMillis = event.timestampMillis,
+                                command = event.summary,
+                                detail = event.detail.orEmpty(),
+                                errorCode = event.errorCode,
+                            )
+                        },
+                otaHistory =
+                    profile?.otaHistory.orEmpty().takeLast(5).map { record ->
+                        DiagnosticReportOta(
+                            firmwareVersion = record.firmwareVersion,
+                            finishedAtEpochMillis = record.finishedAtEpochMillis,
+                            outcome = record.outcome.name,
+                            durationMillis = record.durationMillis,
+                            errorCode = record.errorCode,
+                            sentBytes = record.sentBytes,
+                            totalBytes = record.totalBytes,
+                        )
+                    },
+            )
+        val result =
+            DiagnosticReportComposer.build(
+                input = input,
+                options = DiagnosticReportOptions(format = DiagnosticReportFormat.TEXT),
+            )
         onDiagnosticReport(result.text)
         return AutomationExecution(
             ruleId = rule.id,

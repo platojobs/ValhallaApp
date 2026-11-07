@@ -6,7 +6,6 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
 
 class Sha256Test {
-
     @Test
     fun `空输入符合 FIPS 180-4 标准向量`() {
         assertEquals(

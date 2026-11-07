@@ -27,7 +27,6 @@ data class ConfigScope(
     val maxVersion: FirmwareVersion? = null,
     val models: Set<String> = emptySet(),
 ) {
-
     /** 是否声明了版本或型号约束。 */
     val restricted: Boolean
         get() = minVersion != null || maxVersion != null || models.isNotEmpty()
@@ -42,6 +41,7 @@ enum class ConfigCapabilityStatus {
     VERSION_TOO_OLD,
     VERSION_TOO_NEW,
     MODEL_UNSUPPORTED,
+
     /** 设备快照不足以判定（固件版本或型号缺失）。 */
     TARGET_UNKNOWN,
 }
@@ -58,7 +58,6 @@ data class ConfigCapabilityResult(
     val visible: Boolean,
     val reason: String? = null,
 ) {
-
     companion object {
         val SUPPORTED: ConfigCapabilityResult =
             ConfigCapabilityResult(ConfigCapabilityStatus.SUPPORTED, supported = true, visible = true)
@@ -66,7 +65,10 @@ data class ConfigCapabilityResult(
 }
 
 /** 版本比较：仅 major.minor.patch.build，忽略 channel。 */
-internal fun compareFirmwareVersions(a: FirmwareVersion, b: FirmwareVersion): Int {
+internal fun compareFirmwareVersions(
+    a: FirmwareVersion,
+    b: FirmwareVersion,
+): Int {
     val major = a.major.compareTo(b.major)
     if (major != 0) return major
     val minor = a.minor.compareTo(b.minor)

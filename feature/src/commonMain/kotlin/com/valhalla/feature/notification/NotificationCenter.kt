@@ -1,7 +1,9 @@
 package com.valhalla.feature.notification
 
 /** 本地通知指向的页面。 */
-enum class NotificationPage(val wireName: String) {
+enum class NotificationPage(
+    val wireName: String,
+) {
     HOME("home"),
     DETAIL("detail"),
     OTA("ota"),
@@ -13,13 +15,13 @@ data class NotificationTarget(
     val page: NotificationPage,
     val deviceId: String? = null,
 ) {
-
     /** 写入 PendingIntent extra 的稳定字符串，跨进程可解析。 */
-    fun wireValue(): String = if (deviceId.isNullOrBlank()) {
-        page.wireName
-    } else {
-        "${page.wireName}|$deviceId"
-    }
+    fun wireValue(): String =
+        if (deviceId.isNullOrBlank()) {
+            page.wireName
+        } else {
+            "${page.wireName}|$deviceId"
+        }
 
     companion object {
         fun fromWire(raw: String?): NotificationTarget? {
@@ -33,7 +35,9 @@ data class NotificationTarget(
 }
 
 /** 通知事件类型；同一类型 + 设备去重。 */
-enum class NotificationEventType(val wireName: String) {
+enum class NotificationEventType(
+    val wireName: String,
+) {
     OTA_SUCCESS("ota_success"),
     OTA_FAILED("ota_failed"),
     RECONNECT_EXHAUSTED("reconnect_exhausted"),
@@ -72,7 +76,6 @@ class NotificationCenter(
     private val nowMillis: () -> Long,
     private val dedupeWindowMillis: Long = DEFAULT_DEDUPE_WINDOW_MILLIS,
 ) {
-
     private val lastSent = mutableMapOf<String, Long>()
 
     /**

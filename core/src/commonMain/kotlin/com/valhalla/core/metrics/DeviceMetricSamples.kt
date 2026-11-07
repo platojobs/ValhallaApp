@@ -1,5 +1,8 @@
 package com.valhalla.core.metrics
 
+import com.valhalla.core.storage.StorageKind
+import com.valhalla.core.storage.StorageMigrationStatus
+import com.valhalla.core.storage.StorageSchemaMigrator
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
 
@@ -14,7 +17,6 @@ data class DeviceMetricSample(
     val batteryPercent: Int?,
     val rssi: Int?,
 ) {
-
     init {
         require(timestampMillis >= 0) { "采样时间不能为负" }
         require(batteryPercent == null || batteryPercent in 0..100) { "电量应在 0..100" }
@@ -29,16 +31,17 @@ data class DeviceMetricSeries(
     val deviceId: String,
     val samples: List<DeviceMetricSample>,
 ) {
-
     val batteryPoints: List<Pair<Long, Int>>
-        get() = samples.mapNotNull { sample ->
-            sample.batteryPercent?.let { sample.timestampMillis to it }
-        }
+        get() =
+            samples.mapNotNull { sample ->
+                sample.batteryPercent?.let { sample.timestampMillis to it }
+            }
 
     val rssiPoints: List<Pair<Long, Int>>
-        get() = samples.mapNotNull { sample ->
-            sample.rssi?.let { sample.timestampMillis to it }
-        }
+        get() =
+            samples.mapNotNull { sample ->
+                sample.rssi?.let { sample.timestampMillis to it }
+            }
 
     /** 少于 3 个有效点时只展示当前值，不画折线。 */
     val canDrawBattery: Boolean get() = batteryPoints.size >= MIN_POINTS
@@ -50,30 +53,35 @@ data class DeviceMetricSeries(
     }
 }
 
-/** 采样序列 + 解码状态；[legacyIgnored] 表示读到的是旧版本格式。 */
+/** 采样序列 + 解码状态；[legacyIgnored] 表示读到的是无法升级的旧/未来版本格式。 */
 data class DeviceMetricSeriesStatus(
     val series: DeviceMetricSeries,
     val legacyIgnored: Boolean,
+    val migrationStatus: StorageMigrationStatus = StorageMigrationStatus.Current,
 )
 
 /** 按设备分开存储采样；平台实现只负责字符串读写。 */
 interface DeviceMetricStore {
-
     fun loadRaw(deviceId: String): String?
 
-    fun saveRaw(deviceId: String, raw: String)
+    fun saveRaw(
+        deviceId: String,
+        raw: String,
+    )
 
     fun clear(deviceId: String)
 }
 
 /** 内存实现：JVM 测试与测试宿主使用。 */
 class InMemoryDeviceMetricStore : DeviceMetricStore {
-
     private val values = mutableMapOf<String, String>()
 
     override fun loadRaw(deviceId: String): String? = values[deviceId]
 
-    override fun saveRaw(deviceId: String, raw: String) {
+    override fun saveRaw(
+        deviceId: String,
+        raw: String,
+    ) {
         values[deviceId] = raw
     }
 
@@ -85,55 +93,79 @@ class InMemoryDeviceMetricStore : DeviceMetricStore {
 /**
  * 采样解码结果。
  *
- * [legacyIgnored] 为 true 表示存储里是旧版本/不可识别格式：按空数据处理，
+ * [legacyIgnored] 为 true 表示存储里是未来版本/不可识别格式：按空数据处理，
  * 界面应说明「旧采样格式已忽略」，而不是把它当成损坏的当前数据。
+ * [migrationStatus] 记录真实迁移结果（v1 → v2 会成功升级并保留采样）。
  */
 data class DeviceMetricDecodeResult(
     val samples: List<DeviceMetricSample>,
     val legacyIgnored: Boolean,
+    val migrationStatus: StorageMigrationStatus = StorageMigrationStatus.Current,
 )
 
 /**
- * 采样编码：`v1` 头 + 每行 `S|timestamp|battery|rssi`。
+ * 采样编码：`v2` 头 + 每行 `S|timestamp|battery|rssi`。
  *
+ * v1 → v2 迁移保持行结构不变，仅升级头标记，历史采样不丢失。
  * 空值写 `-`；任何一行结构损坏都跳过，全部损坏时回退为空。
- * 读取旧版本格式时按空处理并标记 [DeviceMetricDecodeResult.legacyIgnored]。
+ * 未来版本按空处理并标记 [DeviceMetricDecodeResult.legacyIgnored]。
  */
 object DeviceMetricCodec {
-
-    private const val VERSION = "v1"
+    private const val VERSION = "v2"
     private const val SAMPLE = "S"
     private const val EMPTY = "-"
     private const val SEPARATOR = '|'
     private const val PARTS = 4
 
-    fun encode(samples: List<DeviceMetricSample>): String = buildString {
-        append(VERSION)
-        append('\n')
-        samples.sortedBy { it.timestampMillis }.forEach { sample ->
-            append(SAMPLE)
-            append(SEPARATOR)
-            append(sample.timestampMillis)
-            append(SEPARATOR)
-            append(sample.batteryPercent?.toString() ?: EMPTY)
-            append(SEPARATOR)
-            append(sample.rssi?.toString() ?: EMPTY)
+    private val migrationSteps: Map<Int, (String) -> String?> =
+        mapOf(
+            1 to { raw: String ->
+                raw
+                    .lineSequence()
+                    .mapIndexed { index, line -> if (index == 0) VERSION else line }
+                    .joinToString("\n")
+            },
+        )
+
+    fun encode(samples: List<DeviceMetricSample>): String =
+        buildString {
+            append(VERSION)
             append('\n')
+            samples.sortedBy { it.timestampMillis }.forEach { sample ->
+                append(SAMPLE)
+                append(SEPARATOR)
+                append(sample.timestampMillis)
+                append(SEPARATOR)
+                append(sample.batteryPercent?.toString() ?: EMPTY)
+                append(SEPARATOR)
+                append(sample.rssi?.toString() ?: EMPTY)
+                append('\n')
+            }
         }
-    }
 
     fun decode(raw: String?): List<DeviceMetricSample> = decodeWithStatus(raw).samples
 
     fun decodeWithStatus(raw: String?): DeviceMetricDecodeResult {
-        if (raw.isNullOrBlank()) return DeviceMetricDecodeResult(emptyList(), legacyIgnored = false)
-        val lines = raw.split('\n')
-        val header = lines.firstOrNull()?.trim()
-        if (header != VERSION) {
-            // 旧版本或手改格式统一按空处理，并明确标记，避免界面把「读不懂」误判为没有采样。
-            return DeviceMetricDecodeResult(emptyList(), legacyIgnored = true)
+        if (raw.isNullOrBlank()) {
+            return DeviceMetricDecodeResult(emptyList(), legacyIgnored = false, migrationStatus = StorageMigrationStatus.Current)
         }
+        val migration =
+            StorageSchemaMigrator.migrate(
+                kind = StorageKind.METRIC_SAMPLES,
+                raw = raw,
+                readVersion = {
+                    it
+                        .lineSequence()
+                        .firstOrNull()
+                        ?.trim()
+                        ?.removePrefix("v")
+                        ?.toIntOrNull()
+                },
+                steps = migrationSteps,
+            )
+        val usable = migration.raw ?: return DeviceMetricDecodeResult(emptyList(), legacyIgnored = true, migrationStatus = migration.status)
         val result = mutableListOf<DeviceMetricSample>()
-        lines.drop(1).forEach { line ->
+        usable.split('\n').drop(1).forEach { line ->
             if (line.isBlank()) return@forEach
             val parts = line.split(SEPARATOR)
             if (parts.size != PARTS || parts[0] != SAMPLE) return@forEach
@@ -144,7 +176,7 @@ object DeviceMetricCodec {
                 DeviceMetricSample(timestampMillis = timestamp, batteryPercent = battery, rssi = rssi)
             }.getOrNull()?.let(result::add)
         }
-        return DeviceMetricDecodeResult(result, legacyIgnored = false)
+        return DeviceMetricDecodeResult(result, legacyIgnored = false, migrationStatus = migration.status)
     }
 }
 
@@ -160,7 +192,6 @@ class DeviceMetricRepository(
     private val maxSamples: Int = DEFAULT_MAX_SAMPLES,
     private val clockMillis: () -> Long = { Clock.System.now().toEpochMilliseconds() },
 ) {
-
     init {
         require(maxSamples >= DeviceMetricSeries.MIN_POINTS) {
             "maxSamples 至少为 ${DeviceMetricSeries.MIN_POINTS}"
@@ -173,20 +204,30 @@ class DeviceMetricRepository(
     fun seriesWithStatus(deviceId: String): DeviceMetricSeriesStatus {
         require(deviceId.isNotBlank()) { "设备 id 不能为空" }
         val decoded = DeviceMetricCodec.decodeWithStatus(store.loadRaw(deviceId))
+        if (decoded.migrationStatus is StorageMigrationStatus.Migrated) {
+            // 旧版本数据升级后立即写回当前格式，避免下次启动重复迁移。
+            store.saveRaw(deviceId, DeviceMetricCodec.encode(decoded.samples))
+        }
         return DeviceMetricSeriesStatus(
             series = DeviceMetricSeries(deviceId, decoded.samples),
             legacyIgnored = decoded.legacyIgnored,
+            migrationStatus = decoded.migrationStatus,
         )
     }
 
     /** 记录一次采样并立即淘汰超限点；电池与 RSSI 都为空时不写入。 */
-    fun record(deviceId: String, batteryPercent: Int?, rssi: Int?): DeviceMetricSeries {
+    fun record(
+        deviceId: String,
+        batteryPercent: Int?,
+        rssi: Int?,
+    ): DeviceMetricSeries {
         require(deviceId.isNotBlank()) { "设备 id 不能为空" }
-        val sample = DeviceMetricSample(
-            timestampMillis = clockMillis(),
-            batteryPercent = batteryPercent,
-            rssi = rssi,
-        )
+        val sample =
+            DeviceMetricSample(
+                timestampMillis = clockMillis(),
+                batteryPercent = batteryPercent,
+                rssi = rssi,
+            )
         if (!sample.hasValue) return series(deviceId)
         val samples = (series(deviceId).samples + sample).takeLast(maxSamples)
         store.saveRaw(deviceId, DeviceMetricCodec.encode(samples))

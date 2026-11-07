@@ -1,10 +1,10 @@
 package com.valhalla.feature.ble
 
 import com.valhalla.data.ble.BleAdapterState
-import kotlin.test.Test
 import com.valhalla.feature.i18n.AppStrings
 import com.valhalla.feature.i18n.StringKey
 import com.valhalla.feature.i18n.UiMessage
+import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
@@ -12,7 +12,6 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class BlePermissionStateMachineTest {
-
     @Test
     fun `初始为未请求且允许发起一次请求`() {
         val machine = BlePermissionStateMachine()

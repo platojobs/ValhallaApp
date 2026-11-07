@@ -35,7 +35,6 @@ class BatchOperationController(
     private val locks: DeviceOperationLocks,
     private val isConnected: (String) -> Boolean = { true },
 ) {
-
     private val mutableItems = MutableStateFlow<List<BatchItemState>>(emptyList())
     val items: StateFlow<List<BatchItemState>> = mutableItems.asStateFlow()
 
@@ -92,41 +91,44 @@ class BatchOperationController(
                 update(target.deviceId) {
                     copy(status = BatchItemStatus.RUNNING, step = "batch.started", reason = null)
                 }
-                val outcome = try {
-                    execute(target) { step ->
-                        update(target.deviceId) { copy(step = step) }
+                val outcome =
+                    try {
+                        execute(target) { step ->
+                            update(target.deviceId) { copy(step = step) }
+                        }
+                    } catch (cancelledError: CancellationException) {
+                        update(target.deviceId) {
+                            copy(status = BatchItemStatus.CANCELLED, reason = "batch.job_cancelled")
+                        }
+                        markRemainingCancelled(targets, fromDeviceId = target.deviceId)
+                        throw cancelledError
+                    } catch (error: Throwable) {
+                        BatchDeviceOutcome(
+                            status = BatchItemStatus.FAILED,
+                            reason = "batch.execution_error",
+                            detail = error.message,
+                        )
                     }
-                } catch (cancelledError: CancellationException) {
-                    update(target.deviceId) {
-                        copy(status = BatchItemStatus.CANCELLED, reason = "batch.job_cancelled")
-                    }
-                    markRemainingCancelled(targets, fromDeviceId = target.deviceId)
-                    throw cancelledError
-                } catch (error: Throwable) {
-                    BatchDeviceOutcome(
-                        status = BatchItemStatus.FAILED,
-                        reason = "batch.execution_error",
-                        detail = error.message,
-                    )
-                }
 
                 update(target.deviceId) {
                     copy(
-                        status = if (!isConnected(target.deviceId) &&
-                            outcome.status == BatchItemStatus.SUCCEEDED
-                        ) {
-                            BatchItemStatus.REMOVED
-                        } else {
-                            outcome.status
-                        },
+                        status =
+                            if (!isConnected(target.deviceId) &&
+                                outcome.status == BatchItemStatus.SUCCEEDED
+                            ) {
+                                BatchItemStatus.REMOVED
+                            } else {
+                                outcome.status
+                            },
                         step = outcome.step,
-                        reason = if (!isConnected(target.deviceId) &&
-                            outcome.status == BatchItemStatus.SUCCEEDED
-                        ) {
-                            "batch.disconnected_after_step"
-                        } else {
-                            outcome.reason
-                        },
+                        reason =
+                            if (!isConnected(target.deviceId) &&
+                                outcome.status == BatchItemStatus.SUCCEEDED
+                            ) {
+                                "batch.disconnected_after_step"
+                            } else {
+                                outcome.reason
+                            },
                         detail = outcome.detail,
                     )
                 }
@@ -143,7 +145,10 @@ class BatchOperationController(
         return summary(kind)
     }
 
-    private fun markRemainingCancelled(targets: List<BatchTarget>, fromDeviceId: String) {
+    private fun markRemainingCancelled(
+        targets: List<BatchTarget>,
+        fromDeviceId: String,
+    ) {
         val started = targets.indexOfFirst { it.deviceId == fromDeviceId }
         targets.drop(started + 1).forEach { target ->
             update(target.deviceId) {
@@ -156,10 +161,14 @@ class BatchOperationController(
         }
     }
 
-    private fun update(deviceId: String, transform: BatchItemState.() -> BatchItemState) {
-        val updated = mutableItems.value.map { item ->
-            if (item.target.deviceId == deviceId) item.transform() else item
-        }
+    private fun update(
+        deviceId: String,
+        transform: BatchItemState.() -> BatchItemState,
+    ) {
+        val updated =
+            mutableItems.value.map { item ->
+                if (item.target.deviceId == deviceId) item.transform() else item
+            }
         mutableItems.value = updated
     }
 

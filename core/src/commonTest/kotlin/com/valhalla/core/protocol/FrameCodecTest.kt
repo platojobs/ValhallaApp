@@ -7,7 +7,6 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class Crc16Test {
-
     @Test
     fun `CCITT-FALSE 标准校验向量`() {
         val data = "123456789".encodeToByteArray()
@@ -34,7 +33,6 @@ class Crc16Test {
 }
 
 class HexTest {
-
     @Test
     fun `编码默认大写且无分隔符`() {
         assertEquals("A55A0102", Hex.encode(byteArrayOf(0xA5.toByte(), 0x5A, 0x01, 0x02)))
@@ -59,15 +57,15 @@ class HexTest {
 }
 
 class FrameCodecTest {
-
     @Test
     fun `编码解码往返保持字段一致`() {
-        val original = Frame(
-            type = CommandType.SET_CONFIG,
-            sequence = 0x1234,
-            payload = byteArrayOf(0x10, 0x20, 0x30),
-            isResponse = true,
-        )
+        val original =
+            Frame(
+                type = CommandType.SET_CONFIG,
+                sequence = 0x1234,
+                payload = byteArrayOf(0x10, 0x20, 0x30),
+                isResponse = true,
+            )
         val decoded = FrameCodec.decode(FrameCodec.encode(original))
         assertEquals(original, decoded)
         assertContentEquals(original.payload, decoded.payload)
@@ -81,19 +79,24 @@ class FrameCodecTest {
 
     @Test
     fun `报文头字节布局符合协议`() {
-        val encoded = FrameCodec.encode(
-            Frame(type = CommandType.AUTH, sequence = 7, payload = byteArrayOf(0x01, 0x02), isResponse = true)
-        )
+        val encoded =
+            FrameCodec.encode(
+                Frame(type = CommandType.AUTH, sequence = 7, payload = byteArrayOf(0x01, 0x02), isResponse = true),
+            )
         assertEquals(13, encoded.size)
         assertContentEquals(
             byteArrayOf(
-                0xA5.toByte(), 0x5A, // SOF
+                0xA5.toByte(),
+                0x5A, // SOF
                 0x01, // version
                 0x01, // type = AUTH
                 0x01, // flags = response
-                0x07, 0x00, // sequence LE
-                0x02, 0x00, // length LE
-                0x01, 0x02, // payload
+                0x07,
+                0x00, // sequence LE
+                0x02,
+                0x00, // length LE
+                0x01,
+                0x02, // payload
             ),
             encoded.copyOfRange(0, 11),
         )
@@ -120,9 +123,10 @@ class FrameCodecTest {
 
     @Test
     fun `payload 被篡改时 CRC 校验失败`() {
-        val encoded = FrameCodec.encode(
-            Frame(type = CommandType.GET_DEVICE_INFO, sequence = 3, payload = byteArrayOf(0x01, 0x02))
-        )
+        val encoded =
+            FrameCodec.encode(
+                Frame(type = CommandType.GET_DEVICE_INFO, sequence = 3, payload = byteArrayOf(0x01, 0x02)),
+            )
         encoded[FrameCodec.HEADER_SIZE] = 0x7F
         val error = assertFailsWith<FrameDecodeException> { FrameCodec.decode(encoded) }
         assertTrue(error.message!!.contains("CRC"))

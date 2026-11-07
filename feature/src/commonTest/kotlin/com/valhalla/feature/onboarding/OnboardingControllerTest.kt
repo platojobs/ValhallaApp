@@ -9,14 +9,18 @@ import kotlin.test.assertTrue
 
 private class FakeSettingsStore : AppSettingsStore {
     val values = mutableMapOf<String, String>()
+
     override fun read(key: String): String? = values[key]
-    override fun write(key: String, value: String?) {
+
+    override fun write(
+        key: String,
+        value: String?,
+    ) {
         if (value == null) values.remove(key) else values[key] = value
     }
 }
 
 class OnboardingControllerTest {
-
     @Test
     fun `未完成时启动应展示引导`() {
         val store = FakeSettingsStore()
@@ -28,8 +32,10 @@ class OnboardingControllerTest {
     @Test
     fun `按顺序推进三步`() {
         val controller = OnboardingController(FakeSettingsStore())
-        assertEquals(listOf(OnboardingStep.PERMISSION, OnboardingStep.SCAN, OnboardingStep.CONNECT),
-            OnboardingStep.ORDER)
+        assertEquals(
+            listOf(OnboardingStep.PERMISSION, OnboardingStep.SCAN, OnboardingStep.CONNECT),
+            OnboardingStep.ORDER,
+        )
 
         controller.next()
         assertEquals(OnboardingStep.SCAN, controller.state.value.step)

@@ -1,12 +1,13 @@
 package com.valhalla.core.metrics
 
+import com.valhalla.core.storage.StorageMigrationStatus
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 class DeviceMetricSamplesTest {
-
     private fun repository(maxSamples: Int = 50): DeviceMetricRepository =
         DeviceMetricRepository(InMemoryDeviceMetricStore(), maxSamples = maxSamples) { 1_000L }
 
@@ -61,17 +62,18 @@ class DeviceMetricSamplesTest {
 
     @Test
     fun `编码往返保留空值`() {
-        val samples = listOf(
-            DeviceMetricSample(1, 80, -50),
-            DeviceMetricSample(2, null, -70),
-        )
+        val samples =
+            listOf(
+                DeviceMetricSample(1, 80, -50),
+                DeviceMetricSample(2, null, -70),
+            )
         val decoded = DeviceMetricCodec.decode(DeviceMetricCodec.encode(samples))
         assertEquals(samples, decoded)
     }
 
     @Test
     fun `损坏数据回退为空`() {
-        assertEquals(emptyList(), DeviceMetricCodec.decode("v2\nS|1|80|-50"))
+        assertEquals(emptyList(), DeviceMetricCodec.decode("v9\nS|1|80|-50"))
         assertEquals(emptyList(), DeviceMetricCodec.decode("v1\nbroken"))
         assertEquals(emptyList(), DeviceMetricCodec.decode(null))
 
@@ -81,7 +83,7 @@ class DeviceMetricSamplesTest {
     }
 
     @Test
-    fun `旧采样格式按空处理并标记`() {
+    fun `未知版本采样按空处理并标记`() {
         val store = InMemoryDeviceMetricStore()
         store.saveRaw("dev", "v0\nS|1|80|-50")
 
@@ -89,9 +91,36 @@ class DeviceMetricSamplesTest {
 
         assertTrue(status.legacyIgnored)
         assertTrue(status.series.samples.isEmpty())
+        assertIs<StorageMigrationStatus.Corrupted>(status.migrationStatus)
         // 新样本仍会以当前格式追加，不会被旧内容阻断。
         DeviceMetricRepository(store).record("dev", batteryPercent = 70, rssi = -55)
         assertFalse(DeviceMetricRepository(store).seriesWithStatus("dev").legacyIgnored)
+    }
+
+    @Test
+    fun `v1 采样真实迁移到当前版本并保留样本`() {
+        val store = InMemoryDeviceMetricStore()
+        store.saveRaw("dev", "v1\nS|1|80|-50\nS|2|-|-60")
+
+        val status = DeviceMetricRepository(store).seriesWithStatus("dev")
+
+        assertFalse(status.legacyIgnored)
+        assertEquals(StorageMigrationStatus.Migrated(1, 2), status.migrationStatus)
+        assertEquals(2, status.series.samples.size)
+        assertEquals(
+            80,
+            status.series.samples
+                .first()
+                .batteryPercent,
+        )
+        assertEquals(
+            -60,
+            status.series.samples
+                .last()
+                .rssi,
+        )
+        // 迁移后的写回使用当前版本头。
+        assertEquals("v2", store.loadRaw("dev")?.lineSequence()?.first())
     }
 
     @Test
@@ -100,6 +129,13 @@ class DeviceMetricSamplesTest {
         repository.record("a", 80, -50)
         repository.record("b", 60, -80)
         assertEquals(1, repository.series("a").samples.size)
-        assertEquals(60, repository.series("b").samples.single().batteryPercent)
+        assertEquals(
+            60,
+            repository
+                .series("b")
+                .samples
+                .single()
+                .batteryPercent,
+        )
     }
 }

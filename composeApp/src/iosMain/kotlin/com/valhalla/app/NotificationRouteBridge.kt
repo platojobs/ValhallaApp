@@ -9,7 +9,6 @@ import kotlinx.coroutines.flow.asStateFlow
  * Compose 根界面观察后跳转。仅在本 App 存活期间使用，不做后台唤起。
  */
 object NotificationRouteBridge {
-
     private val mutableRoute = MutableStateFlow<String?>(null)
     val route: StateFlow<String?> = mutableRoute.asStateFlow()
 

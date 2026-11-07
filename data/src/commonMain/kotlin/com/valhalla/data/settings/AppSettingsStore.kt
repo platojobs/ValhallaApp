@@ -10,16 +10,21 @@ package com.valhalla.data.settings
  * 这里只存非敏感配置；令牌仍走 [com.valhalla.data.security.createTokenStore]。
  */
 interface AppSettingsStore {
-
     fun read(key: String): String?
 
-    fun write(key: String, value: String?)
+    fun write(
+        key: String,
+        value: String?,
+    )
 }
 
 expect fun createAppSettingsStore(): AppSettingsStore
 
 /** 偏好键名，隐私说明与实现共用同一常量，避免文案与真实存储漂移。 */
 object SettingsKeys {
+    /** 偏好存储 schema 版本；缺失视为旧版 v1，由 PreferencesSchema 集中升级。 */
+    const val SCHEMA_VERSION = "storage_schema_version"
+
     const val LANGUAGE = "language"
     const val THEME = "theme"
 
@@ -78,26 +83,28 @@ object SettingsKeys {
     const val AUTOMATION_RULES = "automation_rules"
 
     /** 全部偏好键，供隐私页与存储清单展示。 */
-    val ALL: List<String> = listOf(
-        LANGUAGE,
-        THEME,
-        RECONNECT_MAX_ATTEMPTS,
-        RECONNECT_MAX_DELAY_SECONDS,
-        LOG_CAPACITY,
-        EXPORT_DEFAULT_ENTRIES,
-        EXPORT_DEFAULT_BYTES_KB,
-        EXPORT_DEFAULT_HEX_CHARS,
-        ONBOARDING_COMPLETED,
-        NOTIFY_MASTER_ENABLED,
-        NOTIFY_OTA_ENABLED,
-        NOTIFY_DISCONNECT_ENABLED,
-        NOTIFY_LOW_BATTERY_ENABLED,
-        NOTIFY_RECONNECT_ENABLED,
-        NOTIFY_HEALTH_ENABLED,
-        NOTIFY_LOW_BATTERY_THRESHOLD,
-        RSSI_SUBSCRIPTION_ENABLED,
-        RSSI_SAMPLE_PERIOD_SECONDS,
-        CONFIG_PRESETS,
-        AUTOMATION_RULES,
-    )
+    val ALL: List<String> =
+        listOf(
+            SCHEMA_VERSION,
+            LANGUAGE,
+            THEME,
+            RECONNECT_MAX_ATTEMPTS,
+            RECONNECT_MAX_DELAY_SECONDS,
+            LOG_CAPACITY,
+            EXPORT_DEFAULT_ENTRIES,
+            EXPORT_DEFAULT_BYTES_KB,
+            EXPORT_DEFAULT_HEX_CHARS,
+            ONBOARDING_COMPLETED,
+            NOTIFY_MASTER_ENABLED,
+            NOTIFY_OTA_ENABLED,
+            NOTIFY_DISCONNECT_ENABLED,
+            NOTIFY_LOW_BATTERY_ENABLED,
+            NOTIFY_RECONNECT_ENABLED,
+            NOTIFY_HEALTH_ENABLED,
+            NOTIFY_LOW_BATTERY_THRESHOLD,
+            RSSI_SUBSCRIPTION_ENABLED,
+            RSSI_SAMPLE_PERIOD_SECONDS,
+            CONFIG_PRESETS,
+            AUTOMATION_RULES,
+        )
 }

@@ -15,7 +15,6 @@ import androidx.compose.ui.unit.dp
  * 页面里不再直接写 `16.dp` 之类的魔法数字，统一从这里取；后续做设计调整只改一处。
  */
 object DesignTokens {
-
     object Spacing {
         val xxs = 2.dp
         val xs = 4.dp
@@ -47,34 +46,38 @@ object DesignTokens {
         val inProgress: Color,
     )
 
-    val lightStatusColors = StatusColors(
-        success = Color(0xFF1B7F3B),
-        // 原 #B26A00 与浅色背景对比度 4.16:1，低于 WCAG AA 4.5:1，调深至 6.28:1。
-        warning = Color(0xFF8A5200),
-        error = Color(0xFFB3261E),
-        inProgress = Color(0xFF1B5E9E),
-    )
+    val lightStatusColors =
+        StatusColors(
+            success = Color(0xFF1B7F3B),
+            // 原 #B26A00 与浅色背景对比度 4.16:1，低于 WCAG AA 4.5:1，调深至 6.28:1。
+            warning = Color(0xFF8A5200),
+            error = Color(0xFFB3261E),
+            inProgress = Color(0xFF1B5E9E),
+        )
 
-    val darkStatusColors = StatusColors(
-        success = Color(0xFF6DD58C),
-        warning = Color(0xFFFFB74D),
-        error = Color(0xFFFF897D),
-        inProgress = Color(0xFF9EC9FF),
-    )
+    val darkStatusColors =
+        StatusColors(
+            success = Color(0xFF6DD58C),
+            warning = Color(0xFFFFB74D),
+            error = Color(0xFFFF897D),
+            inProgress = Color(0xFF9EC9FF),
+        )
 
-    private val LightPalette = lightColorScheme(
-        primary = Color(0xFF1B5E9E),
-        onPrimary = Color(0xFFFFFFFF),
-        secondary = Color(0xFF4E6272),
-        surfaceVariant = Color(0xFFE3E8EE),
-    )
+    private val LightPalette =
+        lightColorScheme(
+            primary = Color(0xFF1B5E9E),
+            onPrimary = Color(0xFFFFFFFF),
+            secondary = Color(0xFF4E6272),
+            surfaceVariant = Color(0xFFE3E8EE),
+        )
 
-    private val DarkPalette = darkColorScheme(
-        primary = Color(0xFF9EC9FF),
-        onPrimary = Color(0xFF002F51),
-        secondary = Color(0xFFB6C8D6),
-        surfaceVariant = Color(0xFF2A3138),
-    )
+    private val DarkPalette =
+        darkColorScheme(
+            primary = Color(0xFF9EC9FF),
+            onPrimary = Color(0xFF002F51),
+            secondary = Color(0xFFB6C8D6),
+            surfaceVariant = Color(0xFF2A3138),
+        )
 
     val lightScheme get() = LightPalette
     val darkScheme get() = DarkPalette
@@ -88,11 +91,15 @@ enum class ThemeMode {
 }
 
 /** 纯函数：给定偏好与系统当前是否深色，解析最终是否使用深色主题。 */
-fun resolveDarkTheme(mode: ThemeMode, systemDark: Boolean): Boolean = when (mode) {
-    ThemeMode.SYSTEM -> systemDark
-    ThemeMode.LIGHT -> false
-    ThemeMode.DARK -> true
-}
+fun resolveDarkTheme(
+    mode: ThemeMode,
+    systemDark: Boolean,
+): Boolean =
+    when (mode) {
+        ThemeMode.SYSTEM -> systemDark
+        ThemeMode.LIGHT -> false
+        ThemeMode.DARK -> true
+    }
 
 /** 当前主题下的状态色，页面统一从这里取，避免各页面自行定义红/绿。 */
 @Composable
@@ -110,7 +117,10 @@ private fun Color.luminanceIsDark(): Boolean {
 
 /** 应用主题：按偏好或系统解析亮暗，套用统一的颜色方案。 */
 @Composable
-fun ValhallaTheme(mode: ThemeMode, content: @Composable () -> Unit) {
+fun ValhallaTheme(
+    mode: ThemeMode,
+    content: @Composable () -> Unit,
+) {
     val systemDark = isSystemInDarkTheme()
     val dark = resolveDarkTheme(mode, systemDark)
     MaterialTheme(

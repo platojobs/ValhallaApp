@@ -11,7 +11,6 @@ import kotlin.test.assertTrue
 
 /** 设备自由文本入库脱敏测试：日志缓冲与设备档案。 */
 class DeviceTextRedactionStorageTest {
-
     @Test
     fun `设备日志入库前脱敏`() {
         val logger = InMemoryDeviceLogger()
@@ -33,28 +32,30 @@ class DeviceTextRedactionStorageTest {
 
     @Test
     fun `设备档案编码后不包含自由文本中的敏感串`() {
-        val profile = DeviceProfile(
-            deviceId = "dev-1",
-            displayName = "设备 token=abc",
-            vendor = "Valhalla",
-            model = "VH-100 serialNumber=SN-999",
-            lastConnectedAtEpochMillis = 1000,
-            lastKnownFirmwareVersion = "1.2.0-credential=secret",
-            lastKnownBatteryPercent = 80,
-            lastKnownCharging = false,
-            otaHistory = listOf(
-                OtaHistoryRecord(
-                    firmwareVersion = "1.2.0",
-                    finishedAtEpochMillis = 2000,
-                    durationMillis = 300,
-                    outcome = OtaOutcome.FAILED,
-                    errorCode = "E_TOKEN token=leak",
-                    detail = "signature=l3ak",
-                    sentBytes = 10,
-                    totalBytes = 20,
-                ),
-            ),
-        )
+        val profile =
+            DeviceProfile(
+                deviceId = "dev-1",
+                displayName = "设备 token=abc",
+                vendor = "Valhalla",
+                model = "VH-100 serialNumber=SN-999",
+                lastConnectedAtEpochMillis = 1000,
+                lastKnownFirmwareVersion = "1.2.0-credential=secret",
+                lastKnownBatteryPercent = 80,
+                lastKnownCharging = false,
+                otaHistory =
+                    listOf(
+                        OtaHistoryRecord(
+                            firmwareVersion = "1.2.0",
+                            finishedAtEpochMillis = 2000,
+                            durationMillis = 300,
+                            outcome = OtaOutcome.FAILED,
+                            errorCode = "E_TOKEN token=leak",
+                            detail = "signature=l3ak",
+                            sentBytes = 10,
+                            totalBytes = 20,
+                        ),
+                    ),
+            )
 
         val encoded = DeviceProfileCodec.encode(listOf(profile))
         assertFalse(encoded.contains("token=abc"))

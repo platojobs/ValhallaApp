@@ -32,15 +32,22 @@ data class RetryPolicy(
     }
 }
 
-sealed class CommandFailure(message: String, cause: Throwable? = null) : Exception(message, cause) {
-    class Timeout(val attempts: Int) :
-        CommandFailure("指令在 $attempts 次尝试后全部超时")
+sealed class CommandFailure(
+    message: String,
+    cause: Throwable? = null,
+) : Exception(message, cause) {
+    class Timeout(
+        val attempts: Int,
+    ) : CommandFailure("指令在 $attempts 次尝试后全部超时")
 
-    class TransportFailure(val attempts: Int, cause: Throwable) :
-        CommandFailure("指令传输失败（已尝试 $attempts 次）: ${cause.message}", cause)
+    class TransportFailure(
+        val attempts: Int,
+        cause: Throwable,
+    ) : CommandFailure("指令传输失败（已尝试 $attempts 次）: ${cause.message}", cause)
 
-    class InvalidResponse(val reason: String) :
-        CommandFailure("设备响应非法: $reason")
+    class InvalidResponse(
+        val reason: String,
+    ) : CommandFailure("设备响应非法: $reason")
 
     /** 设备以非 0 状态码显式拒绝指令。 */
     class DeviceRejected(
@@ -48,7 +55,7 @@ sealed class CommandFailure(message: String, cause: Throwable? = null) : Excepti
         val status: DeviceStatus,
         val detail: String? = null,
     ) : CommandFailure(
-        "设备拒绝指令 ${command.name}: ${status.describe()}" +
-            if (detail.isNullOrBlank()) "" else "（$detail）"
-    )
+            "设备拒绝指令 ${command.name}: ${status.describe()}" +
+                if (detail.isNullOrBlank()) "" else "（$detail）",
+        )
 }

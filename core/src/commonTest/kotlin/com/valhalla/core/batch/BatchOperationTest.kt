@@ -6,16 +6,16 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class BatchOperationTest {
-
     @Test
     fun `汇总只统计终态且区分失败与跳过`() {
-        val items = listOf(
-            BatchItemState(BatchTarget("dev-1", "A"), BatchItemStatus.SUCCEEDED),
-            BatchItemState(BatchTarget("dev-2", "B"), BatchItemStatus.FAILED, reason = "timeout"),
-            BatchItemState(BatchTarget("dev-3", "C"), BatchItemStatus.SKIPPED, reason = "locked"),
-            BatchItemState(BatchTarget("dev-4", "D"), BatchItemStatus.CANCELLED),
-            BatchItemState(BatchTarget("dev-5", "E"), BatchItemStatus.REMOVED),
-        )
+        val items =
+            listOf(
+                BatchItemState(BatchTarget("dev-1", "A"), BatchItemStatus.SUCCEEDED),
+                BatchItemState(BatchTarget("dev-2", "B"), BatchItemStatus.FAILED, reason = "timeout"),
+                BatchItemState(BatchTarget("dev-3", "C"), BatchItemStatus.SKIPPED, reason = "locked"),
+                BatchItemState(BatchTarget("dev-4", "D"), BatchItemStatus.CANCELLED),
+                BatchItemState(BatchTarget("dev-5", "E"), BatchItemStatus.REMOVED),
+            )
         val summary = BatchSummary(BatchOperationKind.HEALTH_CHECK, items)
 
         assertEquals(5, summary.total)
@@ -30,12 +30,14 @@ class BatchOperationTest {
     @Test
     fun `导出文本不包含原始设备标识`() {
         val rawId = "AA:BB:CC:DD:EE:FF"
-        val summary = BatchSummary(
-            kind = BatchOperationKind.APPLY_PRESET,
-            items = listOf(
-                BatchItemState(BatchTarget(rawId, "设备 A"), BatchItemStatus.SUCCEEDED),
-            ),
-        )
+        val summary =
+            BatchSummary(
+                kind = BatchOperationKind.APPLY_PRESET,
+                items =
+                    listOf(
+                        BatchItemState(BatchTarget(rawId, "设备 A"), BatchItemStatus.SUCCEEDED),
+                    ),
+            )
         val text = summary.toText()
 
         assertFalse(text.contains(rawId), "导出文本不得包含原始 deviceId")

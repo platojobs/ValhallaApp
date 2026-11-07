@@ -12,7 +12,6 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class MessageCodecTest {
-
     private val firmware = FirmwareVersion(1, 2, 3, 456, "stable")
 
     private fun assertRequestRoundTrip(request: DeviceRequest) {
@@ -35,27 +34,28 @@ class MessageCodecTest {
 
     @Test
     fun `全部请求命令编解码往返一致`() {
-        val requests = listOf(
-            AuthRequest(AuthMode.TOKEN, "token-abc".encodeToByteArray()),
-            AuthRequest(AuthMode.CHALLENGE, ByteArray(16) { it.toByte() }),
-            GetDeviceInfoRequest(),
-            SetConfigRequest("led.brightness", byteArrayOf(0x10, 0x20)),
-            GetConfigRequest("led.brightness"),
-            GetBatteryRequest(),
-            GetFirmwareVersionRequest(),
-            SetTimeRequest(1_700_000_000L, 480),
-            GetTimeRequest(),
-            SetParamRequest(0x0102, byteArrayOf(0x03, 0x04)),
-            GetParamRequest(0x0102),
-            FactoryResetRequest("factory-token"),
-            StartOtaRequest(2_048L, 0x1234, 64, firmware),
-            OtaDataRequest(128L, ByteArray(32) { (it + 1).toByte() }),
-            FinishOtaRequest(2_048L, 0x1234),
-            AbortOtaRequest(OtaAbortReason.USER_CANCELLED),
-            RebootRequest(100, 2),
-            LogDumpRequest(9L, 64),
-            HeartbeatRequest(123_456L),
-        )
+        val requests =
+            listOf(
+                AuthRequest(AuthMode.TOKEN, "token-abc".encodeToByteArray()),
+                AuthRequest(AuthMode.CHALLENGE, ByteArray(16) { it.toByte() }),
+                GetDeviceInfoRequest(),
+                SetConfigRequest("led.brightness", byteArrayOf(0x10, 0x20)),
+                GetConfigRequest("led.brightness"),
+                GetBatteryRequest(),
+                GetFirmwareVersionRequest(),
+                SetTimeRequest(1_700_000_000L, 480),
+                GetTimeRequest(),
+                SetParamRequest(0x0102, byteArrayOf(0x03, 0x04)),
+                GetParamRequest(0x0102),
+                FactoryResetRequest("factory-token"),
+                StartOtaRequest(2_048L, 0x1234, 64, firmware),
+                OtaDataRequest(128L, ByteArray(32) { (it + 1).toByte() }),
+                FinishOtaRequest(2_048L, 0x1234),
+                AbortOtaRequest(OtaAbortReason.USER_CANCELLED),
+                RebootRequest(100, 2),
+                LogDumpRequest(9L, 64),
+                HeartbeatRequest(123_456L),
+            )
         requests.forEach(::assertRequestRoundTrip)
     }
 
@@ -71,10 +71,11 @@ class MessageCodecTest {
     @Test
     fun `OTA 数据请求携带偏移与分片`() {
         val chunk = ByteArray(64) { (it * 2).toByte() }
-        val decoded = MessageCodec.decodeRequest(
-            CommandType.OTA_DATA,
-            OtaDataRequest(1_024L, chunk).encode(),
-        ) as OtaDataRequest
+        val decoded =
+            MessageCodec.decodeRequest(
+                CommandType.OTA_DATA,
+                OtaDataRequest(1_024L, chunk).encode(),
+            ) as OtaDataRequest
 
         assertEquals(1_024L, decoded.offset)
         assertContentEquals(chunk, decoded.data)
@@ -86,32 +87,33 @@ class MessageCodecTest {
 
     @Test
     fun `全部应答命令编解码往返一致`() {
-        val responses = listOf(
-            AuthResponse(DeviceStatus.OK, "session-token", 3_600L, ByteArray(8) { it.toByte() }),
-            DeviceInfoResponse(DeviceStatus.OK, "Valhalla", "VH-100", "SN20260001", "HW-1.0", firmware),
-            SetConfigResponse(DeviceStatus.OK),
-            ConfigResponse(DeviceStatus.OK, "led.brightness", byteArrayOf(0x10)),
-            BatteryResponse(DeviceStatus.OK, 87, true, 4_120),
-            FirmwareVersionResponse(DeviceStatus.OK, firmware),
-            SetTimeResponse(DeviceStatus.OK, 1_700_000_000L),
-            TimeResponse(DeviceStatus.OK, 1_700_000_000L, -300),
-            SetParamResponse(DeviceStatus.OK),
-            ParamResponse(DeviceStatus.OK, 0x0102, byteArrayOf(0x0A)),
-            FactoryResetResponse(DeviceStatus.OK),
-            StartOtaResponse(DeviceStatus.OK, 0x10203040L, 64),
-            OtaDataResponse(DeviceStatus.OK, 1_024L),
-            FinishOtaResponse(DeviceStatus.OK, true),
-            AbortOtaResponse(DeviceStatus.OK),
-            RebootResponse(DeviceStatus.OK),
-            LogDumpResponse(
-                DeviceStatus.OK,
-                listOf(
-                    DeviceLogEntry(LogLevel.INFO, 1_700_000_000L, "系统启动"),
-                    DeviceLogEntry(LogLevel.ERROR, 1_700_000_100L, "BLE 断链"),
+        val responses =
+            listOf(
+                AuthResponse(DeviceStatus.OK, "session-token", 3_600L, ByteArray(8) { it.toByte() }),
+                DeviceInfoResponse(DeviceStatus.OK, "Valhalla", "VH-100", "SN20260001", "HW-1.0", firmware),
+                SetConfigResponse(DeviceStatus.OK),
+                ConfigResponse(DeviceStatus.OK, "led.brightness", byteArrayOf(0x10)),
+                BatteryResponse(DeviceStatus.OK, 87, true, 4_120),
+                FirmwareVersionResponse(DeviceStatus.OK, firmware),
+                SetTimeResponse(DeviceStatus.OK, 1_700_000_000L),
+                TimeResponse(DeviceStatus.OK, 1_700_000_000L, -300),
+                SetParamResponse(DeviceStatus.OK),
+                ParamResponse(DeviceStatus.OK, 0x0102, byteArrayOf(0x0A)),
+                FactoryResetResponse(DeviceStatus.OK),
+                StartOtaResponse(DeviceStatus.OK, 0x10203040L, 64),
+                OtaDataResponse(DeviceStatus.OK, 1_024L),
+                FinishOtaResponse(DeviceStatus.OK, true),
+                AbortOtaResponse(DeviceStatus.OK),
+                RebootResponse(DeviceStatus.OK),
+                LogDumpResponse(
+                    DeviceStatus.OK,
+                    listOf(
+                        DeviceLogEntry(LogLevel.INFO, 1_700_000_000L, "系统启动"),
+                        DeviceLogEntry(LogLevel.ERROR, 1_700_000_100L, "BLE 断链"),
+                    ),
                 ),
-            ),
-            HeartbeatResponse(DeviceStatus.OK, 1_000L, 87),
-        )
+                HeartbeatResponse(DeviceStatus.OK, 1_000L, 87),
+            )
         responses.forEach(::assertResponseRoundTrip)
     }
 
@@ -129,10 +131,11 @@ class MessageCodecTest {
 
     @Test
     fun `鉴权成功应答无挑战时标记为空`() {
-        val decoded = MessageCodec.decodeResponse(
-            CommandType.AUTH,
-            AuthResponse(DeviceStatus.OK, "token", 60L, ByteArray(0)).encode(),
-        ) as AuthResponse
+        val decoded =
+            MessageCodec.decodeResponse(
+                CommandType.AUTH,
+                AuthResponse(DeviceStatus.OK, "token", 60L, ByteArray(0)).encode(),
+            ) as AuthResponse
 
         assertFalse(decoded.hasChallenge)
         assertContentEquals(ByteArray(0), decoded.challenge)
@@ -140,10 +143,11 @@ class MessageCodecTest {
 
     @Test
     fun `鉴权失败应答映射为错误状态`() {
-        val decoded = MessageCodec.decodeResponse(
-            CommandType.AUTH,
-            byteArrayOf(DeviceStatus.AUTH_FAILED.code.toByte()),
-        )
+        val decoded =
+            MessageCodec.decodeResponse(
+                CommandType.AUTH,
+                byteArrayOf(DeviceStatus.AUTH_FAILED.code.toByte()),
+            )
 
         assertTrue(decoded is ErrorResponse)
         decoded as ErrorResponse
@@ -154,8 +158,9 @@ class MessageCodecTest {
 
     @Test
     fun `失败应答携带可读详情`() {
-        val payload = byteArrayOf(DeviceStatus.AUTH_FAILED.code.toByte()) +
-            "挑战已过期".encodeToByteArray()
+        val payload =
+            byteArrayOf(DeviceStatus.AUTH_FAILED.code.toByte()) +
+                "挑战已过期".encodeToByteArray()
         val decoded = MessageCodec.decodeResponse(CommandType.AUTH, payload) as ErrorResponse
 
         assertEquals("挑战已过期", decoded.detail)
@@ -177,18 +182,20 @@ class MessageCodecTest {
 
     @Test
     fun `三类通知帧编解码往返一致`() {
-        val notifications = listOf(
-            HeartbeatReplyNotification(88, 5_000L),
-            DeviceStatusNotification(DeviceState.READY, 80, 0x0000),
-            OtaProgressNotification(0x10203040L, 512L, 2_048L, OtaStage.TRANSFERRING),
-        )
-        notifications.forEach { notification ->
-            val frame = Frame(
-                type = notification.command,
-                sequence = 7,
-                payload = notification.encode(),
-                isNotification = true,
+        val notifications =
+            listOf(
+                HeartbeatReplyNotification(88, 5_000L),
+                DeviceStatusNotification(DeviceState.READY, 80, 0x0000),
+                OtaProgressNotification(0x10203040L, 512L, 2_048L, OtaStage.TRANSFERRING),
             )
+        notifications.forEach { notification ->
+            val frame =
+                Frame(
+                    type = notification.command,
+                    sequence = 7,
+                    payload = notification.encode(),
+                    isNotification = true,
+                )
             val decoded = MessageCodec.decodeNotification(frame)
             assertEquals(notification.command, decoded.command)
             assertContentEquals(notification.encode(), decoded.encode())
@@ -281,13 +288,14 @@ class MessageCodecTest {
 
     @Test
     fun `通知帧标记缺失时拒绝解析`() {
-        val frame = Frame(
-            type = CommandType.HEARTBEAT_REPLY,
-            sequence = 1,
-            payload = HeartbeatReplyNotification(50, 10L).encode(),
-            isResponse = false,
-            isNotification = false,
-        )
+        val frame =
+            Frame(
+                type = CommandType.HEARTBEAT_REPLY,
+                sequence = 1,
+                payload = HeartbeatReplyNotification(50, 10L).encode(),
+                isResponse = false,
+                isNotification = false,
+            )
         assertFailsWith<MessageDecodeException> {
             MessageCodec.decodeNotification(frame)
         }
@@ -310,12 +318,13 @@ class MessageCodecTest {
     @Test
     fun `请求与应答指令不匹配时拒绝解析`() {
         val request = GetBatteryRequest()
-        val frame = Frame(
-            type = CommandType.GET_DEVICE_INFO,
-            sequence = 1,
-            payload = BatteryResponse(DeviceStatus.OK, 50, false, 3_700).encode(),
-            isResponse = true,
-        )
+        val frame =
+            Frame(
+                type = CommandType.GET_DEVICE_INFO,
+                sequence = 1,
+                payload = BatteryResponse(DeviceStatus.OK, 50, false, 3_700).encode(),
+                isResponse = true,
+            )
         assertFailsWith<MessageDecodeException> {
             MessageCodec.decodeResponse(request, frame)
         }

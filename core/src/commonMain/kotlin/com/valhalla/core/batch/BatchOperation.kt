@@ -24,8 +24,12 @@ enum class BatchItemStatus {
     ;
 
     val terminal: Boolean
-        get() = this == SUCCEEDED || this == SKIPPED || this == FAILED ||
-            this == CANCELLED || this == REMOVED
+        get() =
+            this == SUCCEEDED ||
+                this == SKIPPED ||
+                this == FAILED ||
+                this == CANCELLED ||
+                this == REMOVED
 }
 
 /** 批量操作的参与者；[displayName] 只用于展示，导出时仍会脱敏。 */
@@ -49,7 +53,6 @@ data class BatchSummary(
     val items: List<BatchItemState>,
     val cancelRequested: Boolean = false,
 ) {
-
     val total: Int get() = items.size
 
     val succeeded: Int get() = items.count { it.status == BatchItemStatus.SUCCEEDED }
@@ -65,35 +68,36 @@ data class BatchSummary(
     val finished: Boolean get() = items.all { it.status.terminal }
 
     /** 供剪贴板/导出使用的稳定文本；设备标识只保留不可逆哈希。 */
-    fun toText(): String = buildString {
-        appendLine("Valhalla batch summary")
-        appendLine("operation=${kind.name}")
-        appendLine(
-            "total=$total succeeded=$succeeded skipped=$skipped failed=$failed " +
-                "cancelled=$cancelled removed=$removed",
-        )
-        items.forEach { item ->
-            append("- ")
-            append(SensitiveTextRedaction.redactInline(item.target.displayName))
-            append(' ')
-            append(PacketLogRedaction.hashDeviceId(item.target.deviceId))
-            append(' ')
-            append(item.status.name)
-            item.step?.let {
-                append(" step=")
-                append(SensitiveTextRedaction.redactInline(it))
+    fun toText(): String =
+        buildString {
+            appendLine("Valhalla batch summary")
+            appendLine("operation=${kind.name}")
+            appendLine(
+                "total=$total succeeded=$succeeded skipped=$skipped failed=$failed " +
+                    "cancelled=$cancelled removed=$removed",
+            )
+            items.forEach { item ->
+                append("- ")
+                append(SensitiveTextRedaction.redactInline(item.target.displayName))
+                append(' ')
+                append(PacketLogRedaction.hashDeviceId(item.target.deviceId))
+                append(' ')
+                append(item.status.name)
+                item.step?.let {
+                    append(" step=")
+                    append(SensitiveTextRedaction.redactInline(it))
+                }
+                item.reason?.let {
+                    append(" reason=")
+                    append(SensitiveTextRedaction.redactInline(it))
+                }
+                item.detail?.let {
+                    append(" detail=")
+                    append(SensitiveTextRedaction.redactInline(it))
+                }
+                append('\n')
             }
-            item.reason?.let {
-                append(" reason=")
-                append(SensitiveTextRedaction.redactInline(it))
-            }
-            item.detail?.let {
-                append(" detail=")
-                append(SensitiveTextRedaction.redactInline(it))
-            }
-            append('\n')
         }
-    }
 }
 
 /** 一次批量锁定的结果：成功锁定的设备与已被其它操作占用的设备。 */
@@ -109,7 +113,6 @@ data class BatchLockResult(
  * 未参与批量的设备不在集合内，因此不受影响。锁只在内存中，进程退出自动释放。
  */
 class DeviceOperationLocks {
-
     private val mutableLocked = MutableStateFlow<Set<String>>(emptySet())
     val locked: StateFlow<Set<String>> = mutableLocked.asStateFlow()
 

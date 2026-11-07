@@ -9,10 +9,14 @@
 /* Begin PBXBuildFile section */
 		326BD496B7D9352319AB463F /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 6C076FEF4A34EDE2D3C40534 /* Foundation.framework */; };
 		340094E2B69F25FEA470E3AF /* iOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F63049384B4CEC275AC62CDD /* iOSApp.swift */; };
+		36D4E5F60718293A4B5C6D7E /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 03A1B2C3D4E5F60718293A4B /* Assets.xcassets */; };
+		47E5F60718293A4B5C6D7E8F /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 25C3D4E5F60718293A4B5C6D /* LaunchScreen.storyboard */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		6C076FEF4A34EDE2D3C40534 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
+		03A1B2C3D4E5F60718293A4B /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		25C3D4E5F60718293A4B5C6D /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
 		E2D7ABFD875CC4797A4EFC90 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A1B2C3D4E5F60718293A4B5C /* Version.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; path = Version.xcconfig; sourceTree = "<group>"; };
 		E8D40BC223932E4CD2E76250 /* iosApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = iosApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -55,12 +59,14 @@
 			name = iOS;
 			sourceTree = "<group>";
 		};
-		DD45A730927261762907E3D3 /* iosApp */ = {
+			DD45A730927261762907E3D3 /* iosApp */ = {
 			isa = PBXGroup;
 			children = (
 				E2D7ABFD875CC4797A4EFC90 /* Info.plist */,
 				A1B2C3D4E5F60718293A4B5C /* Version.xcconfig */,
 				F63049384B4CEC275AC62CDD /* iOSApp.swift */,
+				03A1B2C3D4E5F60718293A4B /* Assets.xcassets */,
+				25C3D4E5F60718293A4B5C6D /* LaunchScreen.storyboard */,
 			);
 			name = iosApp;
 			path = iosApp;
@@ -130,6 +136,8 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				36D4E5F60718293A4B5C6D7E /* Assets.xcassets in Resources */,
+				47E5F60718293A4B5C6D7E8F /* LaunchScreen.storyboard in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

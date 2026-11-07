@@ -6,7 +6,9 @@ sealed interface PoolFailure {
     data object Timeout : PoolFailure
 
     /** 底层链路异常，携带原始错误信息。 */
-    data class Transport(val cause: String) : PoolFailure
+    data class Transport(
+        val cause: String,
+    ) : PoolFailure
 }
 
 /** 连接请求结果。 */
@@ -21,13 +23,27 @@ sealed interface ConnectResult {
     data object InProgress : ConnectResult
 
     /** 连接失败，具体原因见 [failure]。 */
-    data class Failed(val failure: PoolFailure) : ConnectResult
+    data class Failed(
+        val failure: PoolFailure,
+    ) : ConnectResult
 }
 
 /** 连接池广播事件，供日志与设备列表页订阅。 */
 sealed interface PoolEvent {
-    data class ConnectionStarted(val deviceId: String) : PoolEvent
-    data class ConnectionEstablished(val deviceId: String) : PoolEvent
-    data class ConnectionFailed(val deviceId: String, val failure: PoolFailure) : PoolEvent
-    data class Disconnected(val deviceId: String) : PoolEvent
+    data class ConnectionStarted(
+        val deviceId: String,
+    ) : PoolEvent
+
+    data class ConnectionEstablished(
+        val deviceId: String,
+    ) : PoolEvent
+
+    data class ConnectionFailed(
+        val deviceId: String,
+        val failure: PoolFailure,
+    ) : PoolEvent
+
+    data class Disconnected(
+        val deviceId: String,
+    ) : PoolEvent
 }

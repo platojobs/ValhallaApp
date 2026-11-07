@@ -7,13 +7,14 @@ import platform.Foundation.NSUserDefaults
 actual fun createDeviceMetricStore(): DeviceMetricStore = NSUserDefaultsDeviceMetricStore()
 
 private class NSUserDefaultsDeviceMetricStore : DeviceMetricStore {
-
     private val defaults: NSUserDefaults = NSUserDefaults.standardUserDefaults
 
-    override fun loadRaw(deviceId: String): String? =
-        defaults.stringForKey(StorageKeys.IOS_METRICS_KEY_PREFIX + deviceId)
+    override fun loadRaw(deviceId: String): String? = defaults.stringForKey(StorageKeys.IOS_METRICS_KEY_PREFIX + deviceId)
 
-    override fun saveRaw(deviceId: String, raw: String) {
+    override fun saveRaw(
+        deviceId: String,
+        raw: String,
+    ) {
         defaults.setObject(raw, forKey = StorageKeys.IOS_METRICS_KEY_PREFIX + deviceId)
     }
 

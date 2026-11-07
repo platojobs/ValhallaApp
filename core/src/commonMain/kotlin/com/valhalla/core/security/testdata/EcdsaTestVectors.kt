@@ -16,7 +16,6 @@ import com.valhalla.core.protocol.Hex
  * 不能同时被 instrumentedTest 树依赖）；内容只有公开测试公钥，不含任何私钥。
  */
 object EcdsaTestVectors {
-
     const val PUBLIC_KEY_PEM: String = """
         -----BEGIN PUBLIC KEY-----
         MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEWXWes/sli2RbqBvrh8XJjxoqEG9U
@@ -62,42 +61,47 @@ object EcdsaTestVectors {
         val signatureHex: String,
     ) {
         fun digest(): ByteArray = Hex.decode(digestHex)
+
         fun signature(): ByteArray = Hex.decode(signatureHex)
     }
 
-    val ALL: List<Vector> = listOf(
-        Vector(
-            name = "vector-1",
-            message = "valhalla-ecdsa-test-vector-1",
-            digestHex = "aa0b3dcd03296f9e6b2073455f1721eb39534746a8a627abce2f2a99a5ef2e5d",
-            signatureHex = "30450221008a6af213d443e3b16549b1b497eaee97dd7226e1fc52ee65311e392bfb234b87" +
-                "022027178caeef2d510c5e786e6315ce35b5608b28313f9516b70c29ab38e377299e",
-        ),
-        Vector(
-            name = "vector-2",
-            message = "valhalla-ecdsa-test-vector-2",
-            digestHex = "5338e9a61e427a555b8bb212b4afb49c027918a286282d8787fb590144f223a6",
-            signatureHex = "3045022100876d2333e7c3831bec73aa54ce83251bb410632e93573d2950ace168a1707494" +
-                "02203d48b85f4e98b0e49c07f133b8fe924cd6322d3e90b0e23735d2954527d7d3b8",
-        ),
-    )
+    val ALL: List<Vector> =
+        listOf(
+            Vector(
+                name = "vector-1",
+                message = "valhalla-ecdsa-test-vector-1",
+                digestHex = "aa0b3dcd03296f9e6b2073455f1721eb39534746a8a627abce2f2a99a5ef2e5d",
+                signatureHex =
+                    "30450221008a6af213d443e3b16549b1b497eaee97dd7226e1fc52ee65311e392bfb234b87" +
+                        "022027178caeef2d510c5e786e6315ce35b5608b28313f9516b70c29ab38e377299e",
+            ),
+            Vector(
+                name = "vector-2",
+                message = "valhalla-ecdsa-test-vector-2",
+                digestHex = "5338e9a61e427a555b8bb212b4afb49c027918a286282d8787fb590144f223a6",
+                signatureHex =
+                    "3045022100876d2333e7c3831bec73aa54ce83251bb410632e93573d2950ace168a1707494" +
+                        "02203d48b85f4e98b0e49c07f133b8fe924cd6322d3e90b0e23735d2954527d7d3b8",
+            ),
+        )
 
     val VECTOR_1: Vector get() = ALL[0]
     val VECTOR_2: Vector get() = ALL[1]
 
     fun certificateDer(): ByteArray = pemBodyToDer(CERTIFICATE_PEM)
 
-    fun tamperedDigest(vector: Vector): ByteArray =
-        vector.digest().also { it[0] = (it[0].toInt() xor 0x01).toByte() }
+    fun tamperedDigest(vector: Vector): ByteArray = vector.digest().also { it[0] = (it[0].toInt() xor 0x01).toByte() }
 
-    fun tamperedSignature(vector: Vector): ByteArray =
-        vector.signature().also { it[it.lastIndex] = (it[it.lastIndex].toInt() xor 0x01).toByte() }
+    fun tamperedSignature(vector: Vector): ByteArray = vector.signature().also { it[it.lastIndex] = (it[it.lastIndex].toInt() xor 0x01).toByte() }
 
     fun pemBodyToDer(pem: String): ByteArray {
-        val body = pem.lines()
-            .map { it.trim() }
-            .filterNot { it.startsWith("-----") || it.isBlank() }
-            .joinToString(separator = "")
-        return kotlin.io.encoding.Base64.decode(body)
+        val body =
+            pem
+                .lines()
+                .map { it.trim() }
+                .filterNot { it.startsWith("-----") || it.isBlank() }
+                .joinToString(separator = "")
+        return kotlin.io.encoding.Base64
+            .decode(body)
     }
 }

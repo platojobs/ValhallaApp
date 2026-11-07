@@ -5,7 +5,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.window.ComposeUIViewController
 import platform.UIKit.UIViewController
 
-fun MainViewController(): UIViewController = ComposeUIViewController {
-    val route by NotificationRouteBridge.route.collectAsState()
-    App(startRoute = route)
-}
+fun mainViewController(): UIViewController =
+    ComposeUIViewController {
+        val route by NotificationRouteBridge.route.collectAsState()
+        valhallaRoot(startRoute = route)
+    }

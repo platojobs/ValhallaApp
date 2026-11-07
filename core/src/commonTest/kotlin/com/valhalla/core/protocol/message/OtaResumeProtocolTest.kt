@@ -14,7 +14,6 @@ import kotlin.test.assertTrue
  * 兼容基线：不续传时请求 payload 与 v0.7.0 完全一致；旧设备只需解析基础字段。
  */
 class OtaResumeProtocolTest {
-
     private val version = FirmwareVersion(1, 2, 3, 456, "release")
 
     private fun legacyRequestPayload(
@@ -32,12 +31,13 @@ class OtaResumeProtocolTest {
 
     @Test
     fun `不续传时请求字节与旧协议完全一致`() {
-        val request = StartOtaRequest(
-            totalBytes = 2_048L,
-            crc16 = 0x1234,
-            chunkSize = 64,
-            firmwareVersion = version,
-        )
+        val request =
+            StartOtaRequest(
+                totalBytes = 2_048L,
+                crc16 = 0x1234,
+                chunkSize = 64,
+                firmwareVersion = version,
+            )
 
         assertFalse(request.hasResumeExtension)
         assertContentEquals(legacyRequestPayload(), request.encode())
@@ -45,10 +45,11 @@ class OtaResumeProtocolTest {
 
     @Test
     fun `旧格式请求解码后续传字段为零`() {
-        val decoded = MessageCodec.decodeRequest(
-            CommandType.START_OTA,
-            legacyRequestPayload(),
-        ) as StartOtaRequest
+        val decoded =
+            MessageCodec.decodeRequest(
+                CommandType.START_OTA,
+                legacyRequestPayload(),
+            ) as StartOtaRequest
 
         assertEquals(2_048L, decoded.totalBytes)
         assertEquals(0x1234, decoded.crc16)
@@ -61,15 +62,16 @@ class OtaResumeProtocolTest {
 
     @Test
     fun `携带领续传扩展的请求往返一致`() {
-        val request = StartOtaRequest(
-            totalBytes = 2_048L,
-            crc16 = 0x1234,
-            chunkSize = 64,
-            firmwareVersion = version,
-            resumeSessionId = 0x10203040L,
-            resumeOffset = 1_024L,
-            payloadCrc32 = 0xDEADBEEFL,
-        )
+        val request =
+            StartOtaRequest(
+                totalBytes = 2_048L,
+                crc16 = 0x1234,
+                chunkSize = 64,
+                firmwareVersion = version,
+                resumeSessionId = 0x10203040L,
+                resumeOffset = 1_024L,
+                payloadCrc32 = 0xDEADBEEFL,
+            )
 
         val encoded = request.encode()
         assertEquals(legacyRequestPayload().size + StartOtaRequest.EXTENSION_SIZE, encoded.size)
@@ -143,12 +145,13 @@ class OtaResumeProtocolTest {
 
     @Test
     fun `设备确认偏移随应答往返一致`() {
-        val response = StartOtaResponse(
-            status = DeviceStatus.OK,
-            sessionId = 0x10203040L,
-            chunkSize = 64,
-            acceptedOffset = 1_024L,
-        )
+        val response =
+            StartOtaResponse(
+                status = DeviceStatus.OK,
+                sessionId = 0x10203040L,
+                chunkSize = 64,
+                acceptedOffset = 1_024L,
+            )
         val encoded = response.encode()
 
         val decoded = MessageCodec.decodeResponse(CommandType.START_OTA, encoded) as StartOtaResponse

@@ -5,7 +5,6 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 
 class PacketLogIndexTest {
-
     private fun entry(
         id: Long,
         command: CommandType,
@@ -27,25 +26,27 @@ class PacketLogIndexTest {
         error = error,
     )
 
-    private val entries = listOf(
-        entry(1, CommandType.GET_CONFIG, 11, "GET_CONFIG key=Alpha"),
-        entry(2, CommandType.SET_CONFIG, 22, "SET_CONFIG key=beta", isResponse = false),
-        entry(3, CommandType.SET_CONFIG, 777, "SET_CONFIG ok", isResponse = true),
-        entry(4, CommandType.OTA_DATA, 33, "OTA_DATA received=128", error = "CRC_MISMATCH"),
-    )
+    private val entries =
+        listOf(
+            entry(1, CommandType.GET_CONFIG, 11, "GET_CONFIG key=Alpha"),
+            entry(2, CommandType.SET_CONFIG, 22, "SET_CONFIG key=beta", isResponse = false),
+            entry(3, CommandType.SET_CONFIG, 777, "SET_CONFIG ok", isResponse = true),
+            entry(4, CommandType.OTA_DATA, 33, "OTA_DATA received=128", error = "CRC_MISMATCH"),
+        )
 
     @Test
     fun `索引查询与线性过滤结果完全一致`() {
         val index = PacketLogIndex(entries)
-        val filters = listOf(
-            PacketLogFilter(),
-            PacketLogFilter(keyword = "BETA"),
-            PacketLogFilter(keyword = "777"),
-            PacketLogFilter(command = CommandType.SET_CONFIG),
-            PacketLogFilter(errorsOnly = true),
-            PacketLogFilter(command = CommandType.SET_CONFIG, keyword = "ok"),
-            PacketLogFilter(keyword = "不存在的关键字"),
-        )
+        val filters =
+            listOf(
+                PacketLogFilter(),
+                PacketLogFilter(keyword = "BETA"),
+                PacketLogFilter(keyword = "777"),
+                PacketLogFilter(command = CommandType.SET_CONFIG),
+                PacketLogFilter(errorsOnly = true),
+                PacketLogFilter(command = CommandType.SET_CONFIG, keyword = "ok"),
+                PacketLogFilter(keyword = "不存在的关键字"),
+            )
 
         filters.forEach { filter ->
             val expected = filterPacketEntries(entries, filter, limit = InMemoryPacketLog.DEFAULT_CAPACITY)
@@ -81,19 +82,20 @@ class PacketLogIndexTest {
     @Test
     fun `命令集合与时间闭区间筛选与线性过滤一致`() {
         val index = PacketLogIndex(entries)
-        val filters = listOf(
-            PacketLogFilter(commands = setOf(CommandType.SET_CONFIG, CommandType.OTA_DATA)),
-            PacketLogFilter(fromMillis = 1_000, toMillis = 3_000),
-            PacketLogFilter(fromMillis = 2_000, toMillis = 2_000),
-            PacketLogFilter(errorsOnly = true, fromMillis = 2_000, toMillis = 4_000),
-            PacketLogFilter(
-                commands = setOf(CommandType.SET_CONFIG),
-                keyword = "ok",
-                fromMillis = 3_000,
-                toMillis = 3_000,
-            ),
-            PacketLogFilter(fromMillis = 4_000, toMillis = 1_000),
-        )
+        val filters =
+            listOf(
+                PacketLogFilter(commands = setOf(CommandType.SET_CONFIG, CommandType.OTA_DATA)),
+                PacketLogFilter(fromMillis = 1_000, toMillis = 3_000),
+                PacketLogFilter(fromMillis = 2_000, toMillis = 2_000),
+                PacketLogFilter(errorsOnly = true, fromMillis = 2_000, toMillis = 4_000),
+                PacketLogFilter(
+                    commands = setOf(CommandType.SET_CONFIG),
+                    keyword = "ok",
+                    fromMillis = 3_000,
+                    toMillis = 3_000,
+                ),
+                PacketLogFilter(fromMillis = 4_000, toMillis = 1_000),
+            )
 
         filters.forEach { filter ->
             val expected = filterPacketEntries(entries, filter, limit = InMemoryPacketLog.DEFAULT_CAPACITY)
@@ -110,10 +112,11 @@ class PacketLogIndexTest {
     @Test
     fun `多选命令优先于单选命令`() {
         val single = PacketLogFilter(command = CommandType.GET_CONFIG)
-        val multi = PacketLogFilter(
-            command = CommandType.GET_CONFIG,
-            commands = setOf(CommandType.SET_CONFIG),
-        )
+        val multi =
+            PacketLogFilter(
+                command = CommandType.GET_CONFIG,
+                commands = setOf(CommandType.SET_CONFIG),
+            )
         assertEquals(setOf(CommandType.GET_CONFIG), single.effectiveCommands)
         assertEquals(setOf(CommandType.SET_CONFIG), multi.effectiveCommands)
         assertEquals(listOf(3L, 2L), filterPacketEntries(entries, multi).map { it.id })

@@ -6,8 +6,9 @@ import com.valhalla.data.settings.AppSettingsStore
 import com.valhalla.data.settings.SettingsKeys
 
 /** 预设存储到平台偏好存储（整表字符串）。 */
-class PreferencesConfigPresetStore(private val store: AppSettingsStore) : ConfigPresetStore {
-
+class PreferencesConfigPresetStore(
+    private val store: AppSettingsStore,
+) : ConfigPresetStore {
     override fun loadRaw(): String? = store.read(SettingsKeys.CONFIG_PRESETS)
 
     override fun saveRaw(raw: String) {
@@ -16,8 +17,9 @@ class PreferencesConfigPresetStore(private val store: AppSettingsStore) : Config
 }
 
 /** 自动化规则存储到平台偏好存储（整表字符串）。 */
-class PreferencesAutomationRuleStore(private val store: AppSettingsStore) : AutomationRuleStore {
-
+class PreferencesAutomationRuleStore(
+    private val store: AppSettingsStore,
+) : AutomationRuleStore {
     override fun loadRaw(): String? = store.read(SettingsKeys.AUTOMATION_RULES)
 
     override fun saveRaw(raw: String) {

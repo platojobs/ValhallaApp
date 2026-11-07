@@ -55,28 +55,28 @@ data class PacketLogEntry(
     val summary: String,
     val error: String? = null,
 ) {
-
-    fun formatForCopy(): String = buildString {
-        append('[')
-        append(formatTimestamp(timestampMillis))
-        append("] ")
-        append(direction.name)
-        append(" seq=")
-        append(sequence)
-        append(' ')
-        append(command.name)
-        if (isResponse) append(" RESPONSE")
-        if (isNotification) append(" NOTIFY")
-        append('\n')
-        append(summary)
-        if (error != null) {
+    fun formatForCopy(): String =
+        buildString {
+            append('[')
+            append(formatTimestamp(timestampMillis))
+            append("] ")
+            append(direction.name)
+            append(" seq=")
+            append(sequence)
+            append(' ')
+            append(command.name)
+            if (isResponse) append(" RESPONSE")
+            if (isNotification) append(" NOTIFY")
             append('\n')
-            append("错误：")
-            append(error)
+            append(summary)
+            if (error != null) {
+                append('\n')
+                append("错误：")
+                append(error)
+            }
+            append('\n')
+            append(hex)
         }
-        append('\n')
-        append(hex)
-    }
 }
 
 /**
@@ -98,7 +98,6 @@ data class PacketLogFilter(
     val fromMillis: Long? = null,
     val toMillis: Long? = null,
 ) {
-
     /** 实际生效的命令集合：多选优先，否则退回单选。 */
     val effectiveCommands: Set<CommandType>
         get() = if (commands.isNotEmpty()) commands else command?.let { setOf(it) } ?: emptySet()
@@ -126,17 +125,18 @@ internal fun PacketLogFilter.matchesFacets(entry: PacketLogEntry): Boolean {
 }
 
 /** 关键字搜索覆盖的原始字段；索引侧对该结果做一次小写缓存。 */
-internal fun PacketLogEntry.searchText(): String = buildString {
-    append(command.name)
-    append('\n')
-    append(summary)
-    append('\n')
-    append(hex)
-    append('\n')
-    append(sequence)
-    append('\n')
-    append(error.orEmpty())
-}
+internal fun PacketLogEntry.searchText(): String =
+    buildString {
+        append(command.name)
+        append('\n')
+        append(summary)
+        append('\n')
+        append(hex)
+        append('\n')
+        append(sequence)
+        append('\n')
+        append(error.orEmpty())
+    }
 
 /** 按时间倒序过滤报文：命令集合、错误标记、时间闭区间与关键字。 */
 fun filterPacketEntries(
@@ -145,7 +145,8 @@ fun filterPacketEntries(
     limit: Int = Int.MAX_VALUE,
 ): List<PacketLogEntry> {
     if (limit <= 0) return emptyList()
-    return entries.asReversed()
+    return entries
+        .asReversed()
         .asSequence()
         .filter { entry -> filter.matches(entry) }
         .take(limit)
@@ -169,7 +170,6 @@ class InMemoryPacketLog(
     /** 脱敏开关，仅用于内部对照测试；生产环境恒为 true，不暴露给导出选项。 */
     internal val redactionEnabled: Boolean = true,
 ) {
-
     init {
         require(capacity > 0) { "capacity 必须大于 0" }
     }
@@ -179,26 +179,31 @@ class InMemoryPacketLog(
 
     val entries: StateFlow<List<PacketLogEntry>> = mutableEntries.asStateFlow()
 
-    fun record(direction: FrameDirection, frame: Frame): PacketLogEntry {
+    fun record(
+        direction: FrameDirection,
+        frame: Frame,
+    ): PacketLogEntry {
         val safeFrame = if (redactionEnabled) PacketLogRedaction.redactFrame(frame) else frame
-        val hex: String = try {
-            Hex.encode(FrameCodec.encode(safeFrame))
-        } catch (_: Throwable) {
-            ""
-        }
+        val hex: String =
+            try {
+                Hex.encode(FrameCodec.encode(safeFrame))
+            } catch (_: Throwable) {
+                ""
+            }
         val described = PacketLogFormatter.describe(direction, safeFrame)
-        val entry = PacketLogEntry(
-            id = nextId(),
-            timestampMillis = clockMillis(),
-            direction = direction,
-            command = safeFrame.type,
-            sequence = safeFrame.sequence,
-            isResponse = safeFrame.isResponse,
-            isNotification = safeFrame.isNotification,
-            hex = hex,
-            summary = described.summary,
-            error = described.error,
-        )
+        val entry =
+            PacketLogEntry(
+                id = nextId(),
+                timestampMillis = clockMillis(),
+                direction = direction,
+                command = safeFrame.type,
+                sequence = safeFrame.sequence,
+                isResponse = safeFrame.isResponse,
+                isNotification = safeFrame.isNotification,
+                hex = hex,
+                summary = described.summary,
+                error = described.error,
+            )
         mutableEntries.update { current ->
             val appended = current + entry
             if (appended.size > capacity) {
@@ -216,8 +221,10 @@ class InMemoryPacketLog(
         return next
     }
 
-    fun filter(filter: PacketLogFilter, limit: Int = Int.MAX_VALUE): List<PacketLogEntry> =
-        filterPacketEntries(mutableEntries.value, filter, limit)
+    fun filter(
+        filter: PacketLogFilter,
+        limit: Int = Int.MAX_VALUE,
+    ): List<PacketLogEntry> = filterPacketEntries(mutableEntries.value, filter, limit)
 
     fun clear() {
         mutableEntries.value = emptyList()
@@ -230,84 +237,97 @@ class InMemoryPacketLog(
 
 /** 报文解析摘要生成器；解析失败时把异常原因写入 [Result.error]，不影响日志记录。 */
 object PacketLogFormatter {
+    data class Result(
+        val summary: String,
+        val error: String? = null,
+    )
 
-    data class Result(val summary: String, val error: String? = null)
-
-    fun describe(direction: FrameDirection, frame: Frame): Result = when {
-        direction == FrameDirection.TX -> parseRequest(frame)
-        frame.isNotification -> parseNotification(frame)
-        else -> parseResponse(frame)
-    }
-
-    private fun parseRequest(frame: Frame): Result = try {
-        val request = MessageCodec.decodeRequest(frame.type, frame.payload)
-        Result(describeRequest(request))
-    } catch (error: Throwable) {
-        Result("${frame.type.name} payload=${frame.payload.size}B", error.message ?: "请求解析失败")
-    }
-
-    private fun parseNotification(frame: Frame): Result = try {
-        Result(describeNotification(MessageCodec.decodeNotification(frame)))
-    } catch (error: Throwable) {
-        Result("${frame.type.name} payload=${frame.payload.size}B", error.message ?: "通知解析失败")
-    }
-
-    private fun parseResponse(frame: Frame): Result = try {
-        val response = MessageCodec.decodeResponse(frame.type, frame.payload)
-        if (response is ErrorResponse) {
-            Result(
-                summary = "${frame.type.name} 失败：${response.status.describe()}" +
-                    (response.detail?.let { "（$it）" } ?: ""),
-                error = response.status.describe(),
-            )
-        } else {
-            Result(describeResponse(response))
+    fun describe(
+        direction: FrameDirection,
+        frame: Frame,
+    ): Result =
+        when {
+            direction == FrameDirection.TX -> parseRequest(frame)
+            frame.isNotification -> parseNotification(frame)
+            else -> parseResponse(frame)
         }
-    } catch (error: Throwable) {
-        Result("${frame.type.name} payload=${frame.payload.size}B", error.message ?: "应答解析失败")
-    }
 
-    private fun describeRequest(request: DeviceRequest): String = when (request) {
-        is AuthRequest -> "AUTH mode=${request.mode.name} credential=${request.credential.size}B"
-        is GetConfigRequest -> "GET_CONFIG key=${request.key}"
-        is SetConfigRequest -> "SET_CONFIG key=${request.key} value=${request.value.size}B"
-        is StartOtaRequest ->
-            "START_OTA total=${request.totalBytes} chunk=${request.chunkSize}" +
-                if (request.hasResumeExtension) {
-                    " resume=${request.resumeSessionId}@${request.resumeOffset}"
-                } else {
-                    " (无续传扩展)"
-                }
+    private fun parseRequest(frame: Frame): Result =
+        try {
+            val request = MessageCodec.decodeRequest(frame.type, frame.payload)
+            Result(describeRequest(request))
+        } catch (error: Throwable) {
+            Result("${frame.type.name} payload=${frame.payload.size}B", error.message ?: "请求解析失败")
+        }
 
-        is OtaDataRequest -> "OTA_DATA offset=${request.offset} len=${request.data.size}B"
-        is FinishOtaRequest -> "FINISH_OTA total=${request.totalBytes} crc=0x${request.crc16.toString(16)}"
-        is AbortOtaRequest -> "ABORT_OTA reason=${request.reason.name}"
-        else -> "${request.command.name} payload=${request.encode().size}B"
-    }
+    private fun parseNotification(frame: Frame): Result =
+        try {
+            Result(describeNotification(MessageCodec.decodeNotification(frame)))
+        } catch (error: Throwable) {
+            Result("${frame.type.name} payload=${frame.payload.size}B", error.message ?: "通知解析失败")
+        }
 
-    private fun describeResponse(response: DeviceResponse): String = when (response) {
-        is ConfigResponse -> "CONFIG key=${response.key} value=${response.value.size}B"
-        is DeviceInfoResponse ->
-            "INFO vendor=${response.vendor} model=${response.model} serial=${response.serialNumber}"
+    private fun parseResponse(frame: Frame): Result =
+        try {
+            val response = MessageCodec.decodeResponse(frame.type, frame.payload)
+            if (response is ErrorResponse) {
+                Result(
+                    summary =
+                        "${frame.type.name} 失败：${response.status.describe()}" +
+                            (response.detail?.let { "（$it）" } ?: ""),
+                    error = response.status.describe(),
+                )
+            } else {
+                Result(describeResponse(response))
+            }
+        } catch (error: Throwable) {
+            Result("${frame.type.name} payload=${frame.payload.size}B", error.message ?: "应答解析失败")
+        }
 
-        is BatteryResponse -> "BATTERY ${response.percent}% charging=${response.charging}"
-        is FirmwareVersionResponse -> "VERSION ${response.version}"
-        is StartOtaResponse ->
-            "START_OK session=${response.sessionId} chunk=${response.chunkSize}" +
-                " accepted=${response.acceptedOffset}"
+    private fun describeRequest(request: DeviceRequest): String =
+        when (request) {
+            is AuthRequest -> "AUTH mode=${request.mode.name} credential=${request.credential.size}B"
+            is GetConfigRequest -> "GET_CONFIG key=${request.key}"
+            is SetConfigRequest -> "SET_CONFIG key=${request.key} value=${request.value.size}B"
+            is StartOtaRequest ->
+                "START_OTA total=${request.totalBytes} chunk=${request.chunkSize}" +
+                    if (request.hasResumeExtension) {
+                        " resume=${request.resumeSessionId}@${request.resumeOffset}"
+                    } else {
+                        " (无续传扩展)"
+                    }
 
-        is OtaDataResponse -> "DATA_OK received=${response.receivedBytes}"
-        is FinishOtaResponse -> "FINISH_OK reboot=${response.rebootRequired}"
-        else -> "${response.command.name} OK"
-    }
+            is OtaDataRequest -> "OTA_DATA offset=${request.offset} len=${request.data.size}B"
+            is FinishOtaRequest -> "FINISH_OTA total=${request.totalBytes} crc=0x${request.crc16.toString(16)}"
+            is AbortOtaRequest -> "ABORT_OTA reason=${request.reason.name}"
+            else -> "${request.command.name} payload=${request.encode().size}B"
+        }
 
-    private fun describeNotification(notification: DeviceNotification): String = when (notification) {
-        is OtaProgressNotification ->
-            "OTA_PROGRESS session=${notification.sessionId}" +
-                " ${notification.receivedBytes}/${notification.totalBytes} stage=${notification.stage.name}"
+    private fun describeResponse(response: DeviceResponse): String =
+        when (response) {
+            is ConfigResponse -> "CONFIG key=${response.key} value=${response.value.size}B"
+            is DeviceInfoResponse ->
+                "INFO vendor=${response.vendor} model=${response.model} serial=${response.serialNumber}"
 
-        else -> notification.command.name
-    }
+            is BatteryResponse -> "BATTERY ${response.percent}% charging=${response.charging}"
+            is FirmwareVersionResponse -> "VERSION ${response.version}"
+            is StartOtaResponse ->
+                "START_OK session=${response.sessionId} chunk=${response.chunkSize}" +
+                    " accepted=${response.acceptedOffset}"
+
+            is OtaDataResponse -> "DATA_OK received=${response.receivedBytes}"
+            is FinishOtaResponse -> "FINISH_OK reboot=${response.rebootRequired}"
+            else -> "${response.command.name} OK"
+        }
+
+    private fun describeNotification(notification: DeviceNotification): String =
+        when (notification) {
+            is OtaProgressNotification ->
+                "OTA_PROGRESS session=${notification.sessionId}" +
+                    " ${notification.receivedBytes}/${notification.totalBytes} stage=${notification.stage.name}"
+
+            else -> notification.command.name
+        }
 }
 
 private fun formatTimestamp(timestampMillis: Long): String {

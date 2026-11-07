@@ -8,7 +8,6 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class ParamCatalogTest {
-
     private val interval = ParamCatalog.find(0x0001)!!
     private val mode = ParamCatalog.find(0x0002)!!
     private val sensitivity = ParamCatalog.find(0x0003)!!
@@ -20,7 +19,10 @@ class ParamCatalogTest {
         assertEquals(5, ParamCatalog.params.size)
         assertEquals(
             ParamCatalog.params.size,
-            ParamCatalog.params.map { it.id }.distinct().size,
+            ParamCatalog.params
+                .map { it.id }
+                .distinct()
+                .size,
         )
         assertTrue(ParamCatalog.params.none { it.firmwareConfirmed })
         assertNull(ParamCatalog.find(0x00FF))
@@ -38,7 +40,7 @@ class ParamCatalogTest {
     fun `整数参数越界与非数字被拒绝`() {
         val low = assertIs<ParamValidation.Invalid>(ParamCatalog.validate(interval, "99"))
         assertTrue(low.message.contains("100"))
-        val high = assertIs<ParamValidation.Invalid>(ParamCatalog.validate(sensitivity, "6"))
+        assertIs<ParamValidation.Invalid>(ParamCatalog.validate(sensitivity, "6"))
         val text = assertIs<ParamValidation.Invalid>(ParamCatalog.validate(interval, "abc"))
         assertTrue(text.message.contains("整数"))
     }
@@ -68,9 +70,10 @@ class ParamCatalogTest {
         assertEquals(8, valid.bytes.size)
         assertIs<ParamValidation.Invalid>(ParamCatalog.validate(writableTag, " "))
         // 16 个汉字 = 48 字节，超过 16 字节上限。
-        val tooLong = assertIs<ParamValidation.Invalid>(
-            ParamCatalog.validate(writableTag, "一二三四五六七八九十一二三四五六"),
-        )
+        val tooLong =
+            assertIs<ParamValidation.Invalid>(
+                ParamCatalog.validate(writableTag, "一二三四五六七八九十一二三四五六"),
+            )
         assertTrue(tooLong.message.contains("上限"))
         assertIs<ParamValidation.Valid>(ParamCatalog.validate(writableTag, "一二三四五"))
     }

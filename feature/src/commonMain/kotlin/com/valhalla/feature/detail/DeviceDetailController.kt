@@ -4,10 +4,10 @@ import com.valhalla.core.command.ConcurrentCommandDispatcher
 import com.valhalla.core.logging.DeviceLogger
 import com.valhalla.core.logging.InMemoryDeviceLogger
 import com.valhalla.core.logging.LogLevel
+import com.valhalla.core.profile.DeviceProfileRepository
 import com.valhalla.core.protocol.message.AuthMode
 import com.valhalla.core.protocol.message.AuthRequest
 import com.valhalla.core.protocol.message.AuthResponse
-import com.valhalla.core.protocol.message.SignedAuthCredential
 import com.valhalla.core.protocol.message.BatteryResponse
 import com.valhalla.core.protocol.message.ConfigResponse
 import com.valhalla.core.protocol.message.DeviceInfoResponse
@@ -26,14 +26,14 @@ import com.valhalla.core.protocol.message.RebootRequest
 import com.valhalla.core.protocol.message.RebootResponse
 import com.valhalla.core.protocol.message.SetConfigRequest
 import com.valhalla.core.protocol.message.SetConfigResponse
-import com.valhalla.core.profile.DeviceProfileRepository
-import com.valhalla.core.state.DeviceEvent
-import com.valhalla.core.state.DeviceState
-import com.valhalla.core.state.DeviceStateMachine
+import com.valhalla.core.protocol.message.SignedAuthCredential
 import com.valhalla.core.security.AuthSignatureMessage
 import com.valhalla.core.security.AuthSigner
 import com.valhalla.core.security.AuthToken
 import com.valhalla.core.security.TokenStore
+import com.valhalla.core.state.DeviceEvent
+import com.valhalla.core.state.DeviceState
+import com.valhalla.core.state.DeviceStateMachine
 import com.valhalla.feature.i18n.StringKey
 import com.valhalla.feature.i18n.UiMessage
 import com.valhalla.feature.toFailureInfo
@@ -63,7 +63,9 @@ enum class QuickActionType {
 sealed interface QuickActionState {
     data object Idle : QuickActionState
 
-    data class Running(val type: QuickActionType) : QuickActionState
+    data class Running(
+        val type: QuickActionType,
+    ) : QuickActionState
 
     data class Succeeded(
         val type: QuickActionType,
@@ -124,11 +126,11 @@ class DeviceDetailController(
     /** 扫描到设备时展示的名称，写入档案作为初始显示名。 */
     private val deviceDisplayName: String? = null,
 ) {
-
     private val machine = DeviceStateMachine(initialState = DeviceState.CONNECTED)
-    private val mutableState = MutableStateFlow(
-        DeviceDetailState(deviceId = deviceId, deviceState = machine.state),
-    )
+    private val mutableState =
+        MutableStateFlow(
+            DeviceDetailState(deviceId = deviceId, deviceState = machine.state),
+        )
     val state: StateFlow<DeviceDetailState> = mutableState.asStateFlow()
 
     /** 鉴权成功后的会话令牌，供后续安全操作使用。 */
@@ -156,7 +158,10 @@ class DeviceDetailController(
     }
 
     /** 发送 AUTH 鉴权。成功进入 READY，失败进入 FAULT 并把错误码暴露到 UI 状态。 */
-    suspend fun authenticate(token: String, mode: AuthMode = AuthMode.TOKEN): Boolean {
+    suspend fun authenticate(
+        token: String,
+        mode: AuthMode = AuthMode.TOKEN,
+    ): Boolean {
         mutableState.value = mutableState.value.copy(error = null, errorCode = null)
         transition(DeviceEvent.AuthenticationStarted)
         log(LogLevel.INFO, "开始鉴权（模式 ${mode.name}）")
@@ -180,10 +185,11 @@ class DeviceDetailController(
             val info = error.toFailureInfo()
             transition(DeviceEvent.AuthFailed(info.message))
             log(LogLevel.ERROR, "鉴权失败：${info.message}")
-            mutableState.value = mutableState.value.copy(
-                error = UiMessage(StringKey.AUTH_FAILED, nested = mapOf("detail" to info.ui)),
-                errorCode = info.status,
-            )
+            mutableState.value =
+                mutableState.value.copy(
+                    error = UiMessage(StringKey.AUTH_FAILED, nested = mapOf("detail" to info.ui)),
+                    errorCode = info.status,
+                )
             false
         }
     }
@@ -213,13 +219,15 @@ class DeviceDetailController(
         } catch (error: Throwable) {
             val info = error.toFailureInfo()
             log(LogLevel.ERROR, "请求挑战失败：${info.message}")
-            mutableState.value = mutableState.value.copy(
-                error = UiMessage(
-                    StringKey.AUTH_CHALLENGE_FAILED,
-                    nested = mapOf("detail" to info.ui),
-                ),
-                errorCode = info.status,
-            )
+            mutableState.value =
+                mutableState.value.copy(
+                    error =
+                        UiMessage(
+                            StringKey.AUTH_CHALLENGE_FAILED,
+                            nested = mapOf("detail" to info.ui),
+                        ),
+                    errorCode = info.status,
+                )
             null
         }
     }
@@ -243,26 +251,29 @@ class DeviceDetailController(
         log(LogLevel.INFO, "开始签名鉴权（${signer.algorithm}）")
 
         return try {
-            val activeChallenge = challenge ?: run {
-                val response = dispatcher.execute(AuthRequest(AuthMode.CHALLENGE, clientNonce))
-                if (response !is AuthResponse) {
-                    error("挑战应答类型异常: ${response::class.simpleName}")
+            val activeChallenge =
+                challenge ?: run {
+                    val response = dispatcher.execute(AuthRequest(AuthMode.CHALLENGE, clientNonce))
+                    if (response !is AuthResponse) {
+                        error("挑战应答类型异常: ${response::class.simpleName}")
+                    }
+                    if (!response.hasChallenge) {
+                        error("设备未返回挑战")
+                    }
+                    response.challenge
                 }
-                if (!response.hasChallenge) {
-                    error("设备未返回挑战")
-                }
-                response.challenge
-            }
             serverChallenge = activeChallenge
 
-            val credential = SignedAuthCredential(
-                challenge = activeChallenge,
-                clientNonce = clientNonce,
-                deviceDigest = deviceDigest,
-                signature = signer.sign(
-                    AuthSignatureMessage.canonical(activeChallenge, clientNonce, deviceDigest),
-                ),
-            )
+            val credential =
+                SignedAuthCredential(
+                    challenge = activeChallenge,
+                    clientNonce = clientNonce,
+                    deviceDigest = deviceDigest,
+                    signature =
+                        signer.sign(
+                            AuthSignatureMessage.canonical(activeChallenge, clientNonce, deviceDigest),
+                        ),
+                )
             val response = dispatcher.execute(AuthRequest(AuthMode.SIGNED, credential.encode()))
             if (response !is AuthResponse) {
                 error("鉴权应答类型异常: ${response::class.simpleName}")
@@ -279,10 +290,11 @@ class DeviceDetailController(
             val info = error.toFailureInfo()
             transition(DeviceEvent.AuthFailed(info.message))
             log(LogLevel.ERROR, "签名鉴权失败：${info.message}")
-            mutableState.value = mutableState.value.copy(
-                error = UiMessage(StringKey.AUTH_FAILED, nested = mapOf("detail" to info.ui)),
-                errorCode = info.status,
-            )
+            mutableState.value =
+                mutableState.value.copy(
+                    error = UiMessage(StringKey.AUTH_FAILED, nested = mapOf("detail" to info.ui)),
+                    errorCode = info.status,
+                )
             false
         }
     }
@@ -304,11 +316,12 @@ class DeviceDetailController(
         serverChallenge = response.challenge
         val store = tokenStore ?: return
         if (response.token.isEmpty()) return
-        val expiresAt = if (response.expiresInSeconds > 0) {
-            clockMillis() + response.expiresInSeconds * 1_000
-        } else {
-            0L
-        }
+        val expiresAt =
+            if (response.expiresInSeconds > 0) {
+                clockMillis() + response.expiresInSeconds * 1_000
+            } else {
+                0L
+            }
         store.save(AuthToken(value = response.token, expiresAtEpochMillis = expiresAt))
     }
 
@@ -321,44 +334,52 @@ class DeviceDetailController(
     suspend fun refreshInfo() {
         mutableState.value = mutableState.value.copy(error = null, errorCode = null, loading = true)
 
-        val (infoAttempt, firmwareAttempt, batteryAttempt) = supervisorScope {
-            val info = async { attempt { dispatcher.execute(GetDeviceInfoRequest()) as DeviceInfoResponse } }
-            val firmware = async {
-                attempt { dispatcher.execute(GetFirmwareVersionRequest()) as FirmwareVersionResponse }
+        val (infoAttempt, firmwareAttempt, batteryAttempt) =
+            supervisorScope {
+                val info = async { attempt { dispatcher.execute(GetDeviceInfoRequest()) as DeviceInfoResponse } }
+                val firmware =
+                    async {
+                        attempt { dispatcher.execute(GetFirmwareVersionRequest()) as FirmwareVersionResponse }
+                    }
+                val battery = async { attempt { dispatcher.execute(GetBatteryRequest()) as BatteryResponse } }
+                Triple(info.await(), firmware.await(), battery.await())
             }
-            val battery = async { attempt { dispatcher.execute(GetBatteryRequest()) as BatteryResponse } }
-            Triple(info.await(), firmware.await(), battery.await())
-        }
 
         val info = infoAttempt.valueOrNull()
         val firmware = firmwareAttempt.valueOrNull()
         val battery = batteryAttempt.valueOrNull()
 
-        val failures = listOf(infoAttempt, firmwareAttempt, batteryAttempt)
-            .mapNotNull { (it as? Attempt.Failure)?.error }
+        val failures =
+            listOf(infoAttempt, firmwareAttempt, batteryAttempt)
+                .mapNotNull { (it as? Attempt.Failure)?.error }
         failures.forEach { log(LogLevel.WARN, "信息读取失败：${it.toFailureInfo().message}") }
 
-        mutableState.value = mutableState.value.copy(
-            deviceInfo = info ?: mutableState.value.deviceInfo,
-            firmware = firmware?.version ?: mutableState.value.firmware,
-            firmwareVersion = firmware?.version?.toString() ?: mutableState.value.firmwareVersion,
-            batteryPercent = battery?.percent ?: mutableState.value.batteryPercent,
-            charging = battery?.charging ?: mutableState.value.charging,
-            voltageMillivolts = battery?.voltageMillivolts ?: mutableState.value.voltageMillivolts,
-            error = if (info == null && firmware == null && battery == null) {
-                UiMessage(
-                    StringKey.INFO_REFRESH_FAILED,
-                    nested = mapOf(
-                        "detail" to (failures.firstOrNull()?.toFailureInfo()?.ui
-                            ?: UiMessage.of(StringKey.FAILURE_UNKNOWN, "detail" to StringKey.UNKNOWN.name)),
-                    ),
-                )
-            } else {
-                null
-            },
-            errorCode = failures.firstOrNull()?.toFailureInfo()?.status,
-            loading = false,
-        )
+        mutableState.value =
+            mutableState.value.copy(
+                deviceInfo = info ?: mutableState.value.deviceInfo,
+                firmware = firmware?.version ?: mutableState.value.firmware,
+                firmwareVersion = firmware?.version?.toString() ?: mutableState.value.firmwareVersion,
+                batteryPercent = battery?.percent ?: mutableState.value.batteryPercent,
+                charging = battery?.charging ?: mutableState.value.charging,
+                voltageMillivolts = battery?.voltageMillivolts ?: mutableState.value.voltageMillivolts,
+                error =
+                    if (info == null && firmware == null && battery == null) {
+                        UiMessage(
+                            StringKey.INFO_REFRESH_FAILED,
+                            nested =
+                                mapOf(
+                                    "detail" to (
+                                        failures.firstOrNull()?.toFailureInfo()?.ui
+                                            ?: UiMessage.of(StringKey.FAILURE_UNKNOWN, "detail" to StringKey.UNKNOWN.name)
+                                    ),
+                                ),
+                        )
+                    } else {
+                        null
+                    },
+                errorCode = failures.firstOrNull()?.toFailureInfo()?.status,
+                loading = false,
+            )
 
         if (info != null || firmware != null || battery != null) {
             log(
@@ -388,9 +409,10 @@ class DeviceDetailController(
             if (response !is ConfigResponse) {
                 error("配置应答类型异常: ${response::class.simpleName}")
             }
-            mutableState.value = mutableState.value.copy(
-                configuration = mutableState.value.configuration + (response.key to response.value),
-            )
+            mutableState.value =
+                mutableState.value.copy(
+                    configuration = mutableState.value.configuration + (response.key to response.value),
+                )
             log(LogLevel.INFO, "读取配置 ${response.key} 成功（${response.value.size} 字节）")
             response.value
         } catch (cancellation: CancellationException) {
@@ -398,28 +420,34 @@ class DeviceDetailController(
         } catch (error: Throwable) {
             val info = error.toFailureInfo()
             log(LogLevel.WARN, "读取配置 $key 失败：${info.message}")
-            mutableState.value = mutableState.value.copy(
-                error = UiMessage(
-                    StringKey.DEVICE_CONFIG_READ_FAILED,
-                    nested = mapOf("detail" to info.ui),
-                ),
-                errorCode = info.status,
-            )
+            mutableState.value =
+                mutableState.value.copy(
+                    error =
+                        UiMessage(
+                            StringKey.DEVICE_CONFIG_READ_FAILED,
+                            nested = mapOf("detail" to info.ui),
+                        ),
+                    errorCode = info.status,
+                )
             null
         }
     }
 
     /** 写入配置项，成功返回 true。 */
-    suspend fun writeConfig(key: String, value: ByteArray): Boolean {
+    suspend fun writeConfig(
+        key: String,
+        value: ByteArray,
+    ): Boolean {
         mutableState.value = mutableState.value.copy(error = null, errorCode = null)
         return try {
             val response = dispatcher.execute(SetConfigRequest(key, value))
             if (response !is SetConfigResponse) {
                 error("写配置应答类型异常: ${response::class.simpleName}")
             }
-            mutableState.value = mutableState.value.copy(
-                configuration = mutableState.value.configuration + (key to value),
-            )
+            mutableState.value =
+                mutableState.value.copy(
+                    configuration = mutableState.value.configuration + (key to value),
+                )
             log(LogLevel.INFO, "写入配置 $key 成功（${value.size} 字节）")
             true
         } catch (cancellation: CancellationException) {
@@ -427,13 +455,15 @@ class DeviceDetailController(
         } catch (error: Throwable) {
             val info = error.toFailureInfo()
             log(LogLevel.WARN, "写入配置 $key 失败：${info.message}")
-            mutableState.value = mutableState.value.copy(
-                error = UiMessage(
-                    StringKey.DEVICE_CONFIG_WRITE_FAILED,
-                    nested = mapOf("detail" to info.ui),
-                ),
-                errorCode = info.status,
-            )
+            mutableState.value =
+                mutableState.value.copy(
+                    error =
+                        UiMessage(
+                            StringKey.DEVICE_CONFIG_WRITE_FAILED,
+                            nested = mapOf("detail" to info.ui),
+                        ),
+                    errorCode = info.status,
+                )
             false
         }
     }
@@ -459,16 +489,19 @@ class DeviceDetailController(
             throw cancellation
         } catch (error: Throwable) {
             val info = error.toFailureInfo()
-            mutableState.value = mutableState.value.copy(
-                quickAction = QuickActionState.Failed(
-                    type = type,
-                    error = UiMessage(
-                        StringKey.QUICK_ACTION_FAILED,
-                        nested = mapOf("detail" to info.ui),
-                    ),
-                    status = info.status,
-                ),
-            )
+            mutableState.value =
+                mutableState.value.copy(
+                    quickAction =
+                        QuickActionState.Failed(
+                            type = type,
+                            error =
+                                UiMessage(
+                                    StringKey.QUICK_ACTION_FAILED,
+                                    nested = mapOf("detail" to info.ui),
+                                ),
+                            status = info.status,
+                        ),
+                )
             log(LogLevel.ERROR, "快捷操作 ${type.name} 失败：${info.message}")
             false
         }
@@ -478,13 +511,14 @@ class DeviceDetailController(
      * 重启设备；[delayMillis] 为设备侧延迟（0..65535 毫秒）。
      * 危险操作，调用方必须先做二次确认。
      */
-    suspend fun reboot(delayMillis: Int = 0): Boolean = runQuickAction(QuickActionType.REBOOT) {
-        val response = dispatcher.execute(RebootRequest(delayMillis = delayMillis))
-        if (response !is RebootResponse) {
-            error("重启应答类型异常: ${response::class.simpleName}")
+    suspend fun reboot(delayMillis: Int = 0): Boolean =
+        runQuickAction(QuickActionType.REBOOT) {
+            val response = dispatcher.execute(RebootRequest(delayMillis = delayMillis))
+            if (response !is RebootResponse) {
+                error("重启应答类型异常: ${response::class.simpleName}")
+            }
+            QuickActionState.Succeeded(QuickActionType.REBOOT, delayMillis = delayMillis)
         }
-        QuickActionState.Succeeded(QuickActionType.REBOOT, delayMillis = delayMillis)
-    }
 
     /**
      * 恢复出厂设置。
@@ -505,22 +539,24 @@ class DeviceDetailController(
      * 心跳探测：回读设备 uptime 与电量，并同步到详情状态。
      * 请求中的 `uptimeSeconds` 为协议要求字段，客户端以已知回读值或 0 填充。
      */
-    suspend fun heartbeat(): Boolean = runQuickAction(QuickActionType.HEARTBEAT) {
-        val knownUptime = mutableState.value.uptimeSeconds ?: 0L
-        val response = dispatcher.execute(HeartbeatRequest(knownUptime))
-        if (response !is HeartbeatResponse) {
-            error("心跳应答类型异常: ${response::class.simpleName}")
+    suspend fun heartbeat(): Boolean =
+        runQuickAction(QuickActionType.HEARTBEAT) {
+            val knownUptime = mutableState.value.uptimeSeconds ?: 0L
+            val response = dispatcher.execute(HeartbeatRequest(knownUptime))
+            if (response !is HeartbeatResponse) {
+                error("心跳应答类型异常: ${response::class.simpleName}")
+            }
+            mutableState.value =
+                mutableState.value.copy(
+                    uptimeSeconds = response.uptimeSeconds,
+                    batteryPercent = response.batteryPercent,
+                )
+            QuickActionState.Succeeded(
+                type = QuickActionType.HEARTBEAT,
+                uptimeSeconds = response.uptimeSeconds,
+                batteryPercent = response.batteryPercent,
+            )
         }
-        mutableState.value = mutableState.value.copy(
-            uptimeSeconds = response.uptimeSeconds,
-            batteryPercent = response.batteryPercent,
-        )
-        QuickActionState.Succeeded(
-            type = QuickActionType.HEARTBEAT,
-            uptimeSeconds = response.uptimeSeconds,
-            batteryPercent = response.batteryPercent,
-        )
-    }
 
     /** 主动断开，状态回落 DISCONNECTED。 */
     suspend fun disconnect() {
@@ -540,8 +576,13 @@ class DeviceDetailController(
     fun deviceLogger(): DeviceLogger = logger
 
     private sealed interface Attempt<out T> {
-        data class Success<T>(val value: T) : Attempt<T>
-        data class Failure(val error: Throwable) : Attempt<Nothing>
+        data class Success<T>(
+            val value: T,
+        ) : Attempt<T>
+
+        data class Failure(
+            val error: Throwable,
+        ) : Attempt<Nothing>
     }
 
     private suspend fun <T> attempt(block: suspend () -> T): Attempt<T> =
@@ -560,10 +601,14 @@ class DeviceDetailController(
         mutableState.value = mutableState.value.copy(deviceState = machine.state)
     }
 
-    private fun log(level: LogLevel, message: String) {
+    private fun log(
+        level: LogLevel,
+        message: String,
+    ) {
         logger.log(level, "DeviceDetail", message)
-        mutableState.value = mutableState.value.copy(
-            logs = logger.entries().map { it.format() },
-        )
+        mutableState.value =
+            mutableState.value.copy(
+                logs = logger.entries().map { it.format() },
+            )
     }
 }

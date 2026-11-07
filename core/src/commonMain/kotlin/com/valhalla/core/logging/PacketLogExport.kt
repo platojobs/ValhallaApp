@@ -5,7 +5,10 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.yield
 
 /** 导出格式；[extension] 与 [mimeType] 用于文件名与平台保存/分享。 */
-enum class PacketLogExportFormat(val extension: String, val mimeType: String) {
+enum class PacketLogExportFormat(
+    val extension: String,
+    val mimeType: String,
+) {
     TEXT("txt", "text/plain"),
     JSON("json", "application/json"),
     CSV("csv", "text/csv"),
@@ -29,7 +32,6 @@ data class PacketLogExportOptions(
     val maxBytes: Int = 512 * 1024,
     val maxHexCharsPerEntry: Int = 4096,
 ) {
-
     init {
         require(maxEntries in MIN_ENTRIES..MAX_ENTRIES) {
             "maxEntries 必须在 $MIN_ENTRIES..$MAX_ENTRIES 之间"
@@ -68,8 +70,9 @@ fun validateEntryLimit(input: String): PacketLogLimitCheck {
     if (text.isEmpty()) {
         return PacketLogLimitCheck(error = "请输入 ${PacketLogExportOptions.MIN_ENTRIES}..${PacketLogExportOptions.MAX_ENTRIES} 之间的整数")
     }
-    val value = text.toIntOrNull()
-        ?: return PacketLogLimitCheck(error = "条数上限必须是整数")
+    val value =
+        text.toIntOrNull()
+            ?: return PacketLogLimitCheck(error = "条数上限必须是整数")
     if (value !in PacketLogExportOptions.MIN_ENTRIES..PacketLogExportOptions.MAX_ENTRIES) {
         return PacketLogLimitCheck(
             error = "条数上限需在 ${PacketLogExportOptions.MIN_ENTRIES}..${PacketLogExportOptions.MAX_ENTRIES} 之间",
@@ -85,8 +88,9 @@ fun validateByteLimitKb(input: String): PacketLogLimitCheck {
     if (text.isEmpty()) {
         return PacketLogLimitCheck(error = "请输入 1..$maxKb 之间的整数（KB）")
     }
-    val value = text.toIntOrNull()
-        ?: return PacketLogLimitCheck(error = "大小上限必须是整数（KB）")
+    val value =
+        text.toIntOrNull()
+            ?: return PacketLogLimitCheck(error = "大小上限必须是整数（KB）")
     if (value !in 1..maxKb) {
         return PacketLogLimitCheck(error = "大小上限需在 1..$maxKb KB 之间")
     }
@@ -154,7 +158,6 @@ data class PacketLogExportProgress(
  * （[PacketLogTruncationTarget.OLDEST]）。
  */
 object PacketLogExporter {
-
     /**
      * 流式拼装的分块大小（字符）。条目逐条序列化后写入 [ChunkedTextBuilder]，
      * 单块缓冲从不超过该值，因此拼装阶段的内存占用与条目总数无关。
@@ -180,16 +183,17 @@ object PacketLogExporter {
         format: PacketLogExportFormat = PacketLogExportFormat.TEXT,
         onProgress: (PacketLogExportProgress) -> Unit = {},
     ): PacketLogExportResult {
-        val computed = compute(
-            entries = entries,
-            filter = filter,
-            nowMillis = nowMillis,
-            zoneOffsetMinutes = zoneOffsetMinutes,
-            format = format,
-            options = options,
-            onProgress = onProgress,
-            assembleOutput = true,
-        )
+        val computed =
+            compute(
+                entries = entries,
+                filter = filter,
+                nowMillis = nowMillis,
+                zoneOffsetMinutes = zoneOffsetMinutes,
+                format = format,
+                options = options,
+                onProgress = onProgress,
+                assembleOutput = true,
+            )
         return PacketLogExportResult(
             text = computed.text,
             fileName = fileName(nowMillis, zoneOffsetMinutes, format),
@@ -214,16 +218,17 @@ object PacketLogExporter {
         filter: PacketLogFilter = PacketLogFilter(),
         format: PacketLogExportFormat = PacketLogExportFormat.TEXT,
     ): PacketLogExportEstimate {
-        val computed = compute(
-            entries = entries,
-            filter = filter,
-            nowMillis = nowMillis,
-            zoneOffsetMinutes = zoneOffsetMinutes,
-            format = format,
-            options = options,
-            onProgress = {},
-            assembleOutput = false,
-        )
+        val computed =
+            compute(
+                entries = entries,
+                filter = filter,
+                nowMillis = nowMillis,
+                zoneOffsetMinutes = zoneOffsetMinutes,
+                format = format,
+                options = options,
+                onProgress = {},
+                assembleOutput = false,
+            )
         return PacketLogExportEstimate(
             sourceCount = entries.size,
             matchedCount = computed.matchedCount,
@@ -294,8 +299,9 @@ object PacketLogExporter {
             val count = selectedCount + 1
             // 若不是最后一条，停下就意味着截断，预算时按带“已截断”标注的头部计算。
             val willTruncate = count < matched.size
-            val projected = renderer.headerBytes(count, willTruncate) +
-                bodyBytes + separatorBytes + blockBytes + renderer.footerBytes
+            val projected =
+                renderer.headerBytes(count, willTruncate) +
+                    bodyBytes + separatorBytes + blockBytes + renderer.footerBytes
             if (projected > options.maxBytes) {
                 truncated = true
                 break
@@ -315,8 +321,9 @@ object PacketLogExporter {
         var total = renderer.headerBytes(selectedCount, finalTruncated) + bodyBytes + renderer.footerBytes
         // 头部会随导出的条数/截断标记变化，极端情况下需要继续从最旧一端丢弃。
         while (selectedCount > 0 && total > options.maxBytes) {
-            val removedBytes = sizes[selectedCount - 1] +
-                if (selectedCount - 1 == 0) 0 else renderer.separatorBytes
+            val removedBytes =
+                sizes[selectedCount - 1] +
+                    if (selectedCount - 1 == 0) 0 else renderer.separatorBytes
             selectedCount--
             bodyBytes -= removedBytes
             finalTruncated = true
@@ -383,17 +390,30 @@ object PacketLogExporter {
         sourceCount: Int,
         matchedCount: Int,
         options: PacketLogExportOptions,
-    ): FormatRenderer = when (format) {
-        PacketLogExportFormat.TEXT -> TextRenderer(
-            nowMillis, zoneOffsetMinutes, filter, sourceCount, matchedCount, options,
-        )
+    ): FormatRenderer =
+        when (format) {
+            PacketLogExportFormat.TEXT ->
+                TextRenderer(
+                    nowMillis,
+                    zoneOffsetMinutes,
+                    filter,
+                    sourceCount,
+                    matchedCount,
+                    options,
+                )
 
-        PacketLogExportFormat.JSON -> JsonRenderer(
-            nowMillis, zoneOffsetMinutes, filter, sourceCount, matchedCount, options,
-        )
+            PacketLogExportFormat.JSON ->
+                JsonRenderer(
+                    nowMillis,
+                    zoneOffsetMinutes,
+                    filter,
+                    sourceCount,
+                    matchedCount,
+                    options,
+                )
 
-        PacketLogExportFormat.CSV -> CsvRenderer(zoneOffsetMinutes, options)
-    }
+            PacketLogExportFormat.CSV -> CsvRenderer(zoneOffsetMinutes, options)
+        }
 
     /** 文件名带本地时间与格式后缀，避免多次导出互相覆盖。 */
     fun fileName(
@@ -415,7 +435,10 @@ object PacketLogExporter {
      * 重名冲突处理：若 [fileName] 已存在，依次尝试 `base-1.ext`、`base-2.ext`…
      * 比较忽略大小写（iOS / Android 文件系统默认大小写不敏感）。
      */
-    fun resolveFileName(fileName: String, existingNames: Collection<String>): String {
+    fun resolveFileName(
+        fileName: String,
+        existingNames: Collection<String>,
+    ): String {
         fun taken(candidate: String) = existingNames.any { it.equals(candidate, ignoreCase = true) }
         if (!taken(fileName)) return fileName
         val dot = fileName.lastIndexOf('.')
@@ -436,9 +459,17 @@ private interface FormatRenderer {
     val separatorBytes: Int
     val footer: String
     val footerBytes: Int
-    fun header(exported: Int, truncated: Boolean): String
-    fun headerBytes(exported: Int, truncated: Boolean): Int =
-        header(exported, truncated).encodeToByteArray().size
+
+    fun header(
+        exported: Int,
+        truncated: Boolean,
+    ): String
+
+    fun headerBytes(
+        exported: Int,
+        truncated: Boolean,
+    ): Int = header(exported, truncated).encodeToByteArray().size
+
     fun entry(entry: PacketLogEntry): String
 }
 
@@ -498,39 +529,41 @@ private class TextRenderer(
     private val matchedCount: Int,
     private val options: PacketLogExportOptions,
 ) : FormatRenderer {
-
     override val separator: String = "\n"
     override val separatorBytes: Int = 1
     override val footer: String = "\n"
     override val footerBytes: Int = 1
 
-    override fun entry(entry: PacketLogEntry): String =
-        formatTextEntry(entry, nowMillis, zoneOffsetMinutes, options.maxHexCharsPerEntry)
+    override fun entry(entry: PacketLogEntry): String = formatTextEntry(entry, nowMillis, zoneOffsetMinutes, options.maxHexCharsPerEntry)
 
-    override fun header(exported: Int, truncated: Boolean): String = buildString {
-        append("ValhallaApp 报文日志\n")
-        append("导出时间：")
-        append(formatAbsoluteTime(nowMillis, zoneOffsetMinutes))
-        append('\n')
-        append("筛选：")
-        append(filterSummary(filter, zoneOffsetMinutes))
-        append('\n')
-        append("来源：")
-        append(sourceCount)
-        append(" 条\n")
-        append("条目：")
-        append(exported)
-        append(" / ")
-        append(matchedCount)
-        if (truncated) append("（已按上限截断，仅保留最新条目，截断端=最旧）")
-        append('\n')
-        append(
-            "上限：${options.maxEntries} 条 / ${options.maxBytes} 字节 / 单条 HEX " +
-                "${options.maxHexCharsPerEntry} 字符\n",
-        )
-        append("字段：时间（绝对 | 相对） 方向 [RESPONSE/NOTIFY] seq 命令 / 摘要 / 错误 / HEX")
-        append('\n')
-    }
+    override fun header(
+        exported: Int,
+        truncated: Boolean,
+    ): String =
+        buildString {
+            append("ValhallaApp 报文日志\n")
+            append("导出时间：")
+            append(formatAbsoluteTime(nowMillis, zoneOffsetMinutes))
+            append('\n')
+            append("筛选：")
+            append(filterSummary(filter, zoneOffsetMinutes))
+            append('\n')
+            append("来源：")
+            append(sourceCount)
+            append(" 条\n")
+            append("条目：")
+            append(exported)
+            append(" / ")
+            append(matchedCount)
+            if (truncated) append("（已按上限截断，仅保留最新条目，截断端=最旧）")
+            append('\n')
+            append(
+                "上限：${options.maxEntries} 条 / ${options.maxBytes} 字节 / 单条 HEX " +
+                    "${options.maxHexCharsPerEntry} 字符\n",
+            )
+            append("字段：时间（绝对 | 相对） 方向 [RESPONSE/NOTIFY] seq 命令 / 摘要 / 错误 / HEX")
+            append('\n')
+        }
 }
 
 private class JsonRenderer(
@@ -541,67 +574,75 @@ private class JsonRenderer(
     private val matchedCount: Int,
     private val options: PacketLogExportOptions,
 ) : FormatRenderer {
-
     override val separator: String = ",\n"
     override val separatorBytes: Int = 2
     override val footer: String = "\n  ]\n}\n"
     override val footerBytes: Int = footer.encodeToByteArray().size
 
-    override fun entry(entry: PacketLogEntry): String = buildString {
-        append("    {")
-        append("\"id\":").append(entry.id)
-        append(",\"timestampMillis\":").append(entry.timestampMillis)
-        append(",\"timestamp\":").append(jsonString(formatAbsoluteTime(entry.timestampMillis, zoneOffsetMinutes)))
-        append(",\"relativeTime\":").append(jsonString(formatRelativeTime(entry.timestampMillis, nowMillis)))
-        append(",\"timezoneOffsetMinutes\":").append(zoneOffsetMinutes)
-        append(",\"direction\":").append(jsonString(entry.direction.name))
-        append(",\"command\":").append(jsonString(entry.command.name))
-        append(",\"sequence\":").append(entry.sequence)
-        append(",\"response\":").append(entry.isResponse)
-        append(",\"notification\":").append(entry.isNotification)
-        val hex = hexSlice(entry.hex, options.maxHexCharsPerEntry)
-        append(",\"hex\":").append(jsonString(hex.text))
-        append(",\"hexOmittedChars\":").append(hex.omittedChars)
-        append(",\"summary\":").append(jsonString(entry.summary))
-        append(",\"error\":").append(entry.error?.let { jsonString(it) } ?: "null")
-        append('}')
-    }
+    override fun entry(entry: PacketLogEntry): String =
+        buildString {
+            append("    {")
+            append("\"id\":").append(entry.id)
+            append(",\"timestampMillis\":").append(entry.timestampMillis)
+            append(",\"timestamp\":").append(jsonString(formatAbsoluteTime(entry.timestampMillis, zoneOffsetMinutes)))
+            append(",\"relativeTime\":").append(jsonString(formatRelativeTime(entry.timestampMillis, nowMillis)))
+            append(",\"timezoneOffsetMinutes\":").append(zoneOffsetMinutes)
+            append(",\"direction\":").append(jsonString(entry.direction.name))
+            append(",\"command\":").append(jsonString(entry.command.name))
+            append(",\"sequence\":").append(entry.sequence)
+            append(",\"response\":").append(entry.isResponse)
+            append(",\"notification\":").append(entry.isNotification)
+            val hex = hexSlice(entry.hex, options.maxHexCharsPerEntry)
+            append(",\"hex\":").append(jsonString(hex.text))
+            append(",\"hexOmittedChars\":").append(hex.omittedChars)
+            append(",\"summary\":").append(jsonString(entry.summary))
+            append(",\"error\":").append(entry.error?.let { jsonString(it) } ?: "null")
+            append('}')
+        }
 
-    override fun header(exported: Int, truncated: Boolean): String = buildString {
-        append("{\n")
-        append("  \"schemaVersion\": 1,\n")
-        append("  \"exportedAt\": ").append(jsonString(formatAbsoluteTime(nowMillis, zoneOffsetMinutes))).append(",\n")
-        append("  \"exportedAtMillis\": ").append(nowMillis).append(",\n")
-        append("  \"timezoneOffsetMinutes\": ").append(zoneOffsetMinutes).append(",\n")
-        append("  \"sourceCount\": ").append(sourceCount).append(",\n")
-        append("  \"matchedCount\": ").append(matchedCount).append(",\n")
-        append("  \"exportedCount\": ").append(exported).append(",\n")
-        append("  \"truncated\": ").append(truncated).append(",\n")
-        append("  \"truncatedEnd\": ")
-            .append(if (truncated) jsonString(PacketLogTruncationTarget.OLDEST.name) else "null")
-            .append(",\n")
-        append("  \"limits\": {")
-        append("\"maxEntries\": ").append(options.maxEntries)
-        append(", \"maxBytes\": ").append(options.maxBytes)
-        append(", \"maxHexCharsPerEntry\": ").append(options.maxHexCharsPerEntry)
-        append("},\n")
-        append("  \"filter\": {")
-        append("\"commands\": [")
-        append(filter.effectiveCommands.map { it.name }.sorted().joinToString(",") { jsonString(it) })
-        append("], \"errorsOnly\": ").append(filter.errorsOnly)
-        append(", \"keyword\": ").append(jsonString(filter.keyword.trim()))
-        append(", \"fromMillis\": ").append(filter.fromMillis?.toString() ?: "null")
-        append(", \"toMillis\": ").append(filter.toMillis?.toString() ?: "null")
-        append("},\n")
-        append("  \"entries\": [\n")
-    }
+    override fun header(
+        exported: Int,
+        truncated: Boolean,
+    ): String =
+        buildString {
+            append("{\n")
+            append("  \"schemaVersion\": 1,\n")
+            append("  \"exportedAt\": ").append(jsonString(formatAbsoluteTime(nowMillis, zoneOffsetMinutes))).append(",\n")
+            append("  \"exportedAtMillis\": ").append(nowMillis).append(",\n")
+            append("  \"timezoneOffsetMinutes\": ").append(zoneOffsetMinutes).append(",\n")
+            append("  \"sourceCount\": ").append(sourceCount).append(",\n")
+            append("  \"matchedCount\": ").append(matchedCount).append(",\n")
+            append("  \"exportedCount\": ").append(exported).append(",\n")
+            append("  \"truncated\": ").append(truncated).append(",\n")
+            append("  \"truncatedEnd\": ")
+                .append(if (truncated) jsonString(PacketLogTruncationTarget.OLDEST.name) else "null")
+                .append(",\n")
+            append("  \"limits\": {")
+            append("\"maxEntries\": ").append(options.maxEntries)
+            append(", \"maxBytes\": ").append(options.maxBytes)
+            append(", \"maxHexCharsPerEntry\": ").append(options.maxHexCharsPerEntry)
+            append("},\n")
+            append("  \"filter\": {")
+            append("\"commands\": [")
+            append(
+                filter.effectiveCommands
+                    .map { it.name }
+                    .sorted()
+                    .joinToString(",") { jsonString(it) },
+            )
+            append("], \"errorsOnly\": ").append(filter.errorsOnly)
+            append(", \"keyword\": ").append(jsonString(filter.keyword.trim()))
+            append(", \"fromMillis\": ").append(filter.fromMillis?.toString() ?: "null")
+            append(", \"toMillis\": ").append(filter.toMillis?.toString() ?: "null")
+            append("},\n")
+            append("  \"entries\": [\n")
+        }
 }
 
 private class CsvRenderer(
     private val zoneOffsetMinutes: Int,
     private val options: PacketLogExportOptions,
 ) : FormatRenderer {
-
     override val separator: String = "\n"
     override val separatorBytes: Int = 1
     override val footer: String = "\n"
@@ -611,7 +652,10 @@ private class CsvRenderer(
         "id,timestampMillis,timestamp,timezoneOffsetMinutes,direction,command,sequence," +
             "response,notification,hex,hexOmittedChars,summary,error\n"
 
-    override fun header(exported: Int, truncated: Boolean): String = headerLine
+    override fun header(
+        exported: Int,
+        truncated: Boolean,
+    ): String = headerLine
 
     override fun entry(entry: PacketLogEntry): String {
         val hex = hexSlice(entry.hex, options.maxHexCharsPerEntry)
@@ -638,48 +682,58 @@ private fun formatTextEntry(
     nowMillis: Long,
     zoneOffsetMinutes: Int,
     maxHexChars: Int,
-): String = buildString {
-    append('[')
-    append(formatAbsoluteTime(entry.timestampMillis, zoneOffsetMinutes))
-    append(" | ")
-    append(formatRelativeTime(entry.timestampMillis, nowMillis))
-    append("] ")
-    append(entry.direction.name)
-    if (entry.isResponse) append(" RESPONSE")
-    if (entry.isNotification) append(" NOTIFY")
-    append(" seq=")
-    append(entry.sequence)
-    append(' ')
-    append(entry.command.name)
-    append('\n')
-    append("  摘要：")
-    append(entry.summary)
-    if (entry.error != null) {
+): String =
+    buildString {
+        append('[')
+        append(formatAbsoluteTime(entry.timestampMillis, zoneOffsetMinutes))
+        append(" | ")
+        append(formatRelativeTime(entry.timestampMillis, nowMillis))
+        append("] ")
+        append(entry.direction.name)
+        if (entry.isResponse) append(" RESPONSE")
+        if (entry.isNotification) append(" NOTIFY")
+        append(" seq=")
+        append(entry.sequence)
+        append(' ')
+        append(entry.command.name)
         append('\n')
-        append("  错误：")
-        append(entry.error)
+        append("  摘要：")
+        append(entry.summary)
+        if (entry.error != null) {
+            append('\n')
+            append("  错误：")
+            append(entry.error)
+        }
+        append('\n')
+        append("  HEX：")
+        val hex = hexSlice(entry.hex, maxHexChars)
+        append(hex.text)
+        if (hex.omittedChars > 0) {
+            append("…（省略 ")
+            append(hex.omittedChars)
+            append(" 字符）")
+        }
     }
-    append('\n')
-    append("  HEX：")
-    val hex = hexSlice(entry.hex, maxHexChars)
-    append(hex.text)
-    if (hex.omittedChars > 0) {
-        append("…（省略 ")
-        append(hex.omittedChars)
-        append(" 字符）")
-    }
-}
 
-private data class HexSlice(val text: String, val omittedChars: Int)
+private data class HexSlice(
+    val text: String,
+    val omittedChars: Int,
+)
 
-private fun hexSlice(hex: String, maxChars: Int): HexSlice =
+private fun hexSlice(
+    hex: String,
+    maxChars: Int,
+): HexSlice =
     if (hex.length > maxChars) {
         HexSlice(hex.substring(0, maxChars), hex.length - maxChars)
     } else {
         HexSlice(hex, 0)
     }
 
-private fun filterSummary(filter: PacketLogFilter, zoneOffsetMinutes: Int): String {
+private fun filterSummary(
+    filter: PacketLogFilter,
+    zoneOffsetMinutes: Int,
+): String {
     val parts = mutableListOf<String>()
     val commands = filter.effectiveCommands
     if (commands.isNotEmpty()) {
@@ -698,24 +752,26 @@ private fun filterSummary(filter: PacketLogFilter, zoneOffsetMinutes: Int): Stri
 }
 
 /** JSON 字符串转义：引号、反斜杠、换行/回车/制表符与控制字符。 */
-private fun jsonString(value: String): String = buildString {
-    append('"')
-    for (char in value) {
-        when (char) {
-            '"' -> append("\\\"")
-            '\\' -> append("\\\\")
-            '\n' -> append("\\n")
-            '\r' -> append("\\r")
-            '\t' -> append("\\t")
-            else -> if (char.code < 0x20) {
-                append("\\u").append(char.code.toString(16).padStart(4, '0'))
-            } else {
-                append(char)
+private fun jsonString(value: String): String =
+    buildString {
+        append('"')
+        for (char in value) {
+            when (char) {
+                '"' -> append("\\\"")
+                '\\' -> append("\\\\")
+                '\n' -> append("\\n")
+                '\r' -> append("\\r")
+                '\t' -> append("\\t")
+                else ->
+                    if (char.code < 0x20) {
+                        append("\\u").append(char.code.toString(16).padStart(4, '0'))
+                    } else {
+                        append(char)
+                    }
             }
         }
+        append('"')
     }
-    append('"')
-}
 
 /** CSV 字段转义：包含逗号、引号、换行或回车时用双引号包裹，内部引号加倍。 */
 private fun csvField(value: String): String {
@@ -725,33 +781,40 @@ private fun csvField(value: String): String {
 }
 
 /** 单条日志的本地化文本，供「复制单条」使用；格式与导出条目一致。 */
-fun PacketLogEntry.formatForCopy(nowMillis: Long, zoneOffsetMinutes: Int): String = buildString {
-    append('[')
-    append(formatAbsoluteTime(timestampMillis, zoneOffsetMinutes))
-    append(" | ")
-    append(formatRelativeTime(timestampMillis, nowMillis))
-    append("] ")
-    append(direction.name)
-    if (isResponse) append(" RESPONSE")
-    if (isNotification) append(" NOTIFY")
-    append(" seq=")
-    append(sequence)
-    append(' ')
-    append(command.name)
-    append('\n')
-    append(summary)
-    error?.let {
+fun PacketLogEntry.formatForCopy(
+    nowMillis: Long,
+    zoneOffsetMinutes: Int,
+): String =
+    buildString {
+        append('[')
+        append(formatAbsoluteTime(timestampMillis, zoneOffsetMinutes))
+        append(" | ")
+        append(formatRelativeTime(timestampMillis, nowMillis))
+        append("] ")
+        append(direction.name)
+        if (isResponse) append(" RESPONSE")
+        if (isNotification) append(" NOTIFY")
+        append(" seq=")
+        append(sequence)
+        append(' ')
+        append(command.name)
         append('\n')
-        append("错误：")
-        append(it)
+        append(summary)
+        error?.let {
+            append('\n')
+            append("错误：")
+            append(it)
+        }
+        append('\n')
+        append("HEX ")
+        append(hex)
     }
-    append('\n')
-    append("HEX ")
-    append(hex)
-}
 
 /** 本地绝对时间：`YYYY-MM-DD HH:mm:ss.SSS +08:00`。 */
-fun formatAbsoluteTime(epochMillis: Long, zoneOffsetMinutes: Int): String {
+fun formatAbsoluteTime(
+    epochMillis: Long,
+    zoneOffsetMinutes: Int,
+): String {
     val parts = localParts(epochMillis, zoneOffsetMinutes)
     return buildString {
         append(parts.year.toString().padStart(4, '0'))
@@ -777,7 +840,10 @@ fun formatAbsoluteTime(epochMillis: Long, zoneOffsetMinutes: Int): String {
  * 结合时区偏移转换为 epoch 毫秒；格式或日期非法时返回 null。
  * 用于日志页的时间范围输入，保证边界与 [formatAbsoluteTime] 同一口径。
  */
-fun parseLocalDateTimeMillis(input: String, zoneOffsetMinutes: Int): Long? {
+fun parseLocalDateTimeMillis(
+    input: String,
+    zoneOffsetMinutes: Int,
+): Long? {
     val text = input.trim().replace('T', ' ')
     if (text.isEmpty()) return null
     val parts = text.split(' ', limit = 2).filter { it.isNotEmpty() }
@@ -875,7 +941,10 @@ private data class LocalParts(
 
 private const val MILLIS_PER_DAY = 86_400_000L
 
-private fun localParts(epochMillis: Long, zoneOffsetMinutes: Int): LocalParts {
+private fun localParts(
+    epochMillis: Long,
+    zoneOffsetMinutes: Int,
+): LocalParts {
     val shifted = epochMillis + zoneOffsetMinutes.toLong() * 60_000L
     val days = floorDiv(shifted, MILLIS_PER_DAY)
     val millisOfDay = shifted - days * MILLIS_PER_DAY
@@ -891,7 +960,10 @@ private fun localParts(epochMillis: Long, zoneOffsetMinutes: Int): LocalParts {
     )
 }
 
-private fun floorDiv(value: Long, divisor: Long): Long {
+private fun floorDiv(
+    value: Long,
+    divisor: Long,
+): Long {
     val quotient = value / divisor
     val remainder = value % divisor
     return if (remainder != 0L && (remainder < 0) != (divisor < 0)) quotient - 1 else quotient
@@ -917,7 +989,11 @@ private fun civilFromDays(days: Long): Triple<Int, Int, Int> {
 }
 
 /** Hinnant 的 days_from_civil：公历日期 → 距 1970-01-01 的天数。 */
-private fun daysFromCivil(year: Int, month: Int, day: Int): Long {
+private fun daysFromCivil(
+    year: Int,
+    month: Int,
+    day: Int,
+): Long {
     val y = if (month <= 2) year - 1 else year
     val era = (if (y >= 0) y else y - 399) / 400
     val yearOfEra = y - era * 400

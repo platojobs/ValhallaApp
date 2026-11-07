@@ -4,7 +4,6 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 
 class ScanEmptyStateTest {
-
     @Test
     fun `已有设备时无空态`() {
         assertEquals(

@@ -13,7 +13,6 @@ data class ConfigPreset(
     val createdAtMillis: Long,
     val lastUsedAtMillis: Long,
 ) {
-
     init {
         require(id.isNotBlank()) { "预设 id 不能为空" }
         require(name.isNotBlank()) { "预设名称不能为空" }
@@ -25,15 +24,15 @@ data class ConfigPreset(
 
 /** 预设原始字符串存储；平台实现只负责整表读写。 */
 interface ConfigPresetStore {
-
     fun loadRaw(): String?
 
     fun saveRaw(raw: String)
 }
 
 /** 内存实现：JVM 测试与测试宿主使用。 */
-class InMemoryConfigPresetStore(private var raw: String? = null) : ConfigPresetStore {
-
+class InMemoryConfigPresetStore(
+    private var raw: String? = null,
+) : ConfigPresetStore {
     override fun loadRaw(): String? = raw
 
     override fun saveRaw(raw: String) {
@@ -53,7 +52,6 @@ class InMemoryConfigPresetStore(private var raw: String? = null) : ConfigPresetS
  * 字段使用百分号转义；任何结构损坏的预设整体跳过，读取不抛异常。
  */
 object ConfigPresetCodec {
-
     private const val VERSION = "v1"
     private const val PRESET = "P"
     private const val VALUE = "V"
@@ -62,30 +60,31 @@ object ConfigPresetCodec {
     private const val VALUE_PARTS = 3
     private const val HEX_DIGITS = "0123456789ABCDEF"
 
-    fun encode(presets: List<ConfigPreset>): String = buildString {
-        append(VERSION)
-        append('\n')
-        presets.forEach { preset ->
-            append(PRESET)
-            append(SEPARATOR)
-            append(escape(preset.id))
-            append(SEPARATOR)
-            append(escape(preset.name))
-            append(SEPARATOR)
-            append(preset.createdAtMillis)
-            append(SEPARATOR)
-            append(preset.lastUsedAtMillis)
+    fun encode(presets: List<ConfigPreset>): String =
+        buildString {
+            append(VERSION)
             append('\n')
-            preset.values.forEach { (key, value) ->
-                append(VALUE)
+            presets.forEach { preset ->
+                append(PRESET)
                 append(SEPARATOR)
-                append(escape(key))
+                append(escape(preset.id))
                 append(SEPARATOR)
-                append(escape(value))
+                append(escape(preset.name))
+                append(SEPARATOR)
+                append(preset.createdAtMillis)
+                append(SEPARATOR)
+                append(preset.lastUsedAtMillis)
                 append('\n')
+                preset.values.forEach { (key, value) ->
+                    append(VALUE)
+                    append(SEPARATOR)
+                    append(escape(key))
+                    append(SEPARATOR)
+                    append(escape(value))
+                    append('\n')
+                }
             }
         }
-    }
 
     fun decode(raw: String?): List<ConfigPreset> {
         if (raw.isNullOrBlank()) return emptyList()
@@ -135,18 +134,19 @@ object ConfigPresetCodec {
         }.getOrNull()
     }
 
-    private fun escape(value: String): String = buildString {
-        value.encodeToByteArray().forEach { byte ->
-            val code = byte.toInt() and 0xFF
-            if (isAsciiSafe(code)) {
-                append(code.toChar())
-            } else {
-                append('%')
-                append(HEX_DIGITS[code shr 4])
-                append(HEX_DIGITS[code and 0x0F])
+    private fun escape(value: String): String =
+        buildString {
+            value.encodeToByteArray().forEach { byte ->
+                val code = byte.toInt() and 0xFF
+                if (isAsciiSafe(code)) {
+                    append(code.toChar())
+                } else {
+                    append('%')
+                    append(HEX_DIGITS[code shr 4])
+                    append(HEX_DIGITS[code and 0x0F])
+                }
             }
         }
-    }
 
     private fun isAsciiSafe(code: Int): Boolean =
         code in 0x30..0x39 ||
@@ -189,40 +189,47 @@ class ConfigPresetRepository(
     private val maxPresets: Int = DEFAULT_MAX_PRESETS,
     private val clockMillis: () -> Long,
 ) {
-
     init {
         require(maxPresets > 0) { "maxPresets 必须大于 0" }
     }
 
     /** 按最近使用倒序；从未使用过的按创建时间倒序。 */
-    fun list(): List<ConfigPreset> = load().sortedWith(
-        compareByDescending<ConfigPreset> { it.lastUsedAtMillis }
-            .thenByDescending { it.createdAtMillis }
-            .thenBy { it.name },
-    )
+    fun list(): List<ConfigPreset> =
+        load().sortedWith(
+            compareByDescending<ConfigPreset> { it.lastUsedAtMillis }
+                .thenByDescending { it.createdAtMillis }
+                .thenBy { it.name },
+        )
 
     fun find(id: String): ConfigPreset? = load().firstOrNull { it.id == id }
 
     /** 用当前配置值创建一套预设；名称重复时自动追加序号。 */
-    fun saveFromValues(name: String, values: Map<String, String>): ConfigPreset? {
+    fun saveFromValues(
+        name: String,
+        values: Map<String, String>,
+    ): ConfigPreset? {
         val trimmed = name.trim()
         if (trimmed.isEmpty() || values.isEmpty()) return null
         val existing = load()
         if (existing.size >= maxPresets) return null
         val uniqueName = uniqueName(trimmed, existing, ignoreId = null)
         val now = clockMillis()
-        val preset = ConfigPreset(
-            id = "preset-${now}-${existing.size + 1}",
-            name = uniqueName,
-            values = values,
-            createdAtMillis = now,
-            lastUsedAtMillis = now,
-        )
+        val preset =
+            ConfigPreset(
+                id = "preset-$now-${existing.size + 1}",
+                name = uniqueName,
+                values = values,
+                createdAtMillis = now,
+                lastUsedAtMillis = now,
+            )
         persist(existing + preset)
         return preset
     }
 
-    fun rename(id: String, name: String): Boolean {
+    fun rename(
+        id: String,
+        name: String,
+    ): Boolean {
         val trimmed = name.trim()
         if (trimmed.isEmpty()) return false
         val existing = load()
@@ -245,11 +252,12 @@ class ConfigPresetRepository(
         if (existing.size >= maxPresets) return null
         val source = existing.firstOrNull { it.id == id } ?: return null
         val now = clockMillis()
-        val copy = source.copy(
-            id = "preset-$now-${existing.size + 1}",
-            name = uniqueName("${source.name} Copy", existing, ignoreId = null),
-            createdAtMillis = now,
-        )
+        val copy =
+            source.copy(
+                id = "preset-$now-${existing.size + 1}",
+                name = uniqueName("${source.name} Copy", existing, ignoreId = null),
+                createdAtMillis = now,
+            )
         persist(existing + copy)
         return copy
     }
@@ -263,29 +271,36 @@ class ConfigPresetRepository(
         return true
     }
 
-    fun replaceAll(presets: List<ConfigPreset>): Boolean = runCatching {
-        store.saveRaw(
-            ConfigPresetCodec.encode(
-                presets.take(maxPresets).map { it.copy(name = it.name.trim().ifEmpty { "Preset" }) },
-            ),
-        )
-        true
-    }.getOrDefault(false)
+    fun replaceAll(presets: List<ConfigPreset>): Boolean =
+        runCatching {
+            store.saveRaw(
+                ConfigPresetCodec.encode(
+                    presets.take(maxPresets).map { it.copy(name = it.name.trim().ifEmpty { "Preset" }) },
+                ),
+            )
+            true
+        }.getOrDefault(false)
 
     fun clear() {
         runCatching { store.saveRaw(ConfigPresetCodec.encode(emptyList())) }
     }
 
-    private fun load(): List<ConfigPreset> = runCatching {
-        ConfigPresetCodec.decode(store.loadRaw())
-    }.getOrDefault(emptyList())
+    private fun load(): List<ConfigPreset> =
+        runCatching {
+            ConfigPresetCodec.decode(store.loadRaw())
+        }.getOrDefault(emptyList())
 
-    private fun persist(presets: List<ConfigPreset>): Boolean = runCatching {
-        store.saveRaw(ConfigPresetCodec.encode(presets))
-        true
-    }.getOrDefault(false)
+    private fun persist(presets: List<ConfigPreset>): Boolean =
+        runCatching {
+            store.saveRaw(ConfigPresetCodec.encode(presets))
+            true
+        }.getOrDefault(false)
 
-    private fun uniqueName(name: String, existing: List<ConfigPreset>, ignoreId: String?): String {
+    private fun uniqueName(
+        name: String,
+        existing: List<ConfigPreset>,
+        ignoreId: String?,
+    ): String {
         val taken = existing.filter { it.id != ignoreId }.map { it.name }.toSet()
         if (name !in taken) return name
         var index = 2
@@ -326,7 +341,6 @@ data class PresetFieldDiff(
  * 只给出差异，不写设备；应用阶段仍要重新做能力/取值校验。
  */
 object ConfigPresetDiffer {
-
     fun diff(
         preset: ConfigPreset,
         target: DeviceConfigTarget,
@@ -334,33 +348,35 @@ object ConfigPresetDiffer {
         catalog: ConfigCatalog = ConfigCatalog,
     ): List<PresetFieldDiff> {
         val knownOrder = catalog.keys.map { it.key }
-        val orderedKeys = preset.values.keys.sortedWith(
-            compareBy<String> { key ->
-                val index = knownOrder.indexOf(key)
-                if (index >= 0) index else Int.MAX_VALUE
-            }.thenBy { it },
-        )
+        val orderedKeys =
+            preset.values.keys.sortedWith(
+                compareBy<String> { key ->
+                    val index = knownOrder.indexOf(key)
+                    if (index >= 0) index else Int.MAX_VALUE
+                }.thenBy { it },
+            )
         return orderedKeys.map { key ->
             val targetValue = preset.values.getValue(key)
             val spec = catalog.find(key)
-            val unsupportedReason = when {
-                spec == null -> "未在命令表定义，无法写入「$key」"
-                !spec.editable -> spec.readOnlyReason ?: "只读配置项无法写入"
-                else -> {
-                    val capability = catalog.capability(spec, target)
-                    when {
-                        !capability.supported || !capability.visible ->
-                            capability.reason ?: "当前设备不支持「$key」"
+            val unsupportedReason =
+                when {
+                    spec == null -> "未在命令表定义，无法写入「$key」"
+                    !spec.editable -> spec.readOnlyReason ?: "只读配置项无法写入"
+                    else -> {
+                        val capability = catalog.capability(spec, target)
+                        when {
+                            !capability.supported || !capability.visible ->
+                                capability.reason ?: "当前设备不支持「$key」"
 
-                        catalog.validate(spec, targetValue) is ConfigValidation.Invalid ->
-                            "预设值不合法：" + (
-                                (catalog.validate(spec, targetValue) as ConfigValidation.Invalid).message
+                            catalog.validate(spec, targetValue) is ConfigValidation.Invalid ->
+                                "预设值不合法：" + (
+                                    (catalog.validate(spec, targetValue) as ConfigValidation.Invalid).message
                                 )
 
-                        else -> null
+                            else -> null
+                        }
                     }
                 }
-            }
             if (unsupportedReason != null) {
                 PresetFieldDiff(
                     key = key,
@@ -371,17 +387,19 @@ object ConfigPresetDiffer {
                 )
             } else {
                 val current = currentValues[key]
-                val canonical = (catalog.validate(spec!!, targetValue) as ConfigValidation.Valid)
-                    .canonicalText
+                val canonical =
+                    (catalog.validate(spec!!, targetValue) as ConfigValidation.Valid)
+                        .canonicalText
                 PresetFieldDiff(
                     key = key,
                     currentValue = current,
                     targetValue = canonical,
-                    status = if (current == canonical) {
-                        PresetFieldStatus.ALREADY_TARGET
-                    } else {
-                        PresetFieldStatus.WILL_CHANGE
-                    },
+                    status =
+                        if (current == canonical) {
+                            PresetFieldStatus.ALREADY_TARGET
+                        } else {
+                            PresetFieldStatus.WILL_CHANGE
+                        },
                 )
             }
         }

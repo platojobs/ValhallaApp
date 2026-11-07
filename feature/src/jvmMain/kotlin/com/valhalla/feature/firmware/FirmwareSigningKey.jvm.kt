@@ -8,14 +8,16 @@ import androidx.compose.runtime.remember
  * 两者都缺失返回 null（预检策略回退 `WARN`）。
  */
 @Composable
-actual fun rememberFirmwareSigningKeyPem(): String? = remember {
-    runCatching {
-        val loader = Thread.currentThread().contextClassLoader
-        val stream = loader?.getResourceAsStream(RESOURCE_PATH)
-            ?: ClassLoader.getSystemResourceAsStream(RESOURCE_PATH)
-        stream?.use { it.bufferedReader().readText() }
-    }.getOrNull()?.takeIf { it.isNotBlank() }
-        ?: BuildInjectedFirmwareKey.PEM.takeIf { it.isNotBlank() }
-}
+actual fun rememberFirmwareSigningKeyPem(): String? =
+    remember {
+        runCatching {
+            val loader = Thread.currentThread().contextClassLoader
+            val stream =
+                loader?.getResourceAsStream(RESOURCE_PATH)
+                    ?: ClassLoader.getSystemResourceAsStream(RESOURCE_PATH)
+            stream?.use { it.bufferedReader().readText() }
+        }.getOrNull()?.takeIf { it.isNotBlank() }
+            ?: BuildInjectedFirmwareKey.PEM.takeIf { it.isNotBlank() }
+    }
 
 private const val RESOURCE_PATH = "firmware/signing-key.pem"

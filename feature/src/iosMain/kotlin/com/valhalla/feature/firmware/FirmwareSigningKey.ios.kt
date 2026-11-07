@@ -14,11 +14,14 @@ import platform.Foundation.stringWithContentsOfFile
  * （静态 framework 不打包 resources 时仍可使用注入值）。
  */
 @Composable
-actual fun rememberFirmwareSigningKeyPem(): String? = remember {
-    val path = NSBundle.mainBundle.pathForResource("signing-key", "pem", "firmware")
-        ?: NSBundle.mainBundle.pathForResource("signing-key", "pem")
-    path?.let {
-        NSString.stringWithContentsOfFile(it, NSUTF8StringEncoding, null)
-    }?.takeIf { it.isNotBlank() }
-        ?: BuildInjectedFirmwareKey.PEM.takeIf { it.isNotBlank() }
-}
+actual fun rememberFirmwareSigningKeyPem(): String? =
+    remember {
+        val path =
+            NSBundle.mainBundle.pathForResource("signing-key", "pem", "firmware")
+                ?: NSBundle.mainBundle.pathForResource("signing-key", "pem")
+        path
+            ?.let {
+                NSString.stringWithContentsOfFile(it, NSUTF8StringEncoding, null)
+            }?.takeIf { it.isNotBlank() }
+            ?: BuildInjectedFirmwareKey.PEM.takeIf { it.isNotBlank() }
+    }

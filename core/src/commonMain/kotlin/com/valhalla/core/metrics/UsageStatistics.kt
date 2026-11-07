@@ -14,11 +14,12 @@ enum class UsageRange {
     ;
 
     /** 起始时间；[ALL] 返回 null 表示不设下限。 */
-    fun startMillis(nowMillis: Long): Long? = when (this) {
-        LAST_7_DAYS -> nowMillis - DAY_MILLIS * 7
-        LAST_30_DAYS -> nowMillis - DAY_MILLIS * 30
-        ALL -> null
-    }
+    fun startMillis(nowMillis: Long): Long? =
+        when (this) {
+            LAST_7_DAYS -> nowMillis - DAY_MILLIS * 7
+            LAST_30_DAYS -> nowMillis - DAY_MILLIS * 30
+            ALL -> null
+        }
 
     companion object {
         const val DAY_MILLIS: Long = 24L * 60 * 60 * 1000
@@ -36,7 +37,6 @@ data class DeviceUsage(
     val healthChecks: Int,
     val lastConnectedAtEpochMillis: Long?,
 ) {
-
     val totalActions: Int get() = connections + otaAttempts + configWrites + paramWrites + healthChecks
 }
 
@@ -59,14 +59,14 @@ data class UsageStatistics(
     val healthChecks: Int = 0,
     val devices: List<DeviceUsage> = emptyList(),
 ) {
-
     val hasAnyData: Boolean
-        get() = connectionCount > 0 ||
-            otaAttempts > 0 ||
-            configWrites > 0 ||
-            paramWrites > 0 ||
-            healthChecks > 0 ||
-            devices.any { it.totalActions > 0 }
+        get() =
+            connectionCount > 0 ||
+                otaAttempts > 0 ||
+                configWrites > 0 ||
+                paramWrites > 0 ||
+                healthChecks > 0 ||
+                devices.any { it.totalActions > 0 }
 }
 
 /**
@@ -82,7 +82,6 @@ data class UsageStatistics(
  * - 按设备分布：设备档案 + 上述事件归属。
  */
 object UsageStatisticsCalculator {
-
     fun compute(
         profiles: List<DeviceProfile>,
         eventsByDevice: Map<String, List<DeviceEvent>>,
@@ -99,50 +98,59 @@ object UsageStatisticsCalculator {
         val durations = mutableListOf<Long>()
 
         eventsByDevice.forEach { (deviceId, events) ->
-            val inRange = events.filter { event ->
-                event.timestampMillis <= nowMillis && (start == null || event.timestampMillis >= start)
-            }
-            connectionCounts[deviceId] = inRange.count {
-                it.type == DeviceEventType.CONNECTION && it.result == DeviceEventResult.SUCCESS
-            }
-            configCounts[deviceId] = inRange.count {
-                it.type == DeviceEventType.CONFIG_CHANGE && it.result == DeviceEventResult.SUCCESS
-            }
-            paramCounts[deviceId] = inRange.count {
-                it.type == DeviceEventType.PARAM_CHANGE && it.result == DeviceEventResult.SUCCESS
-            }
+            val inRange =
+                events.filter { event ->
+                    event.timestampMillis <= nowMillis && (start == null || event.timestampMillis >= start)
+                }
+            connectionCounts[deviceId] =
+                inRange.count {
+                    it.type == DeviceEventType.CONNECTION && it.result == DeviceEventResult.SUCCESS
+                }
+            configCounts[deviceId] =
+                inRange.count {
+                    it.type == DeviceEventType.CONFIG_CHANGE && it.result == DeviceEventResult.SUCCESS
+                }
+            paramCounts[deviceId] =
+                inRange.count {
+                    it.type == DeviceEventType.PARAM_CHANGE && it.result == DeviceEventResult.SUCCESS
+                }
             healthCounts[deviceId] = inRange.count { it.type == DeviceEventType.HEALTH }
             durations += completedSessionDurations(events, start, nowMillis)
         }
 
         val otaByDevice = mutableMapOf<String, List<com.valhalla.core.profile.OtaHistoryRecord>>()
         profiles.forEach { profile ->
-            otaByDevice[profile.deviceId] = profile.otaHistory.filter { record ->
-                record.finishedAtEpochMillis <= nowMillis &&
-                    (start == null || record.finishedAtEpochMillis >= start)
-            }
+            otaByDevice[profile.deviceId] =
+                profile.otaHistory.filter { record ->
+                    record.finishedAtEpochMillis <= nowMillis &&
+                        (start == null || record.finishedAtEpochMillis >= start)
+                }
         }
         val otaRecords = otaByDevice.values.flatten()
         val successes = otaRecords.count { it.outcome == OtaOutcome.SUCCEEDED }
-        val succeededDurations = otaRecords.filter { it.outcome == OtaOutcome.SUCCEEDED }
-            .map { it.durationMillis }
+        val succeededDurations =
+            otaRecords
+                .filter { it.outcome == OtaOutcome.SUCCEEDED }
+                .map { it.durationMillis }
 
         val deviceIds = (profiles.map { it.deviceId } + eventsByDevice.keys).distinct()
-        val devices = deviceIds.map { deviceId ->
-            val profile = profileById[deviceId]
-            DeviceUsage(
-                deviceId = deviceId,
-                displayName = profile?.displayName ?: profile?.model,
-                connections = connectionCounts[deviceId] ?: 0,
-                otaAttempts = otaByDevice[deviceId]?.size ?: 0,
-                configWrites = configCounts[deviceId] ?: 0,
-                paramWrites = paramCounts[deviceId] ?: 0,
-                healthChecks = healthCounts[deviceId] ?: 0,
-                lastConnectedAtEpochMillis = profile?.lastConnectedAtEpochMillis,
-            )
-        }.sortedWith(
-            compareByDescending<DeviceUsage> { it.totalActions }.thenBy { it.deviceId },
-        )
+        val devices =
+            deviceIds
+                .map { deviceId ->
+                    val profile = profileById[deviceId]
+                    DeviceUsage(
+                        deviceId = deviceId,
+                        displayName = profile?.displayName ?: profile?.model,
+                        connections = connectionCounts[deviceId] ?: 0,
+                        otaAttempts = otaByDevice[deviceId]?.size ?: 0,
+                        configWrites = configCounts[deviceId] ?: 0,
+                        paramWrites = paramCounts[deviceId] ?: 0,
+                        healthChecks = healthCounts[deviceId] ?: 0,
+                        lastConnectedAtEpochMillis = profile?.lastConnectedAtEpochMillis,
+                    )
+                }.sortedWith(
+                    compareByDescending<DeviceUsage> { it.totalActions }.thenBy { it.deviceId },
+                )
 
         return UsageStatistics(
             range = range,
@@ -168,9 +176,10 @@ object UsageStatisticsCalculator {
         start: Long?,
         nowMillis: Long,
     ): List<Long> {
-        val sorted = events.sortedWith(
-            compareBy<DeviceEvent> { it.timestampMillis }.thenBy { it.id },
-        )
+        val sorted =
+            events.sortedWith(
+                compareBy<DeviceEvent> { it.timestampMillis }.thenBy { it.id },
+            )
         val durations = mutableListOf<Long>()
         var openAt: Long? = null
         sorted.forEach { event ->

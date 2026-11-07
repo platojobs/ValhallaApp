@@ -25,7 +25,6 @@ data class ConfigKeySpec(
     /** 固件版本/型号能力约束；默认通用键，对所有设备可见。 */
     val scope: ConfigScope = ConfigScope.UNRESTRICTED,
 ) {
-
     init {
         require(key.isNotBlank()) { "配置键不能为空" }
         require(maxLength > 0) { "maxLength 必须大于 0" }
@@ -36,13 +35,14 @@ data class ConfigKeySpec(
 }
 
 sealed interface ConfigValidation {
-
     data class Valid(
         val bytes: ByteArray,
         val canonicalText: String,
     ) : ConfigValidation
 
-    data class Invalid(val message: String) : ConfigValidation
+    data class Invalid(
+        val message: String,
+    ) : ConfigValidation
 }
 
 /**
@@ -55,63 +55,64 @@ sealed interface ConfigValidation {
  * - 未在表内出现的键一律只读，UI 明确标注原因。
  */
 object ConfigCatalog {
-
     /** 能力协商用的版本锚点：固件 v1.0.0 起支持 LED，v1.2.0 起支持采样间隔，v1.3.0 起支持发射功率。 */
     private val v1_0_0 = FirmwareVersion(1, 0, 0, 0, "stable")
     private val v1_2_0 = FirmwareVersion(1, 2, 0, 0, "stable")
     private val v1_3_0 = FirmwareVersion(1, 3, 0, 0, "stable")
 
-    val keys: List<ConfigKeySpec> = listOf(
-        ConfigKeySpec(
-            key = "device_name",
-            displayName = "设备名称",
-            type = ConfigValueType.STRING,
-            editable = true,
-            maxLength = 32,
-        ),
-        ConfigKeySpec(
-            key = "led_enabled",
-            displayName = "LED 指示",
-            type = ConfigValueType.BOOLEAN,
-            editable = true,
-            scope = ConfigScope(minVersion = v1_0_0),
-        ),
-        ConfigKeySpec(
-            key = "sample_interval_ms",
-            displayName = "采样间隔（毫秒）",
-            type = ConfigValueType.INTEGER,
-            editable = true,
-            intRange = 100..60_000,
-            scope = ConfigScope(minVersion = v1_2_0),
-        ),
-        ConfigKeySpec(
-            key = "tx_power_dbm",
-            displayName = "发射功率（dBm）",
-            type = ConfigValueType.INTEGER,
-            editable = true,
-            intRange = 0..8,
-            scope = ConfigScope(
-                minVersion = v1_3_0,
-                models = setOf("VH-1000", "VH-2000"),
+    val keys: List<ConfigKeySpec> =
+        listOf(
+            ConfigKeySpec(
+                key = "device_name",
+                displayName = "设备名称",
+                type = ConfigValueType.STRING,
+                editable = true,
+                maxLength = 32,
             ),
-        ),
-        ConfigKeySpec(
-            key = "serial_number",
-            displayName = "序列号",
-            type = ConfigValueType.STRING,
-            editable = false,
-            maxLength = 64,
-            readOnlyReason = "设备只读字段",
-        ),
-        ConfigKeySpec(
-            key = "hardware_version",
-            displayName = "硬件版本",
-            type = ConfigValueType.STRING,
-            editable = false,
-            maxLength = 64,
-            readOnlyReason = "设备只读字段",
-        ),
-    )
+            ConfigKeySpec(
+                key = "led_enabled",
+                displayName = "LED 指示",
+                type = ConfigValueType.BOOLEAN,
+                editable = true,
+                scope = ConfigScope(minVersion = v1_0_0),
+            ),
+            ConfigKeySpec(
+                key = "sample_interval_ms",
+                displayName = "采样间隔（毫秒）",
+                type = ConfigValueType.INTEGER,
+                editable = true,
+                intRange = 100..60_000,
+                scope = ConfigScope(minVersion = v1_2_0),
+            ),
+            ConfigKeySpec(
+                key = "tx_power_dbm",
+                displayName = "发射功率（dBm）",
+                type = ConfigValueType.INTEGER,
+                editable = true,
+                intRange = 0..8,
+                scope =
+                    ConfigScope(
+                        minVersion = v1_3_0,
+                        models = setOf("VH-1000", "VH-2000"),
+                    ),
+            ),
+            ConfigKeySpec(
+                key = "serial_number",
+                displayName = "序列号",
+                type = ConfigValueType.STRING,
+                editable = false,
+                maxLength = 64,
+                readOnlyReason = "设备只读字段",
+            ),
+            ConfigKeySpec(
+                key = "hardware_version",
+                displayName = "硬件版本",
+                type = ConfigValueType.STRING,
+                editable = false,
+                maxLength = 64,
+                readOnlyReason = "设备只读字段",
+            ),
+        )
 
     fun find(key: String): ConfigKeySpec? = keys.firstOrNull { it.key == key }
 
@@ -133,7 +134,10 @@ object ConfigCatalog {
      * - 声明了约束但固件版本或型号缺失时返回 `TARGET_UNKNOWN`，UI 隐藏该键并提示刷新设备信息；
      * - 版本低于下限/高于上限、型号不在白名单时返回对应状态，UI 隐藏并展示原因。
      */
-    fun capability(spec: ConfigKeySpec, target: DeviceConfigTarget): ConfigCapabilityResult {
+    fun capability(
+        spec: ConfigKeySpec,
+        target: DeviceConfigTarget,
+    ): ConfigCapabilityResult {
         val scope = spec.scope
         if (!scope.restricted) return ConfigCapabilityResult.SUPPORTED
 
@@ -189,10 +193,12 @@ object ConfigCatalog {
     }
 
     /** 按设备快照返回可见配置键；顺序与 [keys] 一致。 */
-    fun visibleKeys(target: DeviceConfigTarget): List<ConfigKeySpec> =
-        keys.filter { capability(it, target).visible }
+    fun visibleKeys(target: DeviceConfigTarget): List<ConfigKeySpec> = keys.filter { capability(it, target).visible }
 
-    fun validate(spec: ConfigKeySpec, text: String): ConfigValidation {
+    fun validate(
+        spec: ConfigKeySpec,
+        text: String,
+    ): ConfigValidation {
         if (!spec.editable) {
             return ConfigValidation.Invalid(spec.readOnlyReason ?: "该配置项只读")
         }
@@ -204,20 +210,33 @@ object ConfigCatalog {
     }
 
     /** 把设备返回的原始 value 转换为编辑框文本；无法识别时退化为十六进制。 */
-    fun format(spec: ConfigKeySpec, raw: ByteArray): String = when (spec.type) {
-        ConfigValueType.STRING -> raw.decodeToString()
-        ConfigValueType.BOOLEAN -> when (raw.firstOrNull()?.toInt()?.and(0xFF)) {
-            1, '1'.code, 't'.code, 'T'.code -> "true"
-            0, '0'.code, 'f'.code, 'F'.code -> "false"
-            else -> raw.decodeToString()
+    fun format(
+        spec: ConfigKeySpec,
+        raw: ByteArray,
+    ): String =
+        when (spec.type) {
+            ConfigValueType.STRING -> raw.decodeToString()
+            ConfigValueType.BOOLEAN ->
+                when (raw.firstOrNull()?.toInt()?.and(0xFF)) {
+                    1, '1'.code, 't'.code, 'T'.code -> "true"
+                    0, '0'.code, 'f'.code, 'F'.code -> "false"
+                    else -> raw.decodeToString()
+                }
+
+            ConfigValueType.INTEGER ->
+                raw.decodeToString().trim().ifEmpty {
+                    raw
+                        .firstOrNull()
+                        ?.toInt()
+                        ?.and(0xFF)
+                        ?.toString() ?: ""
+                }
         }
 
-        ConfigValueType.INTEGER -> raw.decodeToString().trim().ifEmpty {
-            raw.firstOrNull()?.toInt()?.and(0xFF)?.toString() ?: ""
-        }
-    }
-
-    private fun validateString(spec: ConfigKeySpec, text: String): ConfigValidation {
+    private fun validateString(
+        spec: ConfigKeySpec,
+        text: String,
+    ): ConfigValidation {
         if (text.isBlank()) return ConfigValidation.Invalid("值不能为空")
         val length = text.encodeToByteArray().size
         if (length > spec.maxLength) {
@@ -233,9 +252,13 @@ object ConfigCatalog {
             else -> ConfigValidation.Invalid("布尔值仅支持 true/false、1/0、on/off")
         }
 
-    private fun validateInteger(spec: ConfigKeySpec, text: String): ConfigValidation {
-        val value = text.trim().toIntOrNull()
-            ?: return ConfigValidation.Invalid("必须为十进制整数")
+    private fun validateInteger(
+        spec: ConfigKeySpec,
+        text: String,
+    ): ConfigValidation {
+        val value =
+            text.trim().toIntOrNull()
+                ?: return ConfigValidation.Invalid("必须为十进制整数")
         if (value !in spec.intRange) {
             return ConfigValidation.Invalid("取值需在 ${spec.intRange.first}..${spec.intRange.last} 之间")
         }

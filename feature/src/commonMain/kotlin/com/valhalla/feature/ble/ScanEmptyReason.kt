@@ -4,24 +4,34 @@ package com.valhalla.feature.ble
 enum class ScanEmptyReason {
     /** 有设备或仍在扫描且未超时，无需空态提示。 */
     NONE,
+
     /** 正在扫描，尚未发现设备。 */
     SCANNING,
+
     /** 扫描超时仍未发现设备。 */
     SCAN_TIMEOUT,
+
     /** 扫描结束且确实没有设备。 */
     NO_DEVICES,
+
     /** 缺少蓝牙权限。 */
     NO_PERMISSION,
+
     /** 权限被永久拒绝，需要去系统设置。 */
     PERMISSION_PERMANENTLY_DENIED,
+
     /** 蓝牙关闭。 */
     BLUETOOTH_OFF,
+
     /** 蓝牙正在重置。 */
     BLUETOOTH_RESETTING,
+
     /** 设备不支持 BLE。 */
     UNSUPPORTED,
+
     /** 蓝牙状态未知。 */
     UNKNOWN_AVAILABILITY,
+
     /** 扫描过程报错。 */
     ERROR,
 }

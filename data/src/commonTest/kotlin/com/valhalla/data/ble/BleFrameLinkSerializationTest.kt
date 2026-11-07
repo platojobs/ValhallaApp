@@ -17,33 +17,35 @@ import kotlin.test.assertEquals
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class BleFrameLinkSerializationTest {
-
     @Test
-    fun `普通指令与 OTA 分片并发写入时 Mutex 保证串行`() = runTest {
-        val connection = SerialTrackingConnection(writeDelayMillis = 5)
-        val link = BleFrameLink(connection)
+    fun `普通指令与 OTA 分片并发写入时 Mutex 保证串行`() =
+        runTest {
+            val connection = SerialTrackingConnection(writeDelayMillis = 5)
+            val link = BleFrameLink(connection)
 
-        coroutineScope {
-            repeat(40) { index ->
-                launch {
-                    // 交替模拟普通指令与 OTA 分片，二者共享同一条 GATT 写入通道。
-                    val command = if (index % 2 == 0) CommandType.GET_BATTERY else CommandType.OTA_DATA
-                    link.send(
-                        Frame(
-                            type = command,
-                            sequence = index,
-                            payload = BatteryResponse(DeviceStatus.OK, index, true, 4_000).encode(),
-                        ),
-                    )
+            coroutineScope {
+                repeat(40) { index ->
+                    launch {
+                        // 交替模拟普通指令与 OTA 分片，二者共享同一条 GATT 写入通道。
+                        val command = if (index % 2 == 0) CommandType.GET_BATTERY else CommandType.OTA_DATA
+                        link.send(
+                            Frame(
+                                type = command,
+                                sequence = index,
+                                payload = BatteryResponse(DeviceStatus.OK, index, true, 4_000).encode(),
+                            ),
+                        )
+                    }
                 }
             }
+
+            assertEquals(40, connection.writeCount)
+            assertEquals(1, connection.maxConcurrentWrites, "同一链路同一时刻只允许一个在途写")
         }
 
-        assertEquals(40, connection.writeCount)
-        assertEquals(1, connection.maxConcurrentWrites, "同一链路同一时刻只允许一个在途写")
-    }
-
-    private class SerialTrackingConnection(private val writeDelayMillis: Long) : BleConnection {
+    private class SerialTrackingConnection(
+        private val writeDelayMillis: Long,
+    ) : BleConnection {
         private val mutableConnected = MutableStateFlow(true)
         override val deviceId: String = "dev-serial"
         override val connected: StateFlow<Boolean> = mutableConnected
@@ -70,10 +72,15 @@ class BleFrameLinkSerializationTest {
             }
         }
 
-        override suspend fun read(serviceUuid: String, characteristicUuid: String): ByteArray = ByteArray(0)
+        override suspend fun read(
+            serviceUuid: String,
+            characteristicUuid: String,
+        ): ByteArray = ByteArray(0)
 
-        override fun observe(serviceUuid: String, characteristicUuid: String): Flow<ByteArray> =
-            kotlinx.coroutines.flow.emptyFlow()
+        override fun observe(
+            serviceUuid: String,
+            characteristicUuid: String,
+        ): Flow<ByteArray> = kotlinx.coroutines.flow.emptyFlow()
 
         override suspend fun readRssi(): Int? = null
 

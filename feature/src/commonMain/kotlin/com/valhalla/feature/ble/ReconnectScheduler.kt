@@ -37,16 +37,22 @@ data class ReconnectPolicy(
 /** 自动重连的当前阶段。 */
 enum class ReconnectPhase {
     IDLE,
+
     /** 等待下一次尝试（[ReconnectState.nextDelayMillis] 为倒计时基数）。 */
     WAITING,
+
     /** 正在建立连接；此阶段禁止重复发起。 */
     CONNECTING,
+
     /** 达到次数上限。 */
     EXHAUSTED,
+
     /** 蓝牙关闭导致暂停，重新开启后恢复。 */
     PAUSED,
+
     /** 用户手动取消。 */
     CANCELLED,
+
     /** 重连成功。 */
     SUCCEEDED,
 }
@@ -73,7 +79,6 @@ data class ReconnectState(
 class ReconnectScheduler(
     private val policy: ReconnectPolicy = ReconnectPolicy(),
 ) {
-
     var state: ReconnectState = ReconnectState()
         private set
 
@@ -82,15 +87,16 @@ class ReconnectScheduler(
         if (state.phase == ReconnectPhase.WAITING || state.phase == ReconnectPhase.CONNECTING) {
             return state
         }
-        state = if (!bluetoothAvailable) {
-            ReconnectState(
-                phase = ReconnectPhase.PAUSED,
-                attempt = state.attempt,
-                pausedByBluetoothOff = true,
-            )
-        } else {
-            scheduleNext(attempt = state.attempt)
-        }
+        state =
+            if (!bluetoothAvailable) {
+                ReconnectState(
+                    phase = ReconnectPhase.PAUSED,
+                    attempt = state.attempt,
+                    pausedByBluetoothOff = true,
+                )
+            } else {
+                scheduleNext(attempt = state.attempt)
+            }
         return state
     }
 
@@ -105,15 +111,17 @@ class ReconnectScheduler(
     fun onAttemptResult(succeeded: Boolean): ReconnectState {
         if (state.phase != ReconnectPhase.CONNECTING) return state
         val attempts = state.attempt + 1
-        state = when {
-            succeeded -> ReconnectState(phase = ReconnectPhase.SUCCEEDED)
-            attempts >= policy.maxAttempts -> ReconnectState(
-                phase = ReconnectPhase.EXHAUSTED,
-                attempt = attempts,
-            )
+        state =
+            when {
+                succeeded -> ReconnectState(phase = ReconnectPhase.SUCCEEDED)
+                attempts >= policy.maxAttempts ->
+                    ReconnectState(
+                        phase = ReconnectPhase.EXHAUSTED,
+                        attempt = attempts,
+                    )
 
-            else -> scheduleNext(attempt = attempts)
-        }
+                else -> scheduleNext(attempt = attempts)
+            }
         return state
     }
 
@@ -121,11 +129,12 @@ class ReconnectScheduler(
     fun onBluetoothStateChanged(available: Boolean): ReconnectState {
         if (!available) {
             if (state.phase == ReconnectPhase.WAITING || state.phase == ReconnectPhase.CONNECTING) {
-                state = ReconnectState(
-                    phase = ReconnectPhase.PAUSED,
-                    attempt = state.attempt,
-                    pausedByBluetoothOff = true,
-                )
+                state =
+                    ReconnectState(
+                        phase = ReconnectPhase.PAUSED,
+                        attempt = state.attempt,
+                        pausedByBluetoothOff = true,
+                    )
             }
         } else if (state.phase == ReconnectPhase.PAUSED && state.pausedByBluetoothOff) {
             state = scheduleNext(attempt = state.attempt)

@@ -7,13 +7,14 @@ import platform.Foundation.NSUserDefaults
 actual fun createDeviceEventStore(): DeviceEventStore = NSUserDefaultsDeviceEventStore()
 
 private class NSUserDefaultsDeviceEventStore : DeviceEventStore {
-
     private val defaults: NSUserDefaults = NSUserDefaults.standardUserDefaults
 
-    override fun loadRaw(deviceId: String): String? =
-        defaults.stringForKey(StorageKeys.IOS_EVENTS_KEY_PREFIX + deviceId)
+    override fun loadRaw(deviceId: String): String? = defaults.stringForKey(StorageKeys.IOS_EVENTS_KEY_PREFIX + deviceId)
 
-    override fun saveRaw(deviceId: String, raw: String) {
+    override fun saveRaw(
+        deviceId: String,
+        raw: String,
+    ) {
         defaults.setObject(raw, forKey = StorageKeys.IOS_EVENTS_KEY_PREFIX + deviceId)
     }
 

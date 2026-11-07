@@ -12,7 +12,6 @@ class SetConfigRequest(
     val key: String,
     val value: ByteArray,
 ) : DeviceRequest() {
-
     override val command: CommandType = CommandType.SET_CONFIG
 
     override fun encodeBody(writer: PayloadWriter) {
@@ -23,8 +22,9 @@ class SetConfigRequest(
 }
 
 /** 写配置应答，payload 只有状态码。 */
-class SetConfigResponse(status: DeviceStatus) : DeviceResponse() {
-
+class SetConfigResponse(
+    status: DeviceStatus,
+) : DeviceResponse() {
     override val command: CommandType = CommandType.SET_CONFIG
 
     override val status: DeviceStatus = status
@@ -33,8 +33,9 @@ class SetConfigResponse(status: DeviceStatus) : DeviceResponse() {
 }
 
 /** 读配置项，payload：`key:str1`。 */
-class GetConfigRequest(val key: String) : DeviceRequest() {
-
+class GetConfigRequest(
+    val key: String,
+) : DeviceRequest() {
     override val command: CommandType = CommandType.GET_CONFIG
 
     override fun encodeBody(writer: PayloadWriter) {
@@ -48,7 +49,6 @@ class ConfigResponse(
     val key: String,
     val value: ByteArray,
 ) : DeviceResponse() {
-
     override val command: CommandType = CommandType.GET_CONFIG
 
     override val status: DeviceStatus = status
@@ -70,7 +70,6 @@ class SetParamRequest(
     val paramId: Int,
     val value: ByteArray,
 ) : DeviceRequest() {
-
     init {
         require(paramId in 0..0xFFFF) { "paramId 超出范围: $paramId" }
     }
@@ -85,8 +84,9 @@ class SetParamRequest(
 }
 
 /** 写参数应答，payload 只有状态码。 */
-class SetParamResponse(status: DeviceStatus) : DeviceResponse() {
-
+class SetParamResponse(
+    status: DeviceStatus,
+) : DeviceResponse() {
     override val command: CommandType = CommandType.SET_PARAM
 
     override val status: DeviceStatus = status
@@ -95,8 +95,9 @@ class SetParamResponse(status: DeviceStatus) : DeviceResponse() {
 }
 
 /** 读参数，payload：`paramId:u16`。 */
-class GetParamRequest(val paramId: Int) : DeviceRequest() {
-
+class GetParamRequest(
+    val paramId: Int,
+) : DeviceRequest() {
     init {
         require(paramId in 0..0xFFFF) { "paramId 超出范围: $paramId" }
     }
@@ -114,7 +115,6 @@ class ParamResponse(
     val paramId: Int,
     val value: ByteArray,
 ) : DeviceResponse() {
-
     override val command: CommandType = CommandType.GET_PARAM
 
     override val status: DeviceStatus = status

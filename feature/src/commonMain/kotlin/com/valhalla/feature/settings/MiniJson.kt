@@ -7,16 +7,26 @@ package com.valhalla.feature.settings
  * 解析失败返回 null，调用方按「结构非法」处理。
  */
 sealed interface JsonValue {
+    data class Obj(
+        val values: Map<String, JsonValue>,
+    ) : JsonValue
 
-    data class Obj(val values: Map<String, JsonValue>) : JsonValue
+    data class Arr(
+        val values: List<JsonValue>,
+    ) : JsonValue
 
-    data class Arr(val values: List<JsonValue>) : JsonValue
+    data class Str(
+        val value: String,
+    ) : JsonValue
 
-    data class Str(val value: String) : JsonValue
+    data class Num(
+        val value: Double,
+        val raw: String,
+    ) : JsonValue
 
-    data class Num(val value: Double, val raw: String) : JsonValue
-
-    data class Bool(val value: Boolean) : JsonValue
+    data class Bool(
+        val value: Boolean,
+    ) : JsonValue
 
     data object Null : JsonValue
 
@@ -34,12 +44,14 @@ sealed interface JsonValue {
 }
 
 object MiniJson {
-
     fun encode(value: JsonValue): String = buildString { write(value, this) }
 
     fun parse(text: String): JsonValue? = runCatching { Parser(text).parseValue() }.getOrNull()
 
-    private fun write(value: JsonValue, out: StringBuilder) {
+    private fun write(
+        value: JsonValue,
+        out: StringBuilder,
+    ) {
         when (value) {
             is JsonValue.Obj -> {
                 out.append('{')
@@ -68,7 +80,10 @@ object MiniJson {
         }
     }
 
-    private fun writeString(value: String, out: StringBuilder) {
+    private fun writeString(
+        value: String,
+        out: StringBuilder,
+    ) {
         out.append('"')
         value.forEach { char ->
             when (char) {
@@ -77,19 +92,21 @@ object MiniJson {
                 '\n' -> out.append("\\n")
                 '\r' -> out.append("\\r")
                 '\t' -> out.append("\\t")
-                else -> if (char.code < 0x20) {
-                    out.append("\\u")
-                    out.append(char.code.toString(16).padStart(4, '0'))
-                } else {
-                    out.append(char)
-                }
+                else ->
+                    if (char.code < 0x20) {
+                        out.append("\\u")
+                        out.append(char.code.toString(16).padStart(4, '0'))
+                    } else {
+                        out.append(char)
+                    }
             }
         }
         out.append('"')
     }
 
-    private class Parser(private val text: String) {
-
+    private class Parser(
+        private val text: String,
+    ) {
         private var index = 0
 
         fun parseValue(): JsonValue {
@@ -103,7 +120,10 @@ object MiniJson {
                 'f' -> parseLiteral("false", JsonValue.Bool(false))
                 'n' -> parseLiteral("null", JsonValue.Null)
                 else -> if (char == '-' || char.isDigit()) parseNumber() else error("非法字符 $char")
-            }.also { skipWhitespace(); require(index == text.length) { "存在多余内容" } }
+            }.also {
+                skipWhitespace()
+                require(index == text.length) { "存在多余内容" }
+            }
         }
 
         private fun parseObject(): JsonValue.Obj {
@@ -230,7 +250,10 @@ object MiniJson {
             return JsonValue.Num(raw.toDouble(), raw)
         }
 
-        private fun parseLiteral(literal: String, value: JsonValue): JsonValue {
+        private fun parseLiteral(
+            literal: String,
+            value: JsonValue,
+        ): JsonValue {
             require(text.startsWith(literal, index)) { "非法字面量" }
             index += literal.length
             return value

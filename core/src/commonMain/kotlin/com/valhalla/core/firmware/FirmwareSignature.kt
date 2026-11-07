@@ -3,7 +3,10 @@ package com.valhalla.core.firmware
 import com.valhalla.core.security.HmacSha256
 
 /** 固件签名算法。低字节为协议中的算法编号，预留 ECDSA-P256 以便后续接入平台实现。 */
-enum class FirmwareSignatureAlgorithm(val code: Int, val title: String) {
+enum class FirmwareSignatureAlgorithm(
+    val code: Int,
+    val title: String,
+) {
     /** 预共享密钥 HMAC-SHA256；当前用于测试密钥与本地验签流程。 */
     HMAC_SHA256(0x01, "HMAC-SHA256"),
 
@@ -28,7 +31,6 @@ class FirmwareSignature(
     val algorithm: FirmwareSignatureAlgorithm,
     val bytes: ByteArray,
 ) {
-
     init {
         require(bytes.isNotEmpty()) { "签名内容不能为空" }
         require(bytes.size <= 0xFFFF) { "签名内容超过 u16 长度上限: ${bytes.size}" }
@@ -46,21 +48,25 @@ class FirmwareSignature(
         return out
     }
 
-    override fun toString(): String =
-        "FirmwareSignature(${algorithm.title}, ${bytes.size} 字节)"
+    override fun toString(): String = "FirmwareSignature(${algorithm.title}, ${bytes.size} 字节)"
 
     companion object {
         const val HEADER_SIZE: Int = 3
 
         /** 解析签名段；长度与实际字节数不符时抛出 [FirmwareException.SignatureSectionInvalid]。 */
-        fun decode(bytes: ByteArray, offset: Int): FirmwareSignature {
+        fun decode(
+            bytes: ByteArray,
+            offset: Int,
+        ): FirmwareSignature {
             if (offset < 0 || offset + HEADER_SIZE > bytes.size) {
                 throw FirmwareException.SignatureSectionInvalid("签名段头部不完整：offset=$offset")
             }
-            val algorithm = FirmwareSignatureAlgorithm.fromCode(bytes[offset].toInt() and 0xFF)
-                ?: throw FirmwareException.SignatureAlgorithmUnsupported(bytes[offset].toInt() and 0xFF)
-            val length = (bytes[offset + 1].toInt() and 0xFF) or
-                ((bytes[offset + 2].toInt() and 0xFF) shl 8)
+            val algorithm =
+                FirmwareSignatureAlgorithm.fromCode(bytes[offset].toInt() and 0xFF)
+                    ?: throw FirmwareException.SignatureAlgorithmUnsupported(bytes[offset].toInt() and 0xFF)
+            val length =
+                (bytes[offset + 1].toInt() and 0xFF) or
+                    ((bytes[offset + 2].toInt() and 0xFF) shl 8)
             if (length <= 0) {
                 throw FirmwareException.SignatureSectionInvalid("签名长度为 0")
             }
@@ -82,8 +88,10 @@ class FirmwareSignature(
  * 实现方只负责算法与密钥管理，摘要计算由 [FirmwarePackage.computeSignatureDigest] 提供。
  */
 interface FirmwareSignatureVerifier {
-
-    fun verify(digest: ByteArray, signature: FirmwareSignature): Boolean
+    fun verify(
+        digest: ByteArray,
+        signature: FirmwareSignature,
+    ): Boolean
 }
 
 /**
@@ -96,7 +104,6 @@ interface FirmwareSignatureVerifier {
 class EcdsaP256FirmwareVerifier(
     private val verifier: com.valhalla.core.security.EcdsaP256Verifier,
 ) : FirmwareSignatureVerifier {
-
     val algorithm: String get() = verifier.algorithm
 
     val source: com.valhalla.core.security.EcdsaP256Verifier.Source get() = verifier.source
@@ -114,18 +121,25 @@ class EcdsaP256FirmwareVerifier(
         return verifier.verifyDetailed(digest, signature.bytes)
     }
 
-    override fun verify(digest: ByteArray, signature: FirmwareSignature): Boolean =
-        verifyDetailed(digest, signature) is com.valhalla.core.security.EcdsaVerificationResult.Valid
+    override fun verify(
+        digest: ByteArray,
+        signature: FirmwareSignature,
+    ): Boolean = verifyDetailed(digest, signature) is com.valhalla.core.security.EcdsaVerificationResult.Valid
 
     companion object {
-
         /** 从 PEM（公钥或证书）构建；失败抛 [com.valhalla.core.security.EcdsaKeyException]。 */
         fun fromPem(pem: String): EcdsaP256FirmwareVerifier =
-            EcdsaP256FirmwareVerifier(com.valhalla.core.security.EcdsaP256Verifier.fromPem(pem))
+            EcdsaP256FirmwareVerifier(
+                com.valhalla.core.security.EcdsaP256Verifier
+                    .fromPem(pem),
+            )
 
         /** 从 DER（SPKI 或证书）构建。 */
         fun fromDer(der: ByteArray): EcdsaP256FirmwareVerifier =
-            EcdsaP256FirmwareVerifier(com.valhalla.core.security.EcdsaP256Verifier.fromDer(der))
+            EcdsaP256FirmwareVerifier(
+                com.valhalla.core.security.EcdsaP256Verifier
+                    .fromDer(der),
+            )
     }
 }
 
@@ -134,13 +148,17 @@ class EcdsaP256FirmwareVerifier(
  *
  * 仅用于测试、模拟器与本地联调；**生产装配默认使用 [EcdsaP256FirmwareVerifier]**。
  */
-class HmacSha256TestVerifier(private val secret: ByteArray) : FirmwareSignatureVerifier {
-
+class HmacSha256TestVerifier(
+    private val secret: ByteArray,
+) : FirmwareSignatureVerifier {
     init {
         require(secret.isNotEmpty()) { "验签密钥不能为空" }
     }
 
-    override fun verify(digest: ByteArray, signature: FirmwareSignature): Boolean {
+    override fun verify(
+        digest: ByteArray,
+        signature: FirmwareSignature,
+    ): Boolean {
         if (signature.algorithm != FirmwareSignatureAlgorithm.HMAC_SHA256) return false
         val expected = HmacSha256.compute(secret, digest)
         return HmacSha256.constantTimeEquals(expected, signature.bytes)
@@ -149,11 +167,16 @@ class HmacSha256TestVerifier(private val secret: ByteArray) : FirmwareSignatureV
 
 /** 签名计算便捷入口：用测试密钥对摘要签名，供测试桩构造已签名固件。 */
 object FirmwareTestSigner {
+    fun sha256Digest(
+        header: FirmwareHeader,
+        payload: ByteArray,
+    ): ByteArray = Sha256DigestBuilder.build(header, payload)
 
-    fun sha256Digest(header: FirmwareHeader, payload: ByteArray): ByteArray =
-        Sha256DigestBuilder.build(header, payload)
-
-    fun signWithHmacKey(header: FirmwareHeader, payload: ByteArray, secret: ByteArray): FirmwareSignature {
+    fun signWithHmacKey(
+        header: FirmwareHeader,
+        payload: ByteArray,
+        secret: ByteArray,
+    ): FirmwareSignature {
         val digest = Sha256DigestBuilder.build(header, payload)
         return FirmwareSignature(
             algorithm = FirmwareSignatureAlgorithm.HMAC_SHA256,
@@ -163,9 +186,13 @@ object FirmwareTestSigner {
 }
 
 private object Sha256DigestBuilder {
-
-    fun build(header: FirmwareHeader, payload: ByteArray): ByteArray {
-        val digest = com.valhalla.core.security.Sha256Digest()
+    fun build(
+        header: FirmwareHeader,
+        payload: ByteArray,
+    ): ByteArray {
+        val digest =
+            com.valhalla.core.security
+                .Sha256Digest()
         digest.update(header.encode())
         digest.update(payload)
         return digest.digest()

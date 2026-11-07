@@ -16,7 +16,9 @@ import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
 
 /** 诊断包内固定条目；顺序即写入顺序。 */
-enum class DiagnosticEntryKind(val fileName: String) {
+enum class DiagnosticEntryKind(
+    val fileName: String,
+) {
     APP_INFO("app-info.json"),
     HEALTH_REPORT("health-report.md"),
     CONNECTION_QUALITY("connection-quality.json"),
@@ -78,7 +80,6 @@ data class DiagnosticPackageResult(
  * 构建完成前不触碰文件系统，因此取消或失败都不会留下半成品。
  */
 object DiagnosticPackageBuilder {
-
     const val SCHEMA_VERSION: Int = 1
     const val FILE_EXTENSION: String = "vhdiag"
     const val MANIFEST_NAME: String = "manifest.json"
@@ -96,27 +97,30 @@ object DiagnosticPackageBuilder {
         val redacted = { text: String -> SensitiveTextRedaction.redact(text) }
 
         onProgress(DiagnosticPackageProgress(0f, DiagnosticEntryKind.APP_INFO))
-        val appInfo = redacted(
-            MiniJson.encode(
-                JsonValue.Obj(
-                    linkedMapOf(
-                        "schemaVersion" to JsonValue.Num(SCHEMA_VERSION.toDouble(), SCHEMA_VERSION.toString()),
-                        "appVersion" to JsonValue.Str(input.appVersion),
-                        "buildNumber" to JsonValue.Str(input.buildNumber),
-                        "buildChannel" to JsonValue.Str(input.buildChannel),
-                        "buildCommit" to JsonValue.Str(input.buildCommit),
-                        "generatedAtMillis" to JsonValue.Num(
-                            input.generatedAtEpochMillis.toDouble(),
-                            input.generatedAtEpochMillis.toString(),
-                        ),
-                        "timezoneOffsetMinutes" to JsonValue.Num(
-                            input.zoneOffsetMinutes.toDouble(),
-                            input.zoneOffsetMinutes.toString(),
+        val appInfo =
+            redacted(
+                MiniJson.encode(
+                    JsonValue.Obj(
+                        linkedMapOf(
+                            "schemaVersion" to JsonValue.Num(SCHEMA_VERSION.toDouble(), SCHEMA_VERSION.toString()),
+                            "appVersion" to JsonValue.Str(input.appVersion),
+                            "buildNumber" to JsonValue.Str(input.buildNumber),
+                            "buildChannel" to JsonValue.Str(input.buildChannel),
+                            "buildCommit" to JsonValue.Str(input.buildCommit),
+                            "generatedAtMillis" to
+                                JsonValue.Num(
+                                    input.generatedAtEpochMillis.toDouble(),
+                                    input.generatedAtEpochMillis.toString(),
+                                ),
+                            "timezoneOffsetMinutes" to
+                                JsonValue.Num(
+                                    input.zoneOffsetMinutes.toDouble(),
+                                    input.zoneOffsetMinutes.toString(),
+                                ),
                         ),
                     ),
                 ),
-            ),
-        )
+            )
         yield()
         currentCoroutineContext().ensureActive()
 
@@ -141,38 +145,42 @@ object DiagnosticPackageBuilder {
         currentCoroutineContext().ensureActive()
 
         onProgress(DiagnosticPackageProgress(0.75f, DiagnosticEntryKind.PACKET_LOG))
-        val packetLog = PacketLogExporter.build(
-            entries = input.packetLogEntries,
-            nowMillis = input.generatedAtEpochMillis,
-            zoneOffsetMinutes = input.zoneOffsetMinutes,
-            options = input.packetLogOptions,
-            format = PacketLogExportFormat.JSON,
-        )
+        val packetLog =
+            PacketLogExporter.build(
+                entries = input.packetLogEntries,
+                nowMillis = input.generatedAtEpochMillis,
+                zoneOffsetMinutes = input.zoneOffsetMinutes,
+                options = input.packetLogOptions,
+                format = PacketLogExportFormat.JSON,
+            )
         val packetText = redacted(packetLog.text)
         currentCoroutineContext().ensureActive()
 
-        val payloads = listOf(
-            DiagnosticEntryKind.APP_INFO to (appInfo to 1),
-            DiagnosticEntryKind.HEALTH_REPORT to (health to (if (input.healthReport == null) 0 else 1)),
-            DiagnosticEntryKind.CONNECTION_QUALITY to (quality to 1),
-            DiagnosticEntryKind.PACKET_LOG to (packetText to packetLog.entryCount),
-            DiagnosticEntryKind.DEVICE_PROFILE to (profile to 1),
-            DiagnosticEntryKind.DEVICE_METRICS to (metrics to input.metricSamples.size),
-        )
-
-        val entries = payloads.map { (kind, payload) ->
-            DiagnosticPackageEntry(
-                name = kind.fileName,
-                bytes = payload.first.encodeToByteArray().size,
-                records = payload.second,
+        val payloads =
+            listOf(
+                DiagnosticEntryKind.APP_INFO to (appInfo to 1),
+                DiagnosticEntryKind.HEALTH_REPORT to (health to (if (input.healthReport == null) 0 else 1)),
+                DiagnosticEntryKind.CONNECTION_QUALITY to (quality to 1),
+                DiagnosticEntryKind.PACKET_LOG to (packetText to packetLog.entryCount),
+                DiagnosticEntryKind.DEVICE_PROFILE to (profile to 1),
+                DiagnosticEntryKind.DEVICE_METRICS to (metrics to input.metricSamples.size),
             )
-        }
+
+        val entries =
+            payloads.map { (kind, payload) ->
+                DiagnosticPackageEntry(
+                    name = kind.fileName,
+                    bytes = payload.first.encodeToByteArray().size,
+                    records = payload.second,
+                )
+            }
         val manifest = buildManifest(input, entries, packetLog.truncated)
         val text = assemble(manifest, payloads)
         onProgress(DiagnosticPackageProgress(1f, null))
 
-        val fileName = "valhalla-diagnostic-" +
-            input.generatedAtEpochMillis.toString() + "." + FILE_EXTENSION
+        val fileName =
+            "valhalla-diagnostic-" +
+                input.generatedAtEpochMillis.toString() + "." + FILE_EXTENSION
         return DiagnosticPackageResult(
             fileName = fileName,
             text = text,
@@ -188,88 +196,100 @@ object DiagnosticPackageBuilder {
         input: DiagnosticPackageInput,
         entries: List<DiagnosticPackageEntry>,
         truncated: Boolean,
-    ): String = MiniJson.encode(
-        JsonValue.Obj(
-            linkedMapOf(
-                "schemaVersion" to JsonValue.Num(SCHEMA_VERSION.toDouble(), SCHEMA_VERSION.toString()),
-                "generatedAtMillis" to JsonValue.Num(
-                    input.generatedAtEpochMillis.toDouble(),
-                    input.generatedAtEpochMillis.toString(),
-                ),
-                "appVersion" to JsonValue.Str(input.appVersion),
-                "buildNumber" to JsonValue.Str(input.buildNumber),
-                "buildChannel" to JsonValue.Str(input.buildChannel),
-                "buildCommit" to JsonValue.Str(input.buildCommit),
-                "deviceIdHash" to JsonValue.Str(PacketLogRedaction.hashDeviceId(input.deviceId)),
-                "redacted" to JsonValue.Bool(true),
-                "truncated" to JsonValue.Bool(truncated),
-                "excluded" to JsonValue.Arr(
-                    listOf(
-                        JsonValue.Str("tokens"),
-                        JsonValue.Str("keys"),
-                        JsonValue.Str("credentials"),
-                        JsonValue.Str("checkpoints"),
-                        JsonValue.Str("firmware-binaries"),
-                        JsonValue.Str("unredacted-raw"),
-                    ),
-                ),
-                "entries" to JsonValue.Arr(
-                    entries.map { entry ->
-                        JsonValue.Obj(
-                            linkedMapOf(
-                                "name" to JsonValue.Str(entry.name),
-                                "bytes" to JsonValue.Num(entry.bytes.toDouble(), entry.bytes.toString()),
-                                "records" to JsonValue.Num(entry.records.toDouble(), entry.records.toString()),
+    ): String =
+        MiniJson.encode(
+            JsonValue.Obj(
+                linkedMapOf(
+                    "schemaVersion" to JsonValue.Num(SCHEMA_VERSION.toDouble(), SCHEMA_VERSION.toString()),
+                    "generatedAtMillis" to
+                        JsonValue.Num(
+                            input.generatedAtEpochMillis.toDouble(),
+                            input.generatedAtEpochMillis.toString(),
+                        ),
+                    "appVersion" to JsonValue.Str(input.appVersion),
+                    "buildNumber" to JsonValue.Str(input.buildNumber),
+                    "buildChannel" to JsonValue.Str(input.buildChannel),
+                    "buildCommit" to JsonValue.Str(input.buildCommit),
+                    "deviceIdHash" to JsonValue.Str(PacketLogRedaction.hashDeviceId(input.deviceId)),
+                    "redacted" to JsonValue.Bool(true),
+                    "truncated" to JsonValue.Bool(truncated),
+                    "excluded" to
+                        JsonValue.Arr(
+                            listOf(
+                                JsonValue.Str("tokens"),
+                                JsonValue.Str("keys"),
+                                JsonValue.Str("credentials"),
+                                JsonValue.Str("checkpoints"),
+                                JsonValue.Str("firmware-binaries"),
+                                JsonValue.Str("unredacted-raw"),
                             ),
-                        )
-                    },
+                        ),
+                    "entries" to
+                        JsonValue.Arr(
+                            entries.map { entry ->
+                                JsonValue.Obj(
+                                    linkedMapOf(
+                                        "name" to JsonValue.Str(entry.name),
+                                        "bytes" to JsonValue.Num(entry.bytes.toDouble(), entry.bytes.toString()),
+                                        "records" to JsonValue.Num(entry.records.toDouble(), entry.records.toString()),
+                                    ),
+                                )
+                            },
+                        ),
                 ),
             ),
-        ),
-    )
+        )
 
     private fun assemble(
         manifest: String,
         payloads: List<Pair<DiagnosticEntryKind, Pair<String, Int>>>,
-    ): String = buildString {
-        append(CONTAINER_HEADER).append('\n')
-        appendEntry(MANIFEST_NAME, manifest, 0)
-        payloads.forEach { (kind, payload) ->
-            appendEntry(kind.fileName, payload.first, payload.second)
+    ): String =
+        buildString {
+            append(CONTAINER_HEADER).append('\n')
+            appendEntry(MANIFEST_NAME, manifest, 0)
+            payloads.forEach { (kind, payload) ->
+                appendEntry(kind.fileName, payload.first, payload.second)
+            }
+            append("--END\n")
         }
-        append("--END\n")
-    }
 
-    private fun StringBuilder.appendEntry(name: String, content: String, records: Int) {
-        append("--ENTRY|").append(name).append('|')
-            .append(content.encodeToByteArray().size).append('|')
-            .append(records).append('\n')
+    private fun StringBuilder.appendEntry(
+        name: String,
+        content: String,
+        records: Int,
+    ) {
+        append("--ENTRY|")
+            .append(name)
+            .append('|')
+            .append(content.encodeToByteArray().size)
+            .append('|')
+            .append(records)
+            .append('\n')
         append(content)
         if (!content.endsWith('\n')) append('\n')
     }
 
-    private fun renderMetrics(samples: List<DeviceMetricSample>): String = buildString {
-        append("{\"schemaVersion\":1,\"samples\":[")
-        samples.forEachIndexed { index, sample ->
-            if (index > 0) append(',')
-            append("{\"timestampMillis\":").append(sample.timestampMillis)
-            append(",\"batteryPercent\":").append(sample.batteryPercent?.toString() ?: "null")
-            append(",\"rssi\":").append(sample.rssi?.toString() ?: "null")
-            append('}')
+    private fun renderMetrics(samples: List<DeviceMetricSample>): String =
+        buildString {
+            append("{\"schemaVersion\":1,\"samples\":[")
+            samples.forEachIndexed { index, sample ->
+                if (index > 0) append(',')
+                append("{\"timestampMillis\":").append(sample.timestampMillis)
+                append(",\"batteryPercent\":").append(sample.batteryPercent?.toString() ?: "null")
+                append(",\"rssi\":").append(sample.rssi?.toString() ?: "null")
+                append('}')
+            }
+            append("]}")
         }
-        append("]}")
-    }
 
     @OptIn(ExperimentalTime::class)
-    fun proposedFileName(nowMillis: Long = Clock.System.now().toEpochMilliseconds()): String =
-        "valhalla-diagnostic-$nowMillis.$FILE_EXTENSION"
+    fun proposedFileName(nowMillis: Long = Clock.System.now().toEpochMilliseconds()): String = "valhalla-diagnostic-$nowMillis.$FILE_EXTENSION"
 }
 
 /**
  * 容器解析辅助（供自检与测试使用）：只拆出条目，不执行任何反序列化。
  */
 object DiagnosticPackageFormat {
-
     /** 解析失败返回空 Map；manifest 始终以 [DiagnosticPackageBuilder.MANIFEST_NAME] 为键。 */
     fun parseEntries(text: String): Map<String, String> {
         if (!text.startsWith(DiagnosticPackageBuilder.CONTAINER_HEADER)) return emptyMap()

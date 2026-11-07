@@ -1,13 +1,14 @@
 package com.valhalla.core.profile
 
+import com.valhalla.core.storage.StorageMigrationStatus
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class DeviceProfileRepositoryTest {
-
     @Test
     fun `按最近连接时间倒序返回档案`() {
         val store = InMemoryDeviceProfileStore()
@@ -26,12 +27,13 @@ class DeviceProfileRepositoryTest {
         val repository = DeviceProfileRepository(InMemoryDeviceProfileStore(), clockMillis = { 1_000 })
         repository.recordConnection("dev-1", displayName = "手柄", vendor = "Valhalla", model = "X1")
 
-        val updated = repository.updateSnapshot(
-            deviceId = "dev-1",
-            firmwareVersion = "1.2.3 (build 10, stable)",
-            batteryPercent = 85,
-            charging = true,
-        )
+        val updated =
+            repository.updateSnapshot(
+                deviceId = "dev-1",
+                firmwareVersion = "1.2.3 (build 10, stable)",
+                batteryPercent = 85,
+                charging = true,
+            )
         assertEquals("手柄", updated.displayName)
         assertEquals("X1", updated.model)
         assertEquals(85, updated.lastKnownBatteryPercent)
@@ -45,12 +47,13 @@ class DeviceProfileRepositoryTest {
     @Test
     fun `信息刷新遇到未知设备时自动建档`() {
         val repository = DeviceProfileRepository(InMemoryDeviceProfileStore(), clockMillis = { 42 })
-        val profile = repository.updateSnapshot(
-            deviceId = "dev-2",
-            model = "X2",
-            firmwareVersion = "2.0.0",
-            batteryPercent = 66,
-        )
+        val profile =
+            repository.updateSnapshot(
+                deviceId = "dev-2",
+                model = "X2",
+                firmwareVersion = "2.0.0",
+                batteryPercent = 66,
+            )
 
         assertEquals(42, profile.lastConnectedAtEpochMillis)
         assertEquals("X2", profile.model)
@@ -115,13 +118,14 @@ class DeviceProfileRepositoryTest {
     @Test
     fun `OTA 历史写入不存在的设备时自动建档`() {
         val repository = DeviceProfileRepository(InMemoryDeviceProfileStore(), clockMillis = { 7 })
-        val record = OtaHistoryRecord(
-            firmwareVersion = "1.0.0",
-            finishedAtEpochMillis = 50,
-            durationMillis = 2_000,
-            outcome = OtaOutcome.ABORTED,
-            detail = "USER_CANCELLED",
-        )
+        val record =
+            OtaHistoryRecord(
+                firmwareVersion = "1.0.0",
+                finishedAtEpochMillis = 50,
+                durationMillis = 2_000,
+                outcome = OtaOutcome.ABORTED,
+                detail = "USER_CANCELLED",
+            )
 
         val profile = repository.recordOta("dev-9", record)
 
@@ -132,31 +136,33 @@ class DeviceProfileRepositoryTest {
 
     @Test
     fun `档案编码可往返并保留空值与历史`() {
-        val profiles = listOf(
-            DeviceProfile(
-                deviceId = "设备-001",
-                displayName = "主控 手柄",
-                vendor = null,
-                model = "X1",
-                lastConnectedAtEpochMillis = 1_700_000_000_000,
-                lastKnownFirmwareVersion = "2.1.0 (build 5, beta)",
-                lastKnownBatteryPercent = 77,
-                lastKnownCharging = false,
-                otaHistory = listOf(
-                    OtaHistoryRecord(
-                        firmwareVersion = "2.1.0 (build 5, beta)",
-                        finishedAtEpochMillis = 1_700_000_001_000,
-                        durationMillis = 9_000,
-                        outcome = OtaOutcome.FAILED,
-                        errorCode = "0x0E CRC 校验失败",
-                        detail = "链路已断开：请重新连接设备后使用「继续上次升级」",
-                        sentBytes = 1_024,
-                        totalBytes = 4_096,
-                    ),
+        val profiles =
+            listOf(
+                DeviceProfile(
+                    deviceId = "设备-001",
+                    displayName = "主控 手柄",
+                    vendor = null,
+                    model = "X1",
+                    lastConnectedAtEpochMillis = 1_700_000_000_000,
+                    lastKnownFirmwareVersion = "2.1.0 (build 5, beta)",
+                    lastKnownBatteryPercent = 77,
+                    lastKnownCharging = false,
+                    otaHistory =
+                        listOf(
+                            OtaHistoryRecord(
+                                firmwareVersion = "2.1.0 (build 5, beta)",
+                                finishedAtEpochMillis = 1_700_000_001_000,
+                                durationMillis = 9_000,
+                                outcome = OtaOutcome.FAILED,
+                                errorCode = "0x0E CRC 校验失败",
+                                detail = "链路已断开：请重新连接设备后使用「继续上次升级」",
+                                sentBytes = 1_024,
+                                totalBytes = 4_096,
+                            ),
+                        ),
                 ),
-            ),
-            DeviceProfile(deviceId = "dev-2", lastConnectedAtEpochMillis = 10),
-        )
+                DeviceProfile(deviceId = "dev-2", lastConnectedAtEpochMillis = 10),
+            )
 
         val raw = DeviceProfileCodec.encode(profiles)
         val decoded = DeviceProfileCodec.decode(raw)
@@ -168,13 +174,24 @@ class DeviceProfileRepositoryTest {
     fun `损坏或旧版本的存储内容安全回退为空`() {
         val repository = DeviceProfileRepository(InMemoryDeviceProfileStore("not-valid"))
         assertEquals(emptyList(), repository.list())
+        assertIs<StorageMigrationStatus.Corrupted>(repository.lastMigrationStatus)
 
         val versionMismatch = DeviceProfileRepository(InMemoryDeviceProfileStore("v0\nP|dev|"))
         assertEquals(emptyList(), versionMismatch.list())
+        assertIs<StorageMigrationStatus.Corrupted>(versionMismatch.lastMigrationStatus)
 
-        val partial = DeviceProfileCodec.decode(
-            "v1\nP|dev-1|name|||100|1.0.0|80|1\nO|broken\nP|dev-2|name|||200|2.0.0||",
-        )
+        val future = DeviceProfileRepository(InMemoryDeviceProfileStore("v9\nP|dev|"))
+        assertEquals(emptyList(), future.list())
+        assertEquals(StorageMigrationStatus.FutureVersion(9, 1), future.lastMigrationStatus)
+
+        val current = DeviceProfileRepository(InMemoryDeviceProfileStore("v1\nP|dev|name|||100|1.0.0|80|1"))
+        assertEquals(listOf("dev"), current.list().map { it.deviceId })
+        assertEquals(StorageMigrationStatus.Current, current.lastMigrationStatus)
+
+        val partial =
+            DeviceProfileCodec.decode(
+                "v1\nP|dev-1|name|||100|1.0.0|80|1\nO|broken\nP|dev-2|name|||200|2.0.0||",
+            )
         assertEquals(listOf("dev-1", "dev-2"), partial.map { it.deviceId })
         assertTrue(partial.first().otaHistory.isEmpty())
         assertEquals(null, partial.last().lastKnownBatteryPercent)

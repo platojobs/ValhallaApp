@@ -2,7 +2,6 @@ package com.valhalla.core.security
 
 /** AUTH 挑战应答签名器。 */
 interface AuthSigner {
-
     /** 算法标识，用于日志与协议协商（当前仅有 HMAC-SHA256）。 */
     val algorithm: String
 
@@ -10,8 +9,9 @@ interface AuthSigner {
 }
 
 /** 基于预共享密钥的 HMAC-SHA256 签名器。 */
-class HmacAuthSigner(private val secret: ByteArray) : AuthSigner {
-
+class HmacAuthSigner(
+    private val secret: ByteArray,
+) : AuthSigner {
     init {
         require(secret.isNotEmpty()) { "AUTH 密钥不能为空" }
     }
@@ -37,10 +37,13 @@ class HmacAuthSigner(private val secret: ByteArray) : AuthSigner {
  * `version:u8(=1) | challengeLen:u16 | challenge | credentialLen:u16 | credential | digestLen:u16 | digest(UTF-8)`
  */
 object AuthSignatureMessage {
-
     const val VERSION: Byte = 0x01
 
-    fun canonical(challenge: ByteArray, credential: ByteArray, deviceDigest: String): ByteArray {
+    fun canonical(
+        challenge: ByteArray,
+        credential: ByteArray,
+        deviceDigest: String,
+    ): ByteArray {
         val digestBytes = deviceDigest.encodeToByteArray()
         val size = 1 + 2 + challenge.size + 2 + credential.size + 2 + digestBytes.size
         val out = ByteArray(size)
@@ -57,7 +60,11 @@ object AuthSignatureMessage {
         return out
     }
 
-    private fun writeU16(target: ByteArray, offset: Int, value: Int): Int {
+    private fun writeU16(
+        target: ByteArray,
+        offset: Int,
+        value: Int,
+    ): Int {
         require(value in 0..0xFFFF) { "长度字段超出 u16 范围: $value" }
         target[offset] = (value and 0xFF).toByte()
         target[offset + 1] = ((value shr 8) and 0xFF).toByte()

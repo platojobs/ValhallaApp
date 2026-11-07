@@ -42,17 +42,17 @@ class OnboardingController(
     private val store: AppSettingsStore,
     reviewMode: Boolean = false,
 ) {
-
     private val steps = OnboardingStep.ORDER
-    private val mutableState = MutableStateFlow(
-        OnboardingState(
-            step = steps.first(),
-            index = 0,
-            total = steps.size,
-            reviewMode = reviewMode,
-            finished = false,
-        ),
-    )
+    private val mutableState =
+        MutableStateFlow(
+            OnboardingState(
+                step = steps.first(),
+                index = 0,
+                total = steps.size,
+                reviewMode = reviewMode,
+                finished = false,
+            ),
+        )
 
     val state: StateFlow<OnboardingState> = mutableState.asStateFlow()
 
@@ -83,7 +83,6 @@ class OnboardingController(
 
     companion object {
         /** 启动时是否应展示引导：从未完成（或存储值损坏）时为 true。 */
-        fun shouldShowOnLaunch(store: AppSettingsStore): Boolean =
-            !AppSettingsRepository.isOnboardingCompleted(store)
+        fun shouldShowOnLaunch(store: AppSettingsStore): Boolean = !AppSettingsRepository.isOnboardingCompleted(store)
     }
 }

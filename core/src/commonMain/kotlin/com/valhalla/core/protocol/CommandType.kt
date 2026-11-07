@@ -8,7 +8,9 @@ package com.valhalla.core.protocol
  * - 0x40..0x5F 为心跳与设备主动上报的通知；
  * - 0x7F 为解析失败时的兜底值。
  */
-enum class CommandType(val code: Byte) {
+enum class CommandType(
+    val code: Byte,
+) {
     AUTH(0x01),
     GET_DEVICE_INFO(0x02),
     SET_CONFIG(0x03),

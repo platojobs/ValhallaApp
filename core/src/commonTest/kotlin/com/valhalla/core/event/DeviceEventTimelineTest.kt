@@ -6,7 +6,6 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class DeviceEventTimelineTest {
-
     @Test
     fun `事件按时间倒序返回并可按类型筛选`() {
         val timeline = DeviceEventTimeline(InMemoryDeviceEventStore(), clockMillis = { 1 })
@@ -44,11 +43,17 @@ class DeviceEventTimelineTest {
 
     @Test
     fun `写入失败只返回 false 不影响调用方`() {
-        val failing = object : DeviceEventStore {
-            override fun loadRaw(deviceId: String): String? = null
-            override fun saveRaw(deviceId: String, raw: String) = error("disk full")
-            override fun clear(deviceId: String) = Unit
-        }
+        val failing =
+            object : DeviceEventStore {
+                override fun loadRaw(deviceId: String): String? = null
+
+                override fun saveRaw(
+                    deviceId: String,
+                    raw: String,
+                ) = error("disk full")
+
+                override fun clear(deviceId: String) = Unit
+            }
         val timeline = DeviceEventTimeline(failing)
         assertFalse(timeline.record("dev", DeviceEventType.OTA, "OTA 失败"))
         assertTrue(timeline.list("dev").isEmpty())
@@ -67,7 +72,13 @@ class DeviceEventTimelineTest {
         val raw = store.loadRaw("dev")!!
         assertFalse(raw.contains("secret-value"), "事件摘要不应包含令牌原文")
         assertFalse(raw.contains("SN12345"), "事件详情不应包含序列号原文")
-        assertFalse(timeline.list("dev").first().summary.contains("secret-value"))
+        assertFalse(
+            timeline
+                .list("dev")
+                .first()
+                .summary
+                .contains("secret-value"),
+        )
     }
 
     @Test

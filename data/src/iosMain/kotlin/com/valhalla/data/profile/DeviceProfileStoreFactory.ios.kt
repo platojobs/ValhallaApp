@@ -7,7 +7,6 @@ import platform.Foundation.NSUserDefaults
 actual fun createDeviceProfileStore(): DeviceProfileStore = NSUserDefaultsDeviceProfileStore()
 
 private class NSUserDefaultsDeviceProfileStore : DeviceProfileStore {
-
     private val defaults: NSUserDefaults = NSUserDefaults.standardUserDefaults
 
     override fun loadRaw(): String? = defaults.stringForKey(StorageKeys.IOS_PROFILES_KEY)

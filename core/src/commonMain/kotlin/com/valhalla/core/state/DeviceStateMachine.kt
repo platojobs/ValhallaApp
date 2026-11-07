@@ -13,7 +13,6 @@ class DeviceStateMachine(
     private val historyLimit: Int = 32,
     private val onTransition: ((StateTransition) -> Unit)? = null,
 ) {
-
     var state: DeviceState = initialState
         private set
 
@@ -21,15 +20,19 @@ class DeviceStateMachine(
 
     fun transitions(): List<StateTransition> = history.toList()
 
-    fun handle(event: DeviceEvent, timestampMillis: Long = 0L): TransitionResult {
+    fun handle(
+        event: DeviceEvent,
+        timestampMillis: Long = 0L,
+    ): TransitionResult {
         val current = state
 
         if (isIdempotent(current, event)) {
             return TransitionResult.Ignored(current, event, "当前状态 $current 已满足事件 ${eventName(event)}")
         }
 
-        val target = resolve(current, event)
-            ?: return TransitionResult.Rejected(current, event, "状态 $current 不允许事件 ${eventName(event)}")
+        val target =
+            resolve(current, event)
+                ?: return TransitionResult.Rejected(current, event, "状态 $current 不允许事件 ${eventName(event)}")
 
         val transition = StateTransition(from = current, to = target, event = event, timestampMillis = timestampMillis)
         state = target
@@ -47,79 +50,95 @@ class DeviceStateMachine(
     val isReady: Boolean
         get() = state == DeviceState.READY
 
-    private fun isIdempotent(current: DeviceState, event: DeviceEvent): Boolean = when {
-        current == DeviceState.CONNECTING && event == DeviceEvent.ConnectRequested -> true
-        current == DeviceState.READY && event == DeviceEvent.AuthSucceeded -> true
-        current == DeviceState.READY && event == DeviceEvent.AuthenticationStarted -> true
-        current == DeviceState.DISCONNECTING && event == DeviceEvent.DisconnectRequested -> true
-        current == DeviceState.DISCONNECTED && event == DeviceEvent.Disconnected -> true
-        current == DeviceState.DISCONNECTED && event == DeviceEvent.LinkLost -> true
-        else -> false
-    }
-
-    private fun resolve(current: DeviceState, event: DeviceEvent): DeviceState? = when (current) {
-        DeviceState.DISCONNECTED -> when (event) {
-            DeviceEvent.ConnectRequested -> DeviceState.CONNECTING
-            is DeviceEvent.FaultRaised -> DeviceState.FAULT
-            else -> null
+    private fun isIdempotent(
+        current: DeviceState,
+        event: DeviceEvent,
+    ): Boolean =
+        when {
+            current == DeviceState.CONNECTING && event == DeviceEvent.ConnectRequested -> true
+            current == DeviceState.READY && event == DeviceEvent.AuthSucceeded -> true
+            current == DeviceState.READY && event == DeviceEvent.AuthenticationStarted -> true
+            current == DeviceState.DISCONNECTING && event == DeviceEvent.DisconnectRequested -> true
+            current == DeviceState.DISCONNECTED && event == DeviceEvent.Disconnected -> true
+            current == DeviceState.DISCONNECTED && event == DeviceEvent.LinkLost -> true
+            else -> false
         }
 
-        DeviceState.CONNECTING -> when (event) {
-            DeviceEvent.LinkEstablished -> DeviceState.CONNECTED
-            DeviceEvent.LinkLost -> DeviceState.DISCONNECTED
-            DeviceEvent.DisconnectRequested -> DeviceState.DISCONNECTING
-            is DeviceEvent.FaultRaised -> DeviceState.FAULT
-            else -> null
+    private fun resolve(
+        current: DeviceState,
+        event: DeviceEvent,
+    ): DeviceState? =
+        when (current) {
+            DeviceState.DISCONNECTED ->
+                when (event) {
+                    DeviceEvent.ConnectRequested -> DeviceState.CONNECTING
+                    is DeviceEvent.FaultRaised -> DeviceState.FAULT
+                    else -> null
+                }
+
+            DeviceState.CONNECTING ->
+                when (event) {
+                    DeviceEvent.LinkEstablished -> DeviceState.CONNECTED
+                    DeviceEvent.LinkLost -> DeviceState.DISCONNECTED
+                    DeviceEvent.DisconnectRequested -> DeviceState.DISCONNECTING
+                    is DeviceEvent.FaultRaised -> DeviceState.FAULT
+                    else -> null
+                }
+
+            DeviceState.CONNECTED ->
+                when (event) {
+                    DeviceEvent.AuthenticationStarted -> DeviceState.AUTHENTICATING
+                    DeviceEvent.LinkLost -> DeviceState.DISCONNECTED
+                    DeviceEvent.DisconnectRequested -> DeviceState.DISCONNECTING
+                    is DeviceEvent.FaultRaised -> DeviceState.FAULT
+                    else -> null
+                }
+
+            DeviceState.AUTHENTICATING ->
+                when (event) {
+                    DeviceEvent.AuthSucceeded -> DeviceState.READY
+                    is DeviceEvent.AuthFailed -> DeviceState.FAULT
+                    DeviceEvent.LinkLost -> DeviceState.DISCONNECTED
+                    DeviceEvent.DisconnectRequested -> DeviceState.DISCONNECTING
+                    is DeviceEvent.FaultRaised -> DeviceState.FAULT
+                    else -> null
+                }
+
+            DeviceState.READY ->
+                when (event) {
+                    DeviceEvent.LinkLost -> DeviceState.DISCONNECTED
+                    DeviceEvent.DisconnectRequested -> DeviceState.DISCONNECTING
+                    is DeviceEvent.FaultRaised -> DeviceState.FAULT
+                    else -> null
+                }
+
+            DeviceState.DISCONNECTING ->
+                when (event) {
+                    DeviceEvent.Disconnected -> DeviceState.DISCONNECTED
+                    DeviceEvent.LinkLost -> DeviceState.DISCONNECTED
+                    is DeviceEvent.FaultRaised -> DeviceState.FAULT
+                    else -> null
+                }
+
+            DeviceState.FAULT ->
+                when (event) {
+                    DeviceEvent.ResetRequested -> DeviceState.DISCONNECTED
+                    DeviceEvent.LinkLost -> DeviceState.DISCONNECTED
+                    else -> null
+                }
         }
 
-        DeviceState.CONNECTED -> when (event) {
-            DeviceEvent.AuthenticationStarted -> DeviceState.AUTHENTICATING
-            DeviceEvent.LinkLost -> DeviceState.DISCONNECTED
-            DeviceEvent.DisconnectRequested -> DeviceState.DISCONNECTING
-            is DeviceEvent.FaultRaised -> DeviceState.FAULT
-            else -> null
+    private fun eventName(event: DeviceEvent): String =
+        when (event) {
+            DeviceEvent.ConnectRequested -> "ConnectRequested"
+            DeviceEvent.LinkEstablished -> "LinkEstablished"
+            DeviceEvent.LinkLost -> "LinkLost"
+            DeviceEvent.AuthenticationStarted -> "AuthenticationStarted"
+            DeviceEvent.AuthSucceeded -> "AuthSucceeded"
+            is DeviceEvent.AuthFailed -> "AuthFailed(${event.reason})"
+            DeviceEvent.DisconnectRequested -> "DisconnectRequested"
+            DeviceEvent.Disconnected -> "Disconnected"
+            is DeviceEvent.FaultRaised -> "FaultRaised(${event.reason})"
+            DeviceEvent.ResetRequested -> "ResetRequested"
         }
-
-        DeviceState.AUTHENTICATING -> when (event) {
-            DeviceEvent.AuthSucceeded -> DeviceState.READY
-            is DeviceEvent.AuthFailed -> DeviceState.FAULT
-            DeviceEvent.LinkLost -> DeviceState.DISCONNECTED
-            DeviceEvent.DisconnectRequested -> DeviceState.DISCONNECTING
-            is DeviceEvent.FaultRaised -> DeviceState.FAULT
-            else -> null
-        }
-
-        DeviceState.READY -> when (event) {
-            DeviceEvent.LinkLost -> DeviceState.DISCONNECTED
-            DeviceEvent.DisconnectRequested -> DeviceState.DISCONNECTING
-            is DeviceEvent.FaultRaised -> DeviceState.FAULT
-            else -> null
-        }
-
-        DeviceState.DISCONNECTING -> when (event) {
-            DeviceEvent.Disconnected -> DeviceState.DISCONNECTED
-            DeviceEvent.LinkLost -> DeviceState.DISCONNECTED
-            is DeviceEvent.FaultRaised -> DeviceState.FAULT
-            else -> null
-        }
-
-        DeviceState.FAULT -> when (event) {
-            DeviceEvent.ResetRequested -> DeviceState.DISCONNECTED
-            DeviceEvent.LinkLost -> DeviceState.DISCONNECTED
-            else -> null
-        }
-    }
-
-    private fun eventName(event: DeviceEvent): String = when (event) {
-        DeviceEvent.ConnectRequested -> "ConnectRequested"
-        DeviceEvent.LinkEstablished -> "LinkEstablished"
-        DeviceEvent.LinkLost -> "LinkLost"
-        DeviceEvent.AuthenticationStarted -> "AuthenticationStarted"
-        DeviceEvent.AuthSucceeded -> "AuthSucceeded"
-        is DeviceEvent.AuthFailed -> "AuthFailed(${event.reason})"
-        DeviceEvent.DisconnectRequested -> "DisconnectRequested"
-        DeviceEvent.Disconnected -> "Disconnected"
-        is DeviceEvent.FaultRaised -> "FaultRaised(${event.reason})"
-        DeviceEvent.ResetRequested -> "ResetRequested"
-    }
 }

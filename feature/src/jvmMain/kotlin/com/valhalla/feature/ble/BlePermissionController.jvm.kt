@@ -19,8 +19,11 @@ actual fun rememberBlePermissionController(bleClient: BleClient): BlePermissionC
                 MutableStateFlow(BlePermissionState.GRANTED).asStateFlow()
 
             override fun requestPermission() = Unit
+
             override fun openAppSettings() = Unit
+
             override fun requestEnableBluetooth() = Unit
+
             override fun refresh() = Unit
         }
     }

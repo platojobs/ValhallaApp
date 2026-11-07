@@ -31,25 +31,24 @@ data class FirmwareVersion(
      * 预检的版本回退判定、断点固件身份判定都使用这一口径：渠道切换
      * （release → beta）不属于版本回退，内容一致性由 CRC16/CRC32 兜底。
      */
-    fun sameReleaseAs(other: FirmwareVersion): Boolean =
-        major == other.major && minor == other.minor && patch == other.patch && build == other.build
+    fun sameReleaseAs(other: FirmwareVersion): Boolean = major == other.major && minor == other.minor && patch == other.patch && build == other.build
 
     override fun toString(): String = "$major.$minor.$patch (build $build, $channel)"
 
     companion object {
-        fun decode(reader: PayloadReader): FirmwareVersion = FirmwareVersion(
-            major = reader.byte(),
-            minor = reader.byte(),
-            patch = reader.byte(),
-            build = reader.u16(),
-            channel = reader.string1(),
-        )
+        fun decode(reader: PayloadReader): FirmwareVersion =
+            FirmwareVersion(
+                major = reader.byte(),
+                minor = reader.byte(),
+                patch = reader.byte(),
+                build = reader.u16(),
+                channel = reader.string1(),
+            )
     }
 }
 
 /** 读取设备信息，payload 为空。 */
 class GetDeviceInfoRequest : DeviceRequest() {
-
     override val command: CommandType = CommandType.GET_DEVICE_INFO
 
     override fun encodeBody(writer: PayloadWriter) = Unit
@@ -68,7 +67,6 @@ class DeviceInfoResponse(
     val hardwareVersion: String,
     val firmwareVersion: FirmwareVersion,
 ) : DeviceResponse() {
-
     override val command: CommandType = CommandType.GET_DEVICE_INFO
 
     override val status: DeviceStatus = status
@@ -84,7 +82,6 @@ class DeviceInfoResponse(
 
 /** 读取电量，payload 为空。 */
 class GetBatteryRequest : DeviceRequest() {
-
     override val command: CommandType = CommandType.GET_BATTERY
 
     override fun encodeBody(writer: PayloadWriter) = Unit
@@ -101,7 +98,6 @@ class BatteryResponse(
     val charging: Boolean,
     val voltageMillivolts: Int,
 ) : DeviceResponse() {
-
     init {
         require(percent in 0..100) { "电量百分比超出范围: $percent" }
         require(voltageMillivolts in 0..0xFFFF) { "电压毫伏值超出范围: $voltageMillivolts" }
@@ -120,7 +116,6 @@ class BatteryResponse(
 
 /** 读取固件版本，payload 为空。 */
 class GetFirmwareVersionRequest : DeviceRequest() {
-
     override val command: CommandType = CommandType.GET_FIRMWARE_VERSION
 
     override fun encodeBody(writer: PayloadWriter) = Unit
@@ -131,7 +126,6 @@ class FirmwareVersionResponse(
     status: DeviceStatus,
     val version: FirmwareVersion,
 ) : DeviceResponse() {
-
     override val command: CommandType = CommandType.GET_FIRMWARE_VERSION
 
     override val status: DeviceStatus = status
@@ -150,7 +144,6 @@ class SetTimeRequest(
     val epochSeconds: Long,
     val timezoneOffsetMinutes: Int,
 ) : DeviceRequest() {
-
     init {
         require(epochSeconds in 0..0xFFFFFFFFL) { "epochSeconds 超出范围: $epochSeconds" }
         require(timezoneOffsetMinutes in -720..840) { "时区偏移超出范围: $timezoneOffsetMinutes" }
@@ -169,7 +162,6 @@ class SetTimeResponse(
     status: DeviceStatus,
     val appliedEpochSeconds: Long,
 ) : DeviceResponse() {
-
     override val command: CommandType = CommandType.SET_TIME
 
     override val status: DeviceStatus = status
@@ -181,7 +173,6 @@ class SetTimeResponse(
 
 /** 读取设备时间，payload 为空。 */
 class GetTimeRequest : DeviceRequest() {
-
     override val command: CommandType = CommandType.GET_TIME
 
     override fun encodeBody(writer: PayloadWriter) = Unit
@@ -193,7 +184,6 @@ class TimeResponse(
     val epochSeconds: Long,
     val timezoneOffsetMinutes: Int,
 ) : DeviceResponse() {
-
     override val command: CommandType = CommandType.GET_TIME
 
     override val status: DeviceStatus = status

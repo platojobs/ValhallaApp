@@ -27,19 +27,21 @@ data class AppSettings(
     val rssiSubscriptionEnabled: Boolean = DEFAULT_RSSI_SUBSCRIPTION_ENABLED,
     val rssiSamplePeriodSeconds: Int = DEFAULT_RSSI_SAMPLE_PERIOD_SECONDS,
 ) {
-
     /** 转换为导出选项；构造前再夹取一次，避免边界外的持久化值导致构造异常。 */
-    fun exportOptions(): PacketLogExportOptions = PacketLogExportOptions(
-        maxEntries = exportEntries.coerceIn(
-            PacketLogExportOptions.MIN_ENTRIES,
-            PacketLogExportOptions.MAX_ENTRIES,
-        ),
-        maxBytes = (exportBytesKb * 1024).coerceIn(
-            PacketLogExportOptions.MIN_BYTES,
-            PacketLogExportOptions.MAX_BYTES,
-        ),
-        maxHexCharsPerEntry = exportHexChars.coerceIn(1, PacketLogExportOptions.MAX_HEX_CHARS),
-    )
+    fun exportOptions(): PacketLogExportOptions =
+        PacketLogExportOptions(
+            maxEntries =
+                exportEntries.coerceIn(
+                    PacketLogExportOptions.MIN_ENTRIES,
+                    PacketLogExportOptions.MAX_ENTRIES,
+                ),
+            maxBytes =
+                (exportBytesKb * 1024).coerceIn(
+                    PacketLogExportOptions.MIN_BYTES,
+                    PacketLogExportOptions.MAX_BYTES,
+                ),
+            maxHexCharsPerEntry = exportHexChars.coerceIn(1, PacketLogExportOptions.MAX_HEX_CHARS),
+        )
 
     companion object {
         const val DEFAULT_RECONNECT_ATTEMPTS = 5
@@ -79,26 +81,21 @@ data class AppSettings(
         /** 默认值：5 次重连、30 秒封顶、500 条日志、200 条导出 / 512 KiB。 */
         val DEFAULTS = AppSettings()
 
-        fun isValidReconnectAttempts(value: Int): Boolean =
-            value in MIN_RECONNECT_ATTEMPTS..MAX_RECONNECT_ATTEMPTS
+        fun isValidReconnectAttempts(value: Int): Boolean = value in MIN_RECONNECT_ATTEMPTS..MAX_RECONNECT_ATTEMPTS
 
-        fun isValidReconnectMaxDelaySeconds(value: Int): Boolean =
-            value in MIN_RECONNECT_MAX_DELAY_SECONDS..MAX_RECONNECT_MAX_DELAY_SECONDS
+        fun isValidReconnectMaxDelaySeconds(value: Int): Boolean = value in MIN_RECONNECT_MAX_DELAY_SECONDS..MAX_RECONNECT_MAX_DELAY_SECONDS
 
         fun isValidLogCapacity(value: Int): Boolean = value in MIN_LOG_CAPACITY..MAX_LOG_CAPACITY
 
-        fun isValidExportEntries(value: Int): Boolean =
-            value in PacketLogExportOptions.MIN_ENTRIES..PacketLogExportOptions.MAX_ENTRIES
+        fun isValidExportEntries(value: Int): Boolean = value in PacketLogExportOptions.MIN_ENTRIES..PacketLogExportOptions.MAX_ENTRIES
 
         fun isValidExportBytesKb(value: Int): Boolean = value in MIN_EXPORT_BYTES_KB..MAX_EXPORT_BYTES_KB
 
         fun isValidExportHexChars(value: Int): Boolean = value in 1..PacketLogExportOptions.MAX_HEX_CHARS
 
-        fun isValidLowBatteryThreshold(value: Int): Boolean =
-            value in MIN_LOW_BATTERY_THRESHOLD..MAX_LOW_BATTERY_THRESHOLD
+        fun isValidLowBatteryThreshold(value: Int): Boolean = value in MIN_LOW_BATTERY_THRESHOLD..MAX_LOW_BATTERY_THRESHOLD
 
-        fun isValidRssiSamplePeriodSeconds(value: Int): Boolean =
-            value in MIN_RSSI_SAMPLE_PERIOD_SECONDS..MAX_RSSI_SAMPLE_PERIOD_SECONDS
+        fun isValidRssiSamplePeriodSeconds(value: Int): Boolean = value in MIN_RSSI_SAMPLE_PERIOD_SECONDS..MAX_RSSI_SAMPLE_PERIOD_SECONDS
     }
 }
 
@@ -109,151 +106,202 @@ data class AppSettings(
  * 读取接口对损坏值一律回退默认值。
  */
 object AppSettingsRepository {
-
     fun load(store: AppSettingsStore): AppSettings {
         val defaults = AppSettings.DEFAULTS
         return AppSettings(
-            reconnectMaxAttempts = storedInt(
-                store = store,
-                key = SettingsKeys.RECONNECT_MAX_ATTEMPTS,
-                default = defaults.reconnectMaxAttempts,
-                valid = { AppSettings.isValidReconnectAttempts(it) },
-            ),
-            reconnectMaxDelaySeconds = storedInt(
-                store = store,
-                key = SettingsKeys.RECONNECT_MAX_DELAY_SECONDS,
-                default = defaults.reconnectMaxDelaySeconds,
-                valid = { AppSettings.isValidReconnectMaxDelaySeconds(it) },
-            ),
-            logCapacity = storedInt(
-                store = store,
-                key = SettingsKeys.LOG_CAPACITY,
-                default = defaults.logCapacity,
-                valid = { AppSettings.isValidLogCapacity(it) },
-            ),
-            exportEntries = storedInt(
-                store = store,
-                key = SettingsKeys.EXPORT_DEFAULT_ENTRIES,
-                default = defaults.exportEntries,
-                valid = { AppSettings.isValidExportEntries(it) },
-            ),
-            exportBytesKb = storedInt(
-                store = store,
-                key = SettingsKeys.EXPORT_DEFAULT_BYTES_KB,
-                default = defaults.exportBytesKb,
-                valid = { AppSettings.isValidExportBytesKb(it) },
-            ),
-            exportHexChars = storedInt(
-                store = store,
-                key = SettingsKeys.EXPORT_DEFAULT_HEX_CHARS,
-                default = defaults.exportHexChars,
-                valid = { AppSettings.isValidExportHexChars(it) },
-            ),
-            notifyMasterEnabled = storedBoolean(
-                store,
-                SettingsKeys.NOTIFY_MASTER_ENABLED,
-                defaults.notifyMasterEnabled,
-            ),
-            notifyOtaEnabled = storedBoolean(
-                store,
-                SettingsKeys.NOTIFY_OTA_ENABLED,
-                defaults.notifyOtaEnabled,
-            ),
-            notifyDisconnectEnabled = storedBoolean(
-                store,
-                SettingsKeys.NOTIFY_DISCONNECT_ENABLED,
-                defaults.notifyDisconnectEnabled,
-            ),
-            notifyLowBatteryEnabled = storedBoolean(
-                store,
-                SettingsKeys.NOTIFY_LOW_BATTERY_ENABLED,
-                defaults.notifyLowBatteryEnabled,
-            ),
-            notifyReconnectEnabled = storedBoolean(
-                store,
-                SettingsKeys.NOTIFY_RECONNECT_ENABLED,
-                defaults.notifyReconnectEnabled,
-            ),
-            notifyHealthEnabled = storedBoolean(
-                store,
-                SettingsKeys.NOTIFY_HEALTH_ENABLED,
-                defaults.notifyHealthEnabled,
-            ),
-            lowBatteryThreshold = storedInt(
-                store = store,
-                key = SettingsKeys.NOTIFY_LOW_BATTERY_THRESHOLD,
-                default = defaults.lowBatteryThreshold,
-                valid = { AppSettings.isValidLowBatteryThreshold(it) },
-            ),
-            rssiSubscriptionEnabled = storedBoolean(
-                store,
-                SettingsKeys.RSSI_SUBSCRIPTION_ENABLED,
-                defaults.rssiSubscriptionEnabled,
-            ),
-            rssiSamplePeriodSeconds = storedInt(
-                store = store,
-                key = SettingsKeys.RSSI_SAMPLE_PERIOD_SECONDS,
-                default = defaults.rssiSamplePeriodSeconds,
-                valid = { AppSettings.isValidRssiSamplePeriodSeconds(it) },
-            ),
+            reconnectMaxAttempts =
+                storedInt(
+                    store = store,
+                    key = SettingsKeys.RECONNECT_MAX_ATTEMPTS,
+                    default = defaults.reconnectMaxAttempts,
+                    valid = { AppSettings.isValidReconnectAttempts(it) },
+                ),
+            reconnectMaxDelaySeconds =
+                storedInt(
+                    store = store,
+                    key = SettingsKeys.RECONNECT_MAX_DELAY_SECONDS,
+                    default = defaults.reconnectMaxDelaySeconds,
+                    valid = { AppSettings.isValidReconnectMaxDelaySeconds(it) },
+                ),
+            logCapacity =
+                storedInt(
+                    store = store,
+                    key = SettingsKeys.LOG_CAPACITY,
+                    default = defaults.logCapacity,
+                    valid = { AppSettings.isValidLogCapacity(it) },
+                ),
+            exportEntries =
+                storedInt(
+                    store = store,
+                    key = SettingsKeys.EXPORT_DEFAULT_ENTRIES,
+                    default = defaults.exportEntries,
+                    valid = { AppSettings.isValidExportEntries(it) },
+                ),
+            exportBytesKb =
+                storedInt(
+                    store = store,
+                    key = SettingsKeys.EXPORT_DEFAULT_BYTES_KB,
+                    default = defaults.exportBytesKb,
+                    valid = { AppSettings.isValidExportBytesKb(it) },
+                ),
+            exportHexChars =
+                storedInt(
+                    store = store,
+                    key = SettingsKeys.EXPORT_DEFAULT_HEX_CHARS,
+                    default = defaults.exportHexChars,
+                    valid = { AppSettings.isValidExportHexChars(it) },
+                ),
+            notifyMasterEnabled =
+                storedBoolean(
+                    store,
+                    SettingsKeys.NOTIFY_MASTER_ENABLED,
+                    defaults.notifyMasterEnabled,
+                ),
+            notifyOtaEnabled =
+                storedBoolean(
+                    store,
+                    SettingsKeys.NOTIFY_OTA_ENABLED,
+                    defaults.notifyOtaEnabled,
+                ),
+            notifyDisconnectEnabled =
+                storedBoolean(
+                    store,
+                    SettingsKeys.NOTIFY_DISCONNECT_ENABLED,
+                    defaults.notifyDisconnectEnabled,
+                ),
+            notifyLowBatteryEnabled =
+                storedBoolean(
+                    store,
+                    SettingsKeys.NOTIFY_LOW_BATTERY_ENABLED,
+                    defaults.notifyLowBatteryEnabled,
+                ),
+            notifyReconnectEnabled =
+                storedBoolean(
+                    store,
+                    SettingsKeys.NOTIFY_RECONNECT_ENABLED,
+                    defaults.notifyReconnectEnabled,
+                ),
+            notifyHealthEnabled =
+                storedBoolean(
+                    store,
+                    SettingsKeys.NOTIFY_HEALTH_ENABLED,
+                    defaults.notifyHealthEnabled,
+                ),
+            lowBatteryThreshold =
+                storedInt(
+                    store = store,
+                    key = SettingsKeys.NOTIFY_LOW_BATTERY_THRESHOLD,
+                    default = defaults.lowBatteryThreshold,
+                    valid = { AppSettings.isValidLowBatteryThreshold(it) },
+                ),
+            rssiSubscriptionEnabled =
+                storedBoolean(
+                    store,
+                    SettingsKeys.RSSI_SUBSCRIPTION_ENABLED,
+                    defaults.rssiSubscriptionEnabled,
+                ),
+            rssiSamplePeriodSeconds =
+                storedInt(
+                    store = store,
+                    key = SettingsKeys.RSSI_SAMPLE_PERIOD_SECONDS,
+                    default = defaults.rssiSamplePeriodSeconds,
+                    valid = { AppSettings.isValidRssiSamplePeriodSeconds(it) },
+                ),
         )
     }
 
-    fun saveReconnectMaxAttempts(store: AppSettingsStore, value: Int): Boolean =
+    fun saveReconnectMaxAttempts(
+        store: AppSettingsStore,
+        value: Int,
+    ): Boolean =
         saveInt(store, SettingsKeys.RECONNECT_MAX_ATTEMPTS, value) {
             AppSettings.isValidReconnectAttempts(it)
         }
 
-    fun saveReconnectMaxDelaySeconds(store: AppSettingsStore, value: Int): Boolean =
+    fun saveReconnectMaxDelaySeconds(
+        store: AppSettingsStore,
+        value: Int,
+    ): Boolean =
         saveInt(store, SettingsKeys.RECONNECT_MAX_DELAY_SECONDS, value) {
             AppSettings.isValidReconnectMaxDelaySeconds(it)
         }
 
-    fun saveLogCapacity(store: AppSettingsStore, value: Int): Boolean =
-        saveInt(store, SettingsKeys.LOG_CAPACITY, value) { AppSettings.isValidLogCapacity(it) }
+    fun saveLogCapacity(
+        store: AppSettingsStore,
+        value: Int,
+    ): Boolean = saveInt(store, SettingsKeys.LOG_CAPACITY, value) { AppSettings.isValidLogCapacity(it) }
 
-    fun saveExportEntries(store: AppSettingsStore, value: Int): Boolean =
+    fun saveExportEntries(
+        store: AppSettingsStore,
+        value: Int,
+    ): Boolean =
         saveInt(store, SettingsKeys.EXPORT_DEFAULT_ENTRIES, value) {
             AppSettings.isValidExportEntries(it)
         }
 
-    fun saveExportBytesKb(store: AppSettingsStore, value: Int): Boolean =
+    fun saveExportBytesKb(
+        store: AppSettingsStore,
+        value: Int,
+    ): Boolean =
         saveInt(store, SettingsKeys.EXPORT_DEFAULT_BYTES_KB, value) {
             AppSettings.isValidExportBytesKb(it)
         }
 
-    fun saveExportHexChars(store: AppSettingsStore, value: Int): Boolean =
+    fun saveExportHexChars(
+        store: AppSettingsStore,
+        value: Int,
+    ): Boolean =
         saveInt(store, SettingsKeys.EXPORT_DEFAULT_HEX_CHARS, value) {
             AppSettings.isValidExportHexChars(it)
         }
 
-    fun saveNotifyMasterEnabled(store: AppSettingsStore, value: Boolean): Boolean =
-        saveBoolean(store, SettingsKeys.NOTIFY_MASTER_ENABLED, value)
+    fun saveNotifyMasterEnabled(
+        store: AppSettingsStore,
+        value: Boolean,
+    ): Boolean = saveBoolean(store, SettingsKeys.NOTIFY_MASTER_ENABLED, value)
 
-    fun saveNotifyOtaEnabled(store: AppSettingsStore, value: Boolean): Boolean =
-        saveBoolean(store, SettingsKeys.NOTIFY_OTA_ENABLED, value)
+    fun saveNotifyOtaEnabled(
+        store: AppSettingsStore,
+        value: Boolean,
+    ): Boolean = saveBoolean(store, SettingsKeys.NOTIFY_OTA_ENABLED, value)
 
-    fun saveNotifyDisconnectEnabled(store: AppSettingsStore, value: Boolean): Boolean =
-        saveBoolean(store, SettingsKeys.NOTIFY_DISCONNECT_ENABLED, value)
+    fun saveNotifyDisconnectEnabled(
+        store: AppSettingsStore,
+        value: Boolean,
+    ): Boolean = saveBoolean(store, SettingsKeys.NOTIFY_DISCONNECT_ENABLED, value)
 
-    fun saveNotifyLowBatteryEnabled(store: AppSettingsStore, value: Boolean): Boolean =
-        saveBoolean(store, SettingsKeys.NOTIFY_LOW_BATTERY_ENABLED, value)
+    fun saveNotifyLowBatteryEnabled(
+        store: AppSettingsStore,
+        value: Boolean,
+    ): Boolean = saveBoolean(store, SettingsKeys.NOTIFY_LOW_BATTERY_ENABLED, value)
 
-    fun saveNotifyReconnectEnabled(store: AppSettingsStore, value: Boolean): Boolean =
-        saveBoolean(store, SettingsKeys.NOTIFY_RECONNECT_ENABLED, value)
+    fun saveNotifyReconnectEnabled(
+        store: AppSettingsStore,
+        value: Boolean,
+    ): Boolean = saveBoolean(store, SettingsKeys.NOTIFY_RECONNECT_ENABLED, value)
 
-    fun saveNotifyHealthEnabled(store: AppSettingsStore, value: Boolean): Boolean =
-        saveBoolean(store, SettingsKeys.NOTIFY_HEALTH_ENABLED, value)
+    fun saveNotifyHealthEnabled(
+        store: AppSettingsStore,
+        value: Boolean,
+    ): Boolean = saveBoolean(store, SettingsKeys.NOTIFY_HEALTH_ENABLED, value)
 
-    fun saveRssiSubscriptionEnabled(store: AppSettingsStore, value: Boolean): Boolean =
-        saveBoolean(store, SettingsKeys.RSSI_SUBSCRIPTION_ENABLED, value)
+    fun saveRssiSubscriptionEnabled(
+        store: AppSettingsStore,
+        value: Boolean,
+    ): Boolean = saveBoolean(store, SettingsKeys.RSSI_SUBSCRIPTION_ENABLED, value)
 
-    fun saveRssiSamplePeriodSeconds(store: AppSettingsStore, value: Int): Boolean =
+    fun saveRssiSamplePeriodSeconds(
+        store: AppSettingsStore,
+        value: Int,
+    ): Boolean =
         saveInt(store, SettingsKeys.RSSI_SAMPLE_PERIOD_SECONDS, value) {
             AppSettings.isValidRssiSamplePeriodSeconds(it)
         }
 
-    fun saveLowBatteryThreshold(store: AppSettingsStore, value: Int): Boolean =
+    fun saveLowBatteryThreshold(
+        store: AppSettingsStore,
+        value: Int,
+    ): Boolean =
         saveInt(store, SettingsKeys.NOTIFY_LOW_BATTERY_THRESHOLD, value) {
             AppSettings.isValidLowBatteryThreshold(it)
         }
@@ -279,10 +327,12 @@ object AppSettingsRepository {
         ).forEach { store.write(it, null) }
     }
 
-    fun isOnboardingCompleted(store: AppSettingsStore): Boolean =
-        store.read(SettingsKeys.ONBOARDING_COMPLETED)?.toBooleanStrictOrNull() ?: false
+    fun isOnboardingCompleted(store: AppSettingsStore): Boolean = store.read(SettingsKeys.ONBOARDING_COMPLETED)?.toBooleanStrictOrNull() ?: false
 
-    fun setOnboardingCompleted(store: AppSettingsStore, completed: Boolean) {
+    fun setOnboardingCompleted(
+        store: AppSettingsStore,
+        completed: Boolean,
+    ) {
         store.write(SettingsKeys.ONBOARDING_COMPLETED, completed.toString())
     }
 
@@ -296,10 +346,17 @@ object AppSettingsRepository {
         return if (valid(raw)) raw else default
     }
 
-    private fun storedBoolean(store: AppSettingsStore, key: String, default: Boolean): Boolean =
-        store.read(key)?.trim()?.toBooleanStrictOrNull() ?: default
+    private fun storedBoolean(
+        store: AppSettingsStore,
+        key: String,
+        default: Boolean,
+    ): Boolean = store.read(key)?.trim()?.toBooleanStrictOrNull() ?: default
 
-    private fun saveBoolean(store: AppSettingsStore, key: String, value: Boolean): Boolean {
+    private fun saveBoolean(
+        store: AppSettingsStore,
+        key: String,
+        value: Boolean,
+    ): Boolean {
         store.write(key, value.toString())
         return true
     }

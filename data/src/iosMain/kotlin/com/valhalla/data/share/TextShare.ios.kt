@@ -20,8 +20,7 @@ import platform.UIKit.popoverPresentationController
 actual fun createTextSharer(): TextSharer = IosTextSharer()
 
 @Suppress("UNUSED_PARAMETER")
-actual fun currentTimeZoneOffsetMinutes(epochMillis: Long): Int =
-    NSTimeZone.localTimeZone.secondsFromGMTForDate(NSDate()).toInt() / 60
+actual fun currentTimeZoneOffsetMinutes(epochMillis: Long): Int = NSTimeZone.localTimeZone.secondsFromGMTForDate(NSDate()).toInt() / 60
 
 /**
  * 先写入临时目录，再把文件 URL 交给 `UIActivityViewController`。
@@ -29,27 +28,31 @@ actual fun currentTimeZoneOffsetMinutes(epochMillis: Long): Int =
  */
 @OptIn(ExperimentalForeignApi::class)
 private class IosTextSharer : TextSharer {
-
     override suspend fun share(payload: ShareableText): ShareResult {
-        val presenter = topViewController()
-            ?: return ShareResult(ShareStatus.UNAVAILABLE, "未找到可展示分享面板的页面")
+        val presenter =
+            topViewController()
+                ?: return ShareResult(ShareStatus.UNAVAILABLE, "未找到可展示分享面板的页面")
         val path = NSTemporaryDirectory().trimEnd('/') + "/" + payload.fileName
         val written = writeTextFile(payload.content, path)
         if (!written) {
             return ShareResult(ShareStatus.FAILED, "写入临时文件失败")
         }
         val url = NSURL.fileURLWithPath(path)
-        val controller = UIActivityViewController(
-            activityItems = listOf(url),
-            applicationActivities = null,
-        )
+        val controller =
+            UIActivityViewController(
+                activityItems = listOf(url),
+                applicationActivities = null,
+            )
         configurePopover(controller.popoverPresentationController, presenter)
         presenter.presentViewController(controller, animated = true, completion = null)
         return ShareResult(ShareStatus.SHARED)
     }
 
     /** iPad 上分享面板以 popover 呈现，缺少锚点会崩溃；这里以页面中心作为锚点。 */
-    private fun configurePopover(popover: UIPopoverPresentationController?, presenter: UIViewController) {
+    private fun configurePopover(
+        popover: UIPopoverPresentationController?,
+        presenter: UIViewController,
+    ) {
         if (popover == null) return
         popover.sourceView = presenter.view
         popover.sourceRect = presenter.view.bounds
@@ -63,15 +66,19 @@ private class IosTextSharer : TextSharer {
  * 因此走字节数组 pin 到 NSData。
  */
 @OptIn(ExperimentalForeignApi::class)
-private fun writeTextFile(content: String, path: String): Boolean {
+private fun writeTextFile(
+    content: String,
+    path: String,
+): Boolean {
     val bytes = content.encodeToByteArray()
-    val data = if (bytes.isEmpty()) {
-        NSData()
-    } else {
-        bytes.usePinned { pinned ->
-            NSData.dataWithBytes(pinned.addressOf(0), bytes.size.toULong())
+    val data =
+        if (bytes.isEmpty()) {
+            NSData()
+        } else {
+            bytes.usePinned { pinned ->
+                NSData.dataWithBytes(pinned.addressOf(0), bytes.size.toULong())
+            }
         }
-    }
     return data.writeToFile(path, atomically = true)
 }
 

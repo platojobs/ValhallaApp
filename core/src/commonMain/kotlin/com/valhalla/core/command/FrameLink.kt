@@ -14,7 +14,6 @@ import kotlinx.coroutines.flow.Flow
  * 实现方（BLE 适配层）需保证 [send] 内部对写入串行化，避免并发写导致 GATT 忙。
  */
 interface FrameLink {
-
     /** 设备上行帧流，应至少包含所有应答帧与通知帧。 */
     val incoming: Flow<Frame>
 

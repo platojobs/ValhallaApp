@@ -30,7 +30,6 @@ class AutoReconnectController(
     private val delayMillis: suspend (Long) -> Unit = { delay(it) },
     private val onError: (Throwable) -> Unit = {},
 ) {
-
     private val scheduler = ReconnectScheduler(policy)
     private val mutableState = MutableStateFlow(ReconnectState())
     val state: StateFlow<ReconnectState> = mutableState.asStateFlow()
@@ -115,13 +114,14 @@ class AutoReconnectController(
             if (!scheduler.beginAttempt()) return
             publish()
 
-            val connection = try {
-                attemptConnect()
-            } catch (cancellation: CancellationException) {
-                throw cancellation
-            } catch (_: Throwable) {
-                null
-            }
+            val connection =
+                try {
+                    attemptConnect()
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
+                } catch (_: Throwable) {
+                    null
+                }
 
             if (!isBluetoothOn()) {
                 scheduler.onBluetoothStateChanged(false)

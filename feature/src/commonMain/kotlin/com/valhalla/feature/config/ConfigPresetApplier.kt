@@ -24,8 +24,9 @@ data class PresetApplyResult(
     val errorCode: String? = null,
     val detail: String? = null,
 ) {
-    val succeeded: Boolean get() = status == PresetApplyStatus.WRITTEN ||
-        status == PresetApplyStatus.ALREADY_TARGET
+    val succeeded: Boolean get() =
+        status == PresetApplyStatus.WRITTEN ||
+            status == PresetApplyStatus.ALREADY_TARGET
 }
 
 /** 一次预设应用的结果；部分失败不会抛出。 */
@@ -33,7 +34,6 @@ data class PresetApplyReport(
     val results: List<PresetApplyResult>,
     val cancelled: Boolean = false,
 ) {
-
     val writtenCount: Int get() = results.count { it.status == PresetApplyStatus.WRITTEN }
 
     val alreadyCount: Int get() = results.count { it.status == PresetApplyStatus.ALREADY_TARGET }
@@ -57,61 +57,69 @@ class ConfigPresetApplier(
     private val dispatcher: ConcurrentCommandDispatcher,
     private val catalog: ConfigCatalog = ConfigCatalog,
 ) {
-
     suspend fun apply(diffs: List<PresetFieldDiff>): PresetApplyReport {
         val results = mutableListOf<PresetApplyResult>()
         for (diff in diffs) {
             when (diff.status) {
-                PresetFieldStatus.UNSUPPORTED -> results += PresetApplyResult(
-                    key = diff.key,
-                    status = PresetApplyStatus.SKIPPED,
-                    detail = diff.reason,
-                )
+                PresetFieldStatus.UNSUPPORTED ->
+                    results +=
+                        PresetApplyResult(
+                            key = diff.key,
+                            status = PresetApplyStatus.SKIPPED,
+                            detail = diff.reason,
+                        )
 
-                PresetFieldStatus.ALREADY_TARGET -> results += PresetApplyResult(
-                    key = diff.key,
-                    status = PresetApplyStatus.ALREADY_TARGET,
-                )
+                PresetFieldStatus.ALREADY_TARGET ->
+                    results +=
+                        PresetApplyResult(
+                            key = diff.key,
+                            status = PresetApplyStatus.ALREADY_TARGET,
+                        )
 
                 PresetFieldStatus.WILL_CHANGE -> {
                     val spec = catalog.find(diff.key)
                     val validation = if (spec == null) null else catalog.validate(spec, diff.targetValue)
                     if (validation !is ConfigValidation.Valid) {
-                        results += PresetApplyResult(
-                            key = diff.key,
-                            status = PresetApplyStatus.SKIPPED,
-                            detail = (validation as? ConfigValidation.Invalid)?.message
-                                ?: "未知配置键",
-                        )
+                        results +=
+                            PresetApplyResult(
+                                key = diff.key,
+                                status = PresetApplyStatus.SKIPPED,
+                                detail =
+                                    (validation as? ConfigValidation.Invalid)?.message
+                                        ?: "未知配置键",
+                            )
                         continue
                     }
                     try {
                         val response = dispatcher.execute(SetConfigRequest(diff.key, validation.bytes))
                         if (response !is SetConfigResponse) {
-                            throw IllegalStateException("写配置应答类型异常: ${response::class.simpleName}")
+                            error("写配置应答类型异常: ${response::class.simpleName}")
                         }
                         results += PresetApplyResult(diff.key, PresetApplyStatus.WRITTEN)
                     } catch (cancellation: CancellationException) {
                         throw cancellation
                     } catch (rejected: CommandFailure.DeviceRejected) {
-                        results += PresetApplyResult(
-                            key = diff.key,
-                            status = PresetApplyStatus.FAILED,
-                            errorCode = "0x${rejected.status.code.toString(16).uppercase().padStart(2, '0')}",
-                            detail = "${rejected.status.name}: ${rejected.status.describe()}",
-                        )
+                        results +=
+                            PresetApplyResult(
+                                key = diff.key,
+                                status = PresetApplyStatus.FAILED,
+                                errorCode = "0x${rejected.status.code.toString(16).uppercase().padStart(2, '0')}",
+                                detail = "${rejected.status.name}: ${rejected.status.describe()}",
+                            )
                     } catch (failure: CommandFailure) {
-                        results += PresetApplyResult(
-                            key = diff.key,
-                            status = PresetApplyStatus.FAILED,
-                            detail = failure.message,
-                        )
+                        results +=
+                            PresetApplyResult(
+                                key = diff.key,
+                                status = PresetApplyStatus.FAILED,
+                                detail = failure.message,
+                            )
                     } catch (error: Throwable) {
-                        results += PresetApplyResult(
-                            key = diff.key,
-                            status = PresetApplyStatus.FAILED,
-                            detail = error.message,
-                        )
+                        results +=
+                            PresetApplyResult(
+                                key = diff.key,
+                                status = PresetApplyStatus.FAILED,
+                                detail = error.message,
+                            )
                     }
                 }
             }

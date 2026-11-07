@@ -2,7 +2,6 @@ package com.valhalla.feature.ota
 
 import com.valhalla.core.ota.OtaQueue
 import com.valhalla.core.ota.OtaQueueItem
-import com.valhalla.core.ota.OtaQueueItemStatus
 import com.valhalla.core.ota.OtaQueueStage
 import com.valhalla.core.ota.OtaQueueSummary
 import com.valhalla.core.ota.OtaQueueTarget
@@ -16,7 +15,6 @@ import kotlinx.coroutines.launch
 
 /** 队列执行器返回的终态。 */
 sealed interface OtaQueueExecutionResult {
-
     data object Succeeded : OtaQueueExecutionResult
 
     data class Failed(
@@ -34,12 +32,13 @@ sealed interface OtaQueueExecutionResult {
         val checkpointRetained: Boolean,
     ) : OtaQueueExecutionResult
 
-    data class Skipped(val reason: String) : OtaQueueExecutionResult
+    data class Skipped(
+        val reason: String,
+    ) : OtaQueueExecutionResult
 }
 
 /** 单台设备升级的执行适配器；实现方负责预检、打开固件与调用 OtaController。 */
 interface OtaQueueExecutor {
-
     suspend fun execute(
         item: OtaQueueItem,
         progress: (OtaQueueStage, Float) -> Unit,
@@ -68,7 +67,6 @@ class OtaQueueController(
     private val scope: CoroutineScope,
     private val executor: OtaQueueExecutor,
 ) {
-
     private val mutableState = MutableStateFlow(OtaQueueSnapshot())
     val state: StateFlow<OtaQueueSnapshot> = mutableState.asStateFlow()
 
@@ -131,24 +129,25 @@ class OtaQueueController(
                 queue.markRunning(next.target.deviceId)
                 publish()
 
-                val result = try {
-                    executor.execute(
-                        item = next,
-                        progress = { stage, progress ->
-                            queue.updateProgress(next.target.deviceId, stage, progress)
-                            publish()
-                        },
-                        pauseRequested = { queue.pauseRequested },
-                        cancelRequested = { cancelCurrentRequested },
-                    )
-                } catch (cancellation: CancellationException) {
-                    throw cancellation
-                } catch (error: Throwable) {
-                    OtaQueueExecutionResult.Failed(
-                        reason = error.message ?: "queue.execution_error",
-                        checkpointRetained = false,
-                    )
-                }
+                val result =
+                    try {
+                        executor.execute(
+                            item = next,
+                            progress = { stage, progress ->
+                                queue.updateProgress(next.target.deviceId, stage, progress)
+                                publish()
+                            },
+                            pauseRequested = { queue.pauseRequested },
+                            cancelRequested = { cancelCurrentRequested },
+                        )
+                    } catch (cancellation: CancellationException) {
+                        throw cancellation
+                    } catch (error: Throwable) {
+                        OtaQueueExecutionResult.Failed(
+                            reason = error.message ?: "queue.execution_error",
+                            checkpointRetained = false,
+                        )
+                    }
 
                 when (result) {
                     is OtaQueueExecutionResult.Succeeded ->
@@ -193,11 +192,12 @@ class OtaQueueController(
     }
 
     private fun publish() {
-        mutableState.value = OtaQueueSnapshot(
-            items = queue.items,
-            running = job?.isActive == true,
-            pauseRequested = queue.pauseRequested,
-            currentDeviceId = currentDeviceId,
-        )
+        mutableState.value =
+            OtaQueueSnapshot(
+                items = queue.items,
+                running = job?.isActive == true,
+                pauseRequested = queue.pauseRequested,
+                currentDeviceId = currentDeviceId,
+            )
     }
 }

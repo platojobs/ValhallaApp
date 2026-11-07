@@ -8,6 +8,9 @@ import com.valhalla.core.firmware.FirmwareException
 import com.valhalla.core.firmware.FirmwarePackage
 import com.valhalla.core.firmware.OtaCheckpointStore
 import com.valhalla.core.firmware.OtaResumePoint
+import com.valhalla.core.profile.DeviceProfileRepository
+import com.valhalla.core.profile.OtaHistoryRecord
+import com.valhalla.core.profile.OtaOutcome
 import com.valhalla.core.protocol.Crc16
 import com.valhalla.core.protocol.message.AbortOtaRequest
 import com.valhalla.core.protocol.message.DeviceStatus
@@ -21,9 +24,6 @@ import com.valhalla.core.protocol.message.OtaProgressNotification
 import com.valhalla.core.protocol.message.OtaStage
 import com.valhalla.core.protocol.message.StartOtaRequest
 import com.valhalla.core.protocol.message.StartOtaResponse
-import com.valhalla.core.profile.DeviceProfileRepository
-import com.valhalla.core.profile.OtaHistoryRecord
-import com.valhalla.core.profile.OtaOutcome
 import com.valhalla.data.ble.BleException
 import com.valhalla.feature.FailureInfo
 import com.valhalla.feature.error.ErrorReporter
@@ -47,7 +47,6 @@ import kotlin.time.ExperimentalTime
 
 /** OTA 流程状态。 */
 sealed interface OtaState {
-
     data object Idle : OtaState
 
     data class Preparing(
@@ -164,7 +163,6 @@ class OtaController(
     /** 队列取消当前信号：与 [abort] 等价，但由队列外部触发。 */
     private val cancelSignal: () -> Boolean = { false },
 ) {
-
     private var pauseSignalProvider: () -> Boolean = pauseSignal
     private var cancelSignalProvider: () -> Boolean = cancelSignal
 
@@ -205,23 +203,27 @@ class OtaController(
      * 以内存 payload 执行一次升级（测试与兼容入口）。
      * 传入的 [firmware] 视为已经剥离文件头的 payload。
      */
-    suspend fun start(firmware: ByteArray, resumeFrom: OtaResumePoint? = null): OtaState = startMutex.withLock {
-        prepareRun()
-        if (firmware.isEmpty()) {
-            return failed(UiMessage(StringKey.OTA_REASON_EMPTY_FIRMWARE), 0, 0)
-        }
+    suspend fun start(
+        firmware: ByteArray,
+        resumeFrom: OtaResumePoint? = null,
+    ): OtaState =
+        startMutex.withLock {
+            prepareRun()
+            if (firmware.isEmpty()) {
+                return failed(UiMessage(StringKey.OTA_REASON_EMPTY_FIRMWARE), 0, 0)
+            }
 
-        val crc = Crc16.ccittFalse(firmware)
-        val crc32 = Crc32.compute(firmware)
-        runTransfer(
-            totalBytes = firmware.size.toLong(),
-            crc16 = crc,
-            crc32 = crc32,
-            version = firmwareVersion,
-            resumeFrom = resumeFrom,
-            read = { offset, length -> firmware.copyOfRange(offset.toInt(), offset.toInt() + length) },
-        )
-    }
+            val crc = Crc16.ccittFalse(firmware)
+            val crc32 = Crc32.compute(firmware)
+            runTransfer(
+                totalBytes = firmware.size.toLong(),
+                crc16 = crc,
+                crc32 = crc32,
+                version = firmwareVersion,
+                resumeFrom = resumeFrom,
+                read = { offset, length -> firmware.copyOfRange(offset.toInt(), offset.toInt() + length) },
+            )
+        }
 
     /**
      * 从已解析的固件包执行升级：先流式计算协议层 CRC-16，再按 payload 偏移分片读取。
@@ -236,46 +238,48 @@ class OtaController(
         firmware: FirmwarePackage,
         resumeFrom: OtaResumePoint? = null,
         knownCrc16: Int? = null,
-    ): OtaState = startMutex.withLock {
-        if (knownCrc16 != null) {
-            require(knownCrc16 in 0..0xFFFF) { "knownCrc16 超出 u16 范围: $knownCrc16" }
-        }
-        prepareRun()
-        if (firmware.payloadLength <= 0 || firmware.payloadLength > Int.MAX_VALUE.toLong()) {
-            return failed(
-                UiMessage(
-                    StringKey.OTA_REASON_INVALID_LENGTH,
-                    mapOf("length" to firmware.payloadLength.toString()),
-                ),
-                0,
-                0,
+    ): OtaState =
+        startMutex.withLock {
+            if (knownCrc16 != null) {
+                require(knownCrc16 in 0..0xFFFF) { "knownCrc16 超出 u16 范围: $knownCrc16" }
+            }
+            prepareRun()
+            if (firmware.payloadLength <= 0 || firmware.payloadLength > Int.MAX_VALUE.toLong()) {
+                return failed(
+                    UiMessage(
+                        StringKey.OTA_REASON_INVALID_LENGTH,
+                        mapOf("length" to firmware.payloadLength.toString()),
+                    ),
+                    0,
+                    0,
+                )
+            }
+
+            val crc =
+                knownCrc16 ?: try {
+                    computeCrc16(firmware)
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
+                } catch (error: FirmwareException) {
+                    return failed(
+                        UiMessage(
+                            StringKey.FIRMWARE_LOAD_FAILED,
+                            mapOf("detail" to (error.message ?: StringKey.OTA_REASON_FIRMWARE_READ.name)),
+                        ),
+                        0,
+                        0,
+                    )
+                }
+
+            runTransfer(
+                totalBytes = firmware.payloadLength,
+                crc16 = crc,
+                crc32 = firmware.payloadCrc32,
+                version = firmware.version,
+                resumeFrom = resumeFrom,
+                read = { offset, length -> firmware.readPayload(offset, length) },
             )
         }
-
-        val crc = knownCrc16 ?: try {
-            computeCrc16(firmware)
-        } catch (cancellation: CancellationException) {
-            throw cancellation
-        } catch (error: FirmwareException) {
-            return failed(
-                UiMessage(
-                    StringKey.FIRMWARE_LOAD_FAILED,
-                    mapOf("detail" to (error.message ?: StringKey.OTA_REASON_FIRMWARE_READ.name)),
-                ),
-                0,
-                0,
-            )
-        }
-
-        runTransfer(
-            totalBytes = firmware.payloadLength,
-            crc16 = crc,
-            crc32 = firmware.payloadCrc32,
-            version = firmware.version,
-            resumeFrom = resumeFrom,
-            read = { offset, length -> firmware.readPayload(offset, length) },
-        )
-    }
 
     /**
      * 中止升级：置位中止标记并尽力发送 `ABORT_OTA`。
@@ -293,11 +297,12 @@ class OtaController(
         }
 
         abortMutex.withLock { abortReason = reason }
-        val aborted = OtaState.Aborted(
-            reason = reason.name,
-            sentBytes = current.sentBytes(),
-            totalBytes = current.totalBytes(),
-        )
+        val aborted =
+            OtaState.Aborted(
+                reason = reason.name,
+                sentBytes = current.sentBytes(),
+                totalBytes = current.totalBytes(),
+            )
         mutableState.value = aborted
 
         try {
@@ -320,8 +325,7 @@ class OtaController(
      * 控制器随后会本地校验断点固件身份，再将其作为 `START_OTA` 续传扩展发送；
      * 最终起始偏移以设备应答中的 `acceptedOffset` 为准。
      */
-    suspend fun resume(firmware: ByteArray): OtaState =
-        start(firmware, resumeFrom = lastResumePoint ?: checkpointStore?.load())
+    suspend fun resume(firmware: ByteArray): OtaState = start(firmware, resumeFrom = lastResumePoint ?: checkpointStore?.load())
 
     fun reset() {
         abortMutex.tryLock().let { locked ->
@@ -377,14 +381,15 @@ class OtaController(
 
         try {
             ensureLinkAlive()
-            val session = startSession(
-                totalBytes = totalBytes,
-                crc16 = crc16,
-                crc32 = crc32,
-                version = version,
-                requestedOffset = requestedOffset,
-                resumeSessionId = resumeFrom?.sessionId ?: 0,
-            )
+            val session =
+                startSession(
+                    totalBytes = totalBytes,
+                    crc16 = crc16,
+                    crc32 = crc32,
+                    version = version,
+                    requestedOffset = requestedOffset,
+                    resumeSessionId = resumeFrom?.sessionId ?: 0,
+                )
             sessionId = session.response.sessionId
             activeSessionId = sessionId
 
@@ -394,20 +399,22 @@ class OtaController(
             // 新会话一旦建立，旧会话的断点立即失效：按设备确认值立即落盘（或清除），
             // 避免在下一个 4 KiB 检查点之前崩溃时续到旧的高偏移。
             syncCheckpointAfterStart(sessionId, sent, total, crc16, crc32, version)
-            val fallbackReason = fallbackNote(
-                requestedOffset = requestedOffset,
-                acceptedOffset = sent,
-                deviceFallbackReason = session.fallbackReason,
-            ) ?: resumeGate.reason
+            val fallbackReason =
+                fallbackNote(
+                    requestedOffset = requestedOffset,
+                    acceptedOffset = sent,
+                    deviceFallbackReason = session.fallbackReason,
+                ) ?: resumeGate.reason
             if (sent > 0 || fallbackReason != null) {
-                mutableState.value = OtaState.Transferring(
-                    sentBytes = sent,
-                    totalBytes = total,
-                    crc16 = crc16,
-                    sessionId = sessionId,
-                    initialOffset = sent,
-                    resumeFallbackReason = fallbackReason,
-                )
+                mutableState.value =
+                    OtaState.Transferring(
+                        sentBytes = sent,
+                        totalBytes = total,
+                        crc16 = crc16,
+                        sessionId = sessionId,
+                        initialOffset = sent,
+                        resumeFallbackReason = fallbackReason,
+                    )
             }
 
             while (sent < total) {
@@ -422,21 +429,22 @@ class OtaController(
                 sent += length
                 chunks++
                 val current = mutableState.value
-                mutableState.value = if (current is OtaState.Transferring) {
-                    current.copy(
-                        sentBytes = sent,
-                        sessionId = sessionId,
-                        retransmissions = retransmissions,
-                    )
-                } else {
-                    OtaState.Transferring(
-                        sentBytes = sent,
-                        totalBytes = total,
-                        crc16 = crc16,
-                        sessionId = sessionId,
-                        retransmissions = retransmissions,
-                    )
-                }
+                mutableState.value =
+                    if (current is OtaState.Transferring) {
+                        current.copy(
+                            sentBytes = sent,
+                            sessionId = sessionId,
+                            retransmissions = retransmissions,
+                        )
+                    } else {
+                        OtaState.Transferring(
+                            sentBytes = sent,
+                            totalBytes = total,
+                            crc16 = crc16,
+                            sessionId = sessionId,
+                            retransmissions = retransmissions,
+                        )
+                    }
 
                 if (sent < total && sent - lastCheckpointBytes >= CHECKPOINT_INTERVAL_BYTES) {
                     saveCheckpoint(sessionId, sent, total, crc16, crc32, version)
@@ -454,27 +462,30 @@ class OtaController(
 
             checkAborted()
             ensureLinkAlive()
-            mutableState.value = OtaState.Verifying(
-                totalBytes = total,
-                crc16 = crc16,
-                sessionId = sessionId,
-                retransmissions = retransmissions,
-            )
-            val finishResponse = dispatcher.execute(
-                FinishOtaRequest(totalBytes = totalBytes, crc16 = crc16),
-            )
+            mutableState.value =
+                OtaState.Verifying(
+                    totalBytes = total,
+                    crc16 = crc16,
+                    sessionId = sessionId,
+                    retransmissions = retransmissions,
+                )
+            val finishResponse =
+                dispatcher.execute(
+                    FinishOtaRequest(totalBytes = totalBytes, crc16 = crc16),
+                )
             if (finishResponse !is FinishOtaResponse) {
                 error("unexpected OTA finish response: ${finishResponse::class.simpleName}")
             }
 
             clearCheckpointStore()
-            val done = OtaState.Succeeded(
-                totalBytes = total,
-                crc16 = crc16,
-                chunks = chunks,
-                retransmissions = retransmissions,
-                rebootRequired = finishResponse.rebootRequired,
-            )
+            val done =
+                OtaState.Succeeded(
+                    totalBytes = total,
+                    crc16 = crc16,
+                    chunks = chunks,
+                    retransmissions = retransmissions,
+                    rebootRequired = finishResponse.rebootRequired,
+                )
             mutableState.value = done
             recordOtaHistory(version, startedAt, OtaOutcome.SUCCEEDED, total, total)
             return done
@@ -504,23 +515,25 @@ class OtaController(
             )
             return state
         } catch (paused: OtaPausedException) {
-            val resumePoint = persistInterruptedCheckpoint(
-                sessionId = sessionId,
-                sentBytes = paused.sentBytes,
-                totalBytes = total,
-                crc16 = crc16,
-                crc32 = crc32,
-                version = version,
-                previous = resumeFrom,
-            )
+            val resumePoint =
+                persistInterruptedCheckpoint(
+                    sessionId = sessionId,
+                    sentBytes = paused.sentBytes,
+                    totalBytes = total,
+                    crc16 = crc16,
+                    crc32 = crc32,
+                    version = version,
+                    previous = resumeFrom,
+                )
             lastResumePoint = resumePoint
-            val state = OtaState.Paused(
-                sentBytes = paused.sentBytes,
-                totalBytes = total,
-                crc16 = crc16,
-                sessionId = sessionId,
-                checkpointSaved = resumePoint != null,
-            )
+            val state =
+                OtaState.Paused(
+                    sentBytes = paused.sentBytes,
+                    totalBytes = total,
+                    crc16 = crc16,
+                    sessionId = sessionId,
+                    checkpointSaved = resumePoint != null,
+                )
             mutableState.value = state
             recordOtaHistory(
                 version = version,
@@ -534,23 +547,25 @@ class OtaController(
         } catch (error: Throwable) {
             val info = error.toFailureInfo()
             val failureMessage = error.toOtaFailureMessage(info)
-            val resumePoint = persistInterruptedCheckpoint(
-                sessionId = sessionId,
-                sentBytes = sent,
-                totalBytes = total,
-                crc16 = crc16,
-                crc32 = crc32,
-                version = version,
-                previous = resumeFrom,
-            )
+            val resumePoint =
+                persistInterruptedCheckpoint(
+                    sessionId = sessionId,
+                    sentBytes = sent,
+                    totalBytes = total,
+                    crc16 = crc16,
+                    crc32 = crc32,
+                    version = version,
+                    previous = resumeFrom,
+                )
             lastResumePoint = resumePoint
-            val state = OtaState.Failed(
-                reason = failureMessage,
-                sentBytes = sent,
-                totalBytes = total,
-                status = info.status,
-                resumePoint = resumePoint,
-            )
+            val state =
+                OtaState.Failed(
+                    reason = failureMessage,
+                    sentBytes = sent,
+                    totalBytes = total,
+                    status = info.status,
+                    resumePoint = resumePoint,
+                )
             mutableState.value = state
             recordOtaHistory(
                 version = version,
@@ -569,7 +584,10 @@ class OtaController(
         }
     }
 
-    private suspend fun sendChunk(offset: Int, chunk: ByteArray) {
+    private suspend fun sendChunk(
+        offset: Int,
+        chunk: ByteArray,
+    ) {
         var attempt = 0
         while (true) {
             checkAborted()
@@ -602,27 +620,29 @@ class OtaController(
         }
     }
 
-    private fun isRetryable(error: Throwable): Boolean = when (error) {
-        is CommandFailure.InvalidResponse -> true
-        is CommandFailure.DeviceRejected -> error.status in RETRYABLE_STATUS
-        else -> false
-    }
+    private fun isRetryable(error: Throwable): Boolean =
+        when (error) {
+            is CommandFailure.InvalidResponse -> true
+            is CommandFailure.DeviceRejected -> error.status in RETRYABLE_STATUS
+            else -> false
+        }
 
     private fun startProgressCollector() {
         val scope = scope ?: return
         progressJob?.cancel()
-        progressJob = scope.launch {
-            try {
-                dispatcher.notifications
-                    .filterIsInstance<OtaProgressNotification>()
-                    .collect { notification -> applyProgress(notification) }
-            } catch (cancellation: CancellationException) {
-                throw cancellation
-            } catch (error: Throwable) {
-                // 进度通知只是 UI 增强，收集失败不应中断传输或让协程崩溃。
-                errorReporter?.record("ota-progress", error)
+        progressJob =
+            scope.launch {
+                try {
+                    dispatcher.notifications
+                        .filterIsInstance<OtaProgressNotification>()
+                        .collect { notification -> applyProgress(notification) }
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
+                } catch (error: Throwable) {
+                    // 进度通知只是 UI 增强，收集失败不应中断传输或让协程崩溃。
+                    errorReporter?.record("ota-progress", error)
+                }
             }
-        }
     }
 
     private fun applyProgress(notification: OtaProgressNotification) {
@@ -630,10 +650,11 @@ class OtaController(
         mutableState.update { current ->
             if (current is OtaState.Transferring) {
                 current.copy(
-                    sentBytes = maxOf(
-                        current.sentBytes,
-                        notification.receivedBytes.toInt().coerceIn(0, current.totalBytes),
-                    ),
+                    sentBytes =
+                        maxOf(
+                            current.sentBytes,
+                            notification.receivedBytes.toInt().coerceIn(0, current.totalBytes),
+                        ),
                     stage = notification.stage,
                 )
             } else {
@@ -664,29 +685,32 @@ class OtaController(
     ): StartSession {
         if (requestedOffset > 0) {
             try {
-                val response = executeStart(
-                    totalBytes = totalBytes,
-                    crc16 = crc16,
-                    version = version,
-                    resumeSessionId = resumeSessionId,
-                    resumeOffset = requestedOffset.toLong(),
-                    crc32 = crc32,
-                )
+                val response =
+                    executeStart(
+                        totalBytes = totalBytes,
+                        crc16 = crc16,
+                        version = version,
+                        resumeSessionId = resumeSessionId,
+                        resumeOffset = requestedOffset.toLong(),
+                        crc32 = crc32,
+                    )
                 return StartSession(response)
             } catch (error: CommandFailure.DeviceRejected) {
                 // 旧设备不识别尾部扩展，或设备侧续传上下文失效：回退为旧格式并从 0 开始。
-                val reason = UiMessage(
-                    StringKey.OTA_FALLBACK_REJECTED,
-                    mapOf("detail" to error.status.describe()),
-                )
-                val legacy = executeStart(
-                    totalBytes = totalBytes,
-                    crc16 = crc16,
-                    version = version,
-                    resumeSessionId = 0,
-                    resumeOffset = 0,
-                    crc32 = 0,
-                )
+                val reason =
+                    UiMessage(
+                        StringKey.OTA_FALLBACK_REJECTED,
+                        mapOf("detail" to error.status.describe()),
+                    )
+                val legacy =
+                    executeStart(
+                        totalBytes = totalBytes,
+                        crc16 = crc16,
+                        version = version,
+                        resumeSessionId = 0,
+                        resumeOffset = 0,
+                        crc32 = 0,
+                    )
                 return StartSession(legacy, reason)
             }
         }
@@ -710,17 +734,18 @@ class OtaController(
         resumeOffset: Long,
         crc32: Long,
     ): StartOtaResponse {
-        val response = dispatcher.execute(
-            StartOtaRequest(
-                totalBytes = totalBytes,
-                crc16 = crc16,
-                chunkSize = chunkSize,
-                firmwareVersion = version,
-                resumeSessionId = resumeSessionId,
-                resumeOffset = resumeOffset,
-                payloadCrc32 = crc32,
-            ),
-        )
+        val response =
+            dispatcher.execute(
+                StartOtaRequest(
+                    totalBytes = totalBytes,
+                    crc16 = crc16,
+                    chunkSize = chunkSize,
+                    firmwareVersion = version,
+                    resumeSessionId = resumeSessionId,
+                    resumeOffset = resumeOffset,
+                    payloadCrc32 = crc32,
+                ),
+            )
         return response as? StartOtaResponse
             ?: throw CommandFailure.InvalidResponse(
                 "unexpected OTA start response: ${response::class.simpleName}",
@@ -735,7 +760,11 @@ class OtaController(
      * - `accepted > requested`：设备声称的起点晚于本地请求，说明上下文错乱，直接失败；
      * - `0 <= accepted <= requested`：以设备为准，0 表示设备要求从头开始。
      */
-    private fun resolveStartOffset(requestedOffset: Int, acceptedOffset: Long, totalBytes: Int): Int {
+    private fun resolveStartOffset(
+        requestedOffset: Int,
+        acceptedOffset: Long,
+        totalBytes: Int,
+    ): Int {
         if (acceptedOffset >= totalBytes) {
             throw OtaValidationException(
                 UiMessage.of(
@@ -777,13 +806,14 @@ class OtaController(
         if (requestedOffset <= 0) return null
         return when {
             acceptedOffset == 0 -> UiMessage(StringKey.OTA_FALLBACK_NOT_ACCEPTED)
-            acceptedOffset < requestedOffset -> UiMessage(
-                StringKey.OTA_FALLBACK_LOWERED,
-                mapOf(
-                    "accepted" to acceptedOffset.toString(),
-                    "requested" to requestedOffset.toString(),
-                ),
-            )
+            acceptedOffset < requestedOffset ->
+                UiMessage(
+                    StringKey.OTA_FALLBACK_LOWERED,
+                    mapOf(
+                        "accepted" to acceptedOffset.toString(),
+                        "requested" to requestedOffset.toString(),
+                    ),
+                )
             else -> null
         }
     }
@@ -856,26 +886,31 @@ class OtaController(
     }
 
     /** 把传输失败翻译成可操作的提示；拒绝类失败优先展示设备状态码。 */
-    private fun Throwable.toOtaFailureMessage(failure: FailureInfo): UiMessage = when (this) {
-        is OtaValidationException -> uiMessage
-        is BleException -> UiMessage(StringKey.OTA_REASON_DISCONNECTED)
-        is FirmwareException.ReadFailure -> UiMessage(
-            StringKey.OTA_REASON_READ_FIRMWARE,
-            mapOf("offset" to offset.toString(), "length" to length.toString()),
-        )
-        is CommandFailure.Timeout -> UiMessage(
-            StringKey.OTA_REASON_TIMEOUT,
-            mapOf("attempts" to attempts.toString()),
-        )
-        is CommandFailure.TransportFailure -> UiMessage(
-            StringKey.OTA_REASON_TRANSPORT,
-            mapOf("attempts" to attempts.toString()),
-        )
-        else -> UiMessage(
-            StringKey.OTA_REASON_DEVICE_REJECTED,
-            nested = mapOf("detail" to (failure.statusUi ?: failure.ui)),
-        )
-    }
+    private fun Throwable.toOtaFailureMessage(failure: FailureInfo): UiMessage =
+        when (this) {
+            is OtaValidationException -> uiMessage
+            is BleException -> UiMessage(StringKey.OTA_REASON_DISCONNECTED)
+            is FirmwareException.ReadFailure ->
+                UiMessage(
+                    StringKey.OTA_REASON_READ_FIRMWARE,
+                    mapOf("offset" to offset.toString(), "length" to length.toString()),
+                )
+            is CommandFailure.Timeout ->
+                UiMessage(
+                    StringKey.OTA_REASON_TIMEOUT,
+                    mapOf("attempts" to attempts.toString()),
+                )
+            is CommandFailure.TransportFailure ->
+                UiMessage(
+                    StringKey.OTA_REASON_TRANSPORT,
+                    mapOf("attempts" to attempts.toString()),
+                )
+            else ->
+                UiMessage(
+                    StringKey.OTA_REASON_DEVICE_REJECTED,
+                    nested = mapOf("detail" to (failure.statusUi ?: failure.ui)),
+                )
+        }
 
     private fun saveCheckpoint(
         sessionId: Long,
@@ -906,16 +941,17 @@ class OtaController(
         runCatching {
             repository.recordOta(
                 deviceId = id,
-                record = OtaHistoryRecord(
-                    firmwareVersion = version.toString(),
-                    finishedAtEpochMillis = finishedAt,
-                    durationMillis = (finishedAt - startedAt).coerceAtLeast(0),
-                    outcome = outcome,
-                    errorCode = errorCode,
-                    detail = detail,
-                    sentBytes = sentBytes,
-                    totalBytes = totalBytes,
-                ),
+                record =
+                    OtaHistoryRecord(
+                        firmwareVersion = version.toString(),
+                        finishedAtEpochMillis = finishedAt,
+                        durationMillis = (finishedAt - startedAt).coerceAtLeast(0),
+                        outcome = outcome,
+                        errorCode = errorCode,
+                        detail = detail,
+                        sentBytes = sentBytes,
+                        totalBytes = totalBytes,
+                    ),
             )
         }
     }
@@ -931,25 +967,34 @@ class OtaController(
         crc16: Int,
         crc32: Long,
         version: FirmwareVersion,
-    ): OtaResumePoint? = OtaResumePoint(
-        sessionId = sessionId,
-        sentBytes = sentBytes,
-        totalBytes = totalBytes,
-        crc16 = crc16,
-        firmwareVersion = version,
-        crc32 = crc32,
-    ).takeIf { it.isValid() }
+    ): OtaResumePoint? =
+        OtaResumePoint(
+            sessionId = sessionId,
+            sentBytes = sentBytes,
+            totalBytes = totalBytes,
+            crc16 = crc16,
+            firmwareVersion = version,
+            crc32 = crc32,
+        ).takeIf { it.isValid() }
 
-    private fun failed(reason: UiMessage, sentBytes: Int, totalBytes: Int): OtaState.Failed {
+    private fun failed(
+        reason: UiMessage,
+        sentBytes: Int,
+        totalBytes: Int,
+    ): OtaState.Failed {
         val state = OtaState.Failed(reason, sentBytes, totalBytes)
         mutableState.value = state
         return state
     }
 
-    private class OtaAbortedException(val reason: OtaAbortReason) : Exception("OTA 已中止：${reason.name}")
+    private class OtaAbortedException(
+        val reason: OtaAbortReason,
+    ) : Exception("OTA 已中止：${reason.name}")
 
     /** 队列暂停信号在分片边界触发，携带已确认的字节数用于落盘断点。 */
-    private class OtaPausedException(val sentBytes: Int) : Exception("OTA 队列暂停")
+    private class OtaPausedException(
+        val sentBytes: Int,
+    ) : Exception("OTA 队列暂停")
 
     /** 一次 START_OTA 的结果；[fallbackReason] 非空表示续传被拒后回退为从头开始。 */
     private data class StartSession(
@@ -964,32 +1009,37 @@ class OtaController(
     )
 
     /** 续传偏移校验失败：直接携带可展示文案，避免上层再做字符串匹配。 */
-    private class OtaValidationException(val uiMessage: UiMessage) : Exception(uiMessage.key.name)
+    private class OtaValidationException(
+        val uiMessage: UiMessage,
+    ) : Exception(uiMessage.key.name)
 
-    private fun OtaState.sentBytes(): Int = when (this) {
-        is OtaState.Preparing -> 0
-        is OtaState.Transferring -> sentBytes
-        is OtaState.Verifying -> totalBytes
-        is OtaState.Paused -> sentBytes
-        else -> 0
-    }
+    private fun OtaState.sentBytes(): Int =
+        when (this) {
+            is OtaState.Preparing -> 0
+            is OtaState.Transferring -> sentBytes
+            is OtaState.Verifying -> totalBytes
+            is OtaState.Paused -> sentBytes
+            else -> 0
+        }
 
-    private fun OtaState.totalBytes(): Int = when (this) {
-        is OtaState.Preparing -> totalBytes
-        is OtaState.Transferring -> totalBytes
-        is OtaState.Verifying -> totalBytes
-        is OtaState.Paused -> totalBytes
-        else -> 0
-    }
+    private fun OtaState.totalBytes(): Int =
+        when (this) {
+            is OtaState.Preparing -> totalBytes
+            is OtaState.Transferring -> totalBytes
+            is OtaState.Verifying -> totalBytes
+            is OtaState.Paused -> totalBytes
+            else -> 0
+        }
 
     private companion object {
         const val CRC_CHUNK_SIZE: Int = 64 * 1024
         const val CHECKPOINT_INTERVAL_BYTES: Int = 4 * 1024
 
-        val RETRYABLE_STATUS = setOf(
-            DeviceStatus.BUSY,
-            DeviceStatus.CRC_MISMATCH,
-            DeviceStatus.INTERNAL_ERROR,
-        )
+        val RETRYABLE_STATUS =
+            setOf(
+                DeviceStatus.BUSY,
+                DeviceStatus.CRC_MISMATCH,
+                DeviceStatus.INTERNAL_ERROR,
+            )
     }
 }

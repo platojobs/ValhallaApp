@@ -8,11 +8,15 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
 class AppPreferencesTest {
-
     private class FakeSettingsStore : AppSettingsStore {
         val values = mutableMapOf<String, String?>()
+
         override fun read(key: String): String? = values[key]
-        override fun write(key: String, value: String?) {
+
+        override fun write(
+            key: String,
+            value: String?,
+        ) {
             values[key] = value
         }
     }

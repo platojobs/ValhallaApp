@@ -6,7 +6,6 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class ConfigCatalogTest {
-
     @Test
     fun `字符串按字节长度校验并拒绝空值`() {
         val spec = ConfigCatalog.find("device_name")!!
@@ -66,7 +65,11 @@ class ConfigCatalogTest {
 
     @Test
     fun `命令表可编辑键覆盖预期集合`() {
-        val editable = ConfigCatalog.keys.filter { it.editable }.map { it.key }.toSet()
+        val editable =
+            ConfigCatalog.keys
+                .filter { it.editable }
+                .map { it.key }
+                .toSet()
         assertEquals(setOf("device_name", "led_enabled", "sample_interval_ms", "tx_power_dbm"), editable)
     }
 }

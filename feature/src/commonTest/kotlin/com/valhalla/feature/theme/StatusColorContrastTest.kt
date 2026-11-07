@@ -14,8 +14,10 @@ import kotlin.test.assertTrue
  * 这是纯色计算，不依赖真机；实际渲染还受透明度/主题叠加影响，仍需真机目测。
  */
 class StatusColorContrastTest {
-
-    private fun contrast(foreground: Color, background: Color): Double {
+    private fun contrast(
+        foreground: Color,
+        background: Color,
+    ): Double {
         val a = foreground.luminance().toDouble()
         val b = background.luminance().toDouble()
         val lighter = max(a, b)

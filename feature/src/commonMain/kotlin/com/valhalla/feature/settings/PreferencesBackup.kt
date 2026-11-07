@@ -7,6 +7,9 @@ import com.valhalla.core.automation.AutomationRuleRepository
 import com.valhalla.core.automation.AutomationTrigger
 import com.valhalla.core.config.ConfigPreset
 import com.valhalla.core.config.ConfigPresetRepository
+import com.valhalla.core.storage.StorageKind
+import com.valhalla.core.storage.StorageMigrationStatus
+import com.valhalla.core.storage.StorageSchemaMigrator
 import com.valhalla.data.settings.AppSettingsStore
 import com.valhalla.data.settings.SettingsKeys
 import com.valhalla.feature.i18n.AppLanguageMode
@@ -58,61 +61,64 @@ data class PreferencesBackup(
     val automationRules: List<AutomationRule>,
     val onboardingCompleted: Boolean,
 ) {
-
     /** 导出 JSON；只写白名单字段，并且不写任何运行时/敏感数据。 */
-    fun toJson(): String = MiniJson.encode(
-        JsonValue.Obj(
-            linkedMapOf(
-                "schema" to JsonValue.Str(SCHEMA),
-                "schemaVersion" to JsonValue.Num(SCHEMA_VERSION.toDouble(), SCHEMA_VERSION.toString()),
-                "appVersion" to JsonValue.Str(AppBuildInfo.VERSION_NAME),
-                "language" to JsonValue.Str(language.name),
-                "theme" to JsonValue.Str(theme.name),
-                "reconnectMaxAttempts" to number(reconnectMaxAttempts),
-                "reconnectMaxDelaySeconds" to number(reconnectMaxDelaySeconds),
-                "logCapacity" to number(logCapacity),
-                "exportEntries" to number(exportEntries),
-                "exportBytesKb" to number(exportBytesKb),
-                "exportHexChars" to number(exportHexChars),
-                "onboardingCompleted" to JsonValue.Bool(onboardingCompleted),
-                "presets" to JsonValue.Arr(
-                    presets.map { preset ->
-                        JsonValue.Obj(
-                            linkedMapOf(
-                                "id" to JsonValue.Str(preset.id),
-                                "name" to JsonValue.Str(preset.name),
-                                "createdAtMillis" to number(preset.createdAtMillis),
-                                "lastUsedAtMillis" to number(preset.lastUsedAtMillis),
-                                "values" to JsonValue.Obj(
-                                    preset.values.entries
-                                        .sortedBy { it.key }
-                                        .associate { it.key to JsonValue.Str(it.value) },
-                                ),
-                            ),
-                        )
-                    },
-                ),
-                "automationRules" to JsonValue.Arr(
-                    automationRules.map { rule ->
-                        JsonValue.Obj(
-                            linkedMapOf(
-                                "id" to JsonValue.Str(rule.id),
-                                "trigger" to JsonValue.Str(rule.trigger.name),
-                                "action" to JsonValue.Str(rule.action.name),
-                                "enabled" to JsonValue.Bool(rule.enabled),
-                                "order" to number(rule.order),
-                                "presetId" to (rule.presetId?.let { JsonValue.Str(it) } ?: JsonValue.Null),
-                            ),
-                        )
-                    },
+    fun toJson(): String =
+        MiniJson.encode(
+            JsonValue.Obj(
+                linkedMapOf(
+                    "schema" to JsonValue.Str(SCHEMA),
+                    "schemaVersion" to JsonValue.Num(SCHEMA_VERSION.toDouble(), SCHEMA_VERSION.toString()),
+                    "appVersion" to JsonValue.Str(AppBuildInfo.VERSION_NAME),
+                    "language" to JsonValue.Str(language.name),
+                    "theme" to JsonValue.Str(theme.name),
+                    "reconnectMaxAttempts" to number(reconnectMaxAttempts),
+                    "reconnectMaxDelaySeconds" to number(reconnectMaxDelaySeconds),
+                    "logCapacity" to number(logCapacity),
+                    "exportEntries" to number(exportEntries),
+                    "exportBytesKb" to number(exportBytesKb),
+                    "exportHexChars" to number(exportHexChars),
+                    "onboardingCompleted" to JsonValue.Bool(onboardingCompleted),
+                    "presets" to
+                        JsonValue.Arr(
+                            presets.map { preset ->
+                                JsonValue.Obj(
+                                    linkedMapOf(
+                                        "id" to JsonValue.Str(preset.id),
+                                        "name" to JsonValue.Str(preset.name),
+                                        "createdAtMillis" to number(preset.createdAtMillis),
+                                        "lastUsedAtMillis" to number(preset.lastUsedAtMillis),
+                                        "values" to
+                                            JsonValue.Obj(
+                                                preset.values.entries
+                                                    .sortedBy { it.key }
+                                                    .associate { it.key to JsonValue.Str(it.value) },
+                                            ),
+                                    ),
+                                )
+                            },
+                        ),
+                    "automationRules" to
+                        JsonValue.Arr(
+                            automationRules.map { rule ->
+                                JsonValue.Obj(
+                                    linkedMapOf(
+                                        "id" to JsonValue.Str(rule.id),
+                                        "trigger" to JsonValue.Str(rule.trigger.name),
+                                        "action" to JsonValue.Str(rule.action.name),
+                                        "enabled" to JsonValue.Bool(rule.enabled),
+                                        "order" to number(rule.order),
+                                        "presetId" to (rule.presetId?.let { JsonValue.Str(it) } ?: JsonValue.Null),
+                                    ),
+                                )
+                            },
+                        ),
                 ),
             ),
-        ),
-    )
+        )
 
     companion object {
         const val SCHEMA = "valhalla.preferences"
-        const val SCHEMA_VERSION = 1
+        const val SCHEMA_VERSION = 2
 
         private fun number(value: Int): JsonValue.Num = JsonValue.Num(value.toDouble(), value.toString())
 
@@ -121,13 +127,17 @@ data class PreferencesBackup(
 }
 
 sealed interface BackupParseResult {
-
     data class Success(
         val backup: PreferencesBackup,
         val issues: List<BackupIssue>,
+        val migrationStatus: StorageMigrationStatus = StorageMigrationStatus.Current,
+        val warning: String? = null,
+        val canApply: Boolean = true,
     ) : BackupParseResult
 
-    data class Failure(val reason: String) : BackupParseResult
+    data class Failure(
+        val reason: String,
+    ) : BackupParseResult
 }
 
 /**
@@ -138,56 +148,95 @@ sealed interface BackupParseResult {
  * - 非法预设/规则条目跳过，不影响其它字段。
  */
 object PreferencesBackupParser {
-
     fun parse(text: String): BackupParseResult {
-        val root = MiniJson.parse(text)?.asObject()
-            ?: return BackupParseResult.Failure("JSON 顶层不是对象")
+        val root =
+            MiniJson.parse(text)?.asObject()
+                ?: return BackupParseResult.Failure("JSON 顶层不是对象")
         if (root.values["schema"]?.asString() != PreferencesBackup.SCHEMA) {
             return BackupParseResult.Failure("备份标识缺失或不受支持")
         }
-        val version = root.values["schemaVersion"]?.asLong()
-            ?: return BackupParseResult.Failure("缺少 schemaVersion")
-        if (version != PreferencesBackup.SCHEMA_VERSION.toLong()) {
+        val version =
+            root.values["schemaVersion"]?.asLong()
+                ?: return BackupParseResult.Failure("缺少 schemaVersion")
+        if (version < 1L) {
             return BackupParseResult.Failure("不支持的备份版本：$version")
+        }
+        val migration =
+            StorageSchemaMigrator.versionStatus(
+                StorageKind.PREFERENCES_BACKUP,
+                version.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
+            )
+        if (migration is StorageMigrationStatus.FutureVersion) {
+            return futureVersionFallback(version, migration)
         }
 
         val issues = mutableListOf<BackupIssue>()
         val defaults = AppSettings.DEFAULTS
 
-        val language = enumField(
-            root = root,
-            field = "language",
-            values = AppLanguageMode.entries,
-            default = AppLanguageMode.SYSTEM,
-            issues = issues,
-        )
-        val theme = enumField(
-            root = root,
-            field = "theme",
-            values = ThemeMode.entries,
-            default = ThemeMode.SYSTEM,
-            issues = issues,
-        )
-        val reconnectAttempts = intField(
-            root, "reconnectMaxAttempts", defaults.reconnectMaxAttempts,
-            { AppSettings.isValidReconnectAttempts(it) }, issues,
-        )
-        val reconnectDelay = intField(
-            root, "reconnectMaxDelaySeconds", defaults.reconnectMaxDelaySeconds,
-            { AppSettings.isValidReconnectMaxDelaySeconds(it) }, issues,
-        )
-        val logCapacity = intField(
-            root, "logCapacity", defaults.logCapacity, { AppSettings.isValidLogCapacity(it) }, issues,
-        )
-        val exportEntries = intField(
-            root, "exportEntries", defaults.exportEntries, { AppSettings.isValidExportEntries(it) }, issues,
-        )
-        val exportBytes = intField(
-            root, "exportBytesKb", defaults.exportBytesKb, { AppSettings.isValidExportBytesKb(it) }, issues,
-        )
-        val exportHex = intField(
-            root, "exportHexChars", defaults.exportHexChars, { AppSettings.isValidExportHexChars(it) }, issues,
-        )
+        val language =
+            enumField(
+                root = root,
+                field = "language",
+                values = AppLanguageMode.entries,
+                default = AppLanguageMode.SYSTEM,
+                issues = issues,
+            )
+        val theme =
+            enumField(
+                root = root,
+                field = "theme",
+                values = ThemeMode.entries,
+                default = ThemeMode.SYSTEM,
+                issues = issues,
+            )
+        val reconnectAttempts =
+            intField(
+                root,
+                "reconnectMaxAttempts",
+                defaults.reconnectMaxAttempts,
+                { AppSettings.isValidReconnectAttempts(it) },
+                issues,
+            )
+        val reconnectDelay =
+            intField(
+                root,
+                "reconnectMaxDelaySeconds",
+                defaults.reconnectMaxDelaySeconds,
+                { AppSettings.isValidReconnectMaxDelaySeconds(it) },
+                issues,
+            )
+        val logCapacity =
+            intField(
+                root,
+                "logCapacity",
+                defaults.logCapacity,
+                { AppSettings.isValidLogCapacity(it) },
+                issues,
+            )
+        val exportEntries =
+            intField(
+                root,
+                "exportEntries",
+                defaults.exportEntries,
+                { AppSettings.isValidExportEntries(it) },
+                issues,
+            )
+        val exportBytes =
+            intField(
+                root,
+                "exportBytesKb",
+                defaults.exportBytesKb,
+                { AppSettings.isValidExportBytesKb(it) },
+                issues,
+            )
+        val exportHex =
+            intField(
+                root,
+                "exportHexChars",
+                defaults.exportHexChars,
+                { AppSettings.isValidExportHexChars(it) },
+                issues,
+            )
 
         val onboarding = root.values["onboardingCompleted"]?.asBoolean()
         if (onboarding == null) {
@@ -198,20 +247,66 @@ object PreferencesBackupParser {
         val rules = ruleField(root, issues)
 
         return BackupParseResult.Success(
-            backup = PreferencesBackup(
-                language = language,
-                theme = theme,
-                reconnectMaxAttempts = reconnectAttempts,
-                reconnectMaxDelaySeconds = reconnectDelay,
-                logCapacity = logCapacity,
-                exportEntries = exportEntries,
-                exportBytesKb = exportBytes,
-                exportHexChars = exportHex,
-                presets = presets,
-                automationRules = rules,
-                onboardingCompleted = onboarding ?: false,
-            ),
+            backup =
+                PreferencesBackup(
+                    language = language,
+                    theme = theme,
+                    reconnectMaxAttempts = reconnectAttempts,
+                    reconnectMaxDelaySeconds = reconnectDelay,
+                    logCapacity = logCapacity,
+                    exportEntries = exportEntries,
+                    exportBytesKb = exportBytes,
+                    exportHexChars = exportHex,
+                    presets = presets,
+                    automationRules = rules,
+                    onboardingCompleted = onboarding ?: false,
+                ),
             issues = issues,
+            migrationStatus = migration,
+        )
+    }
+
+    /**
+     * 未来版本安全回退：不解读未知字段，返回全默认值并明确提示。
+     * [BackupParseResult.Success.canApply] 为 false，界面应禁用「导入」按钮，避免用默认值覆盖现有偏好。
+     */
+    private fun futureVersionFallback(
+        version: Long,
+        status: StorageMigrationStatus.FutureVersion,
+    ): BackupParseResult.Success {
+        val defaults = AppSettings.DEFAULTS
+        return BackupParseResult.Success(
+            backup =
+                PreferencesBackup(
+                    language = AppLanguageMode.SYSTEM,
+                    theme = ThemeMode.SYSTEM,
+                    reconnectMaxAttempts = defaults.reconnectMaxAttempts,
+                    reconnectMaxDelaySeconds = defaults.reconnectMaxDelaySeconds,
+                    logCapacity = defaults.logCapacity,
+                    exportEntries = defaults.exportEntries,
+                    exportBytesKb = defaults.exportBytesKb,
+                    exportHexChars = defaults.exportHexChars,
+                    presets = emptyList(),
+                    automationRules = emptyList(),
+                    onboardingCompleted = false,
+                ),
+            issues =
+                listOf(
+                    "language",
+                    "theme",
+                    "reconnectMaxAttempts",
+                    "reconnectMaxDelaySeconds",
+                    "logCapacity",
+                    "exportEntries",
+                    "exportBytesKb",
+                    "exportHexChars",
+                    "presets",
+                    "automationRules",
+                    "onboardingCompleted",
+                ).map { BackupIssue(it, missing = true) },
+            migrationStatus = status,
+            warning = "备份版本 $version 高于当前支持版本 ${PreferencesBackup.SCHEMA_VERSION}，已按默认值回退且禁止导入。",
+            canApply = false,
         )
     }
 
@@ -255,7 +350,10 @@ object PreferencesBackupParser {
         return value
     }
 
-    private fun presetField(root: JsonValue.Obj, issues: MutableList<BackupIssue>): List<ConfigPreset> {
+    private fun presetField(
+        root: JsonValue.Obj,
+        issues: MutableList<BackupIssue>,
+    ): List<ConfigPreset> {
         val raw = root.values["presets"]
         if (raw == null) {
             issues += BackupIssue("presets", missing = true)
@@ -277,21 +375,26 @@ object PreferencesBackupParser {
             val createdAt = objectValue.values["createdAtMillis"]?.asLong()
             val lastUsed = objectValue.values["lastUsedAtMillis"]?.asLong()
             val valuesObject = objectValue.values["values"]?.asObject()
-            if (id.isNullOrBlank() || name.isNullOrBlank() || createdAt == null ||
-                lastUsed == null || valuesObject == null
+            if (id.isNullOrBlank() ||
+                name.isNullOrBlank() ||
+                createdAt == null ||
+                lastUsed == null ||
+                valuesObject == null
             ) {
                 issues += BackupIssue("presets[]", missing = false)
                 return@mapNotNull null
             }
-            val values = valuesObject.values.mapNotNull { (key, value) ->
-                val text = value.asString()
-                if (key.isBlank() || text == null) {
-                    issues += BackupIssue("presets[].values", missing = false)
-                    null
-                } else {
-                    key to text
-                }
-            }.toMap()
+            val values =
+                valuesObject.values
+                    .mapNotNull { (key, value) ->
+                        val text = value.asString()
+                        if (key.isBlank() || text == null) {
+                            issues += BackupIssue("presets[].values", missing = false)
+                            null
+                        } else {
+                            key to text
+                        }
+                    }.toMap()
             runCatching {
                 ConfigPreset(
                     id = id,
@@ -304,7 +407,10 @@ object PreferencesBackupParser {
         }
     }
 
-    private fun ruleField(root: JsonValue.Obj, issues: MutableList<BackupIssue>): List<AutomationRule> {
+    private fun ruleField(
+        root: JsonValue.Obj,
+        issues: MutableList<BackupIssue>,
+    ): List<AutomationRule> {
         val raw = root.values["automationRules"]
         if (raw == null) {
             issues += BackupIssue("automationRules", missing = true)
@@ -322,15 +428,23 @@ object PreferencesBackupParser {
                 return@mapNotNull null
             }
             val id = objectValue.values["id"]?.asString()
-            val trigger = objectValue.values["trigger"]?.asString()
-                ?.let { name -> AutomationTrigger.entries.firstOrNull { it.name == name } }
-            val action = objectValue.values["action"]?.asString()
-                ?.let { name -> AutomationAction.entries.firstOrNull { it.name == name } }
+            val trigger =
+                objectValue.values["trigger"]
+                    ?.asString()
+                    ?.let { name -> AutomationTrigger.entries.firstOrNull { it.name == name } }
+            val action =
+                objectValue.values["action"]
+                    ?.asString()
+                    ?.let { name -> AutomationAction.entries.firstOrNull { it.name == name } }
             val enabled = objectValue.values["enabled"]?.asBoolean()
             val order = objectValue.values["order"]?.asLong()?.toInt()
             val presetId = objectValue.values["presetId"]?.asString()
-            if (id.isNullOrBlank() || trigger == null || action == null || enabled == null ||
-                order == null || order < 0
+            if (id.isNullOrBlank() ||
+                trigger == null ||
+                action == null ||
+                enabled == null ||
+                order == null ||
+                order < 0
             ) {
                 issues += BackupIssue("automationRules[]", missing = false)
                 return@mapNotNull null
@@ -356,7 +470,6 @@ object PreferencesBackupParser {
  * 写入只触及白名单字段，不触碰设备档案、令牌、日志与断点。
  */
 object PreferencesBackupService {
-
     fun snapshot(
         store: AppSettingsStore,
         presets: ConfigPresetRepository,
@@ -437,7 +550,11 @@ object PreferencesBackupService {
         rules.replaceAll(backup.automationRules)
     }
 
-    private fun planItem(section: BackupSection, current: String, incoming: String) = BackupPlanItem(
+    private fun planItem(
+        section: BackupSection,
+        current: String,
+        incoming: String,
+    ) = BackupPlanItem(
         section = section,
         currentValue = current,
         incomingValue = incoming,
@@ -451,7 +568,6 @@ object PreferencesBackupService {
  * 只操作偏好存储；设备档案、令牌与日志各自在独立存储中，不会被删除。
  */
 object PreferencesReset {
-
     fun clearAll(
         store: AppSettingsStore,
         presets: ConfigPresetRepository,

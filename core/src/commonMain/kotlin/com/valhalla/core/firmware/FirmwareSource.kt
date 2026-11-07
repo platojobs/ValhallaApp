@@ -7,7 +7,10 @@ package com.valhalla.core.firmware
 interface FirmwareSource {
     val size: Long
 
-    suspend fun read(offset: Long, length: Int): ByteArray
+    suspend fun read(
+        offset: Long,
+        length: Int,
+    ): ByteArray
 
     fun close()
 
@@ -17,11 +20,15 @@ interface FirmwareSource {
 }
 
 /** 内存实现，主要用于测试与小文件。 */
-class ByteArrayFirmwareSource(private val bytes: ByteArray) : FirmwareSource {
-
+class ByteArrayFirmwareSource(
+    private val bytes: ByteArray,
+) : FirmwareSource {
     override val size: Long get() = bytes.size.toLong()
 
-    override suspend fun read(offset: Long, length: Int): ByteArray {
+    override suspend fun read(
+        offset: Long,
+        length: Int,
+    ): ByteArray {
         if (offset < 0 || length < 0 || offset + length > bytes.size.toLong()) {
             throw FirmwareException.ReadFailure(offset, length)
         }

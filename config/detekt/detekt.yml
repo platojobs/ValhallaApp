@@ -1,0 +1,60 @@
+# detekt 配置：保留默认规则集，只调整与 KMP/Compose 工程实际规模相关的阈值。
+# 不关闭任何规则；存量问题统一记录在各模块的 detekt-baseline.xml，
+# 逐条原因见 docs/static-analysis-baseline.md。
+config:
+  validation: true
+  warningsAsErrors: false
+  checkExhaustiveness: false
+
+complexity:
+  LongMethod:
+    threshold: 120
+  LongParameterList:
+    functionThreshold: 10
+    constructorThreshold: 12
+    ignoreDefaultParameters: true
+    ignoreDataClasses: true
+    ignoreAnnotatedParameter: ['Composable']
+  TooManyFunctions:
+    thresholdInFiles: 40
+    thresholdInClasses: 25
+    thresholdInInterfaces: 20
+    thresholdInObjects: 20
+    thresholdInEnums: 10
+    ignoreDeprecated: true
+    ignorePrivate: true
+    ignoreOverridden: true
+  CyclomaticComplexMethod:
+    threshold: 20
+  NestedBlockDepth:
+    threshold: 6
+
+style:
+  MaxLineLength:
+    maxLineLength: 160
+    excludeCommentStatements: true
+  MagicNumber:
+    ignoreNumbers: ['-1', '0', '1', '2', '3', '4', '8', '16', '100', '1000']
+    ignorePropertyDeclaration: true
+    ignoreCompanionObjectPropertyDeclaration: true
+    ignoreAnnotated: ['Composable']
+  ReturnCount:
+    max: 8
+  UnusedPrivateMember:
+    ignoreAnnotated: ['Composable']
+  LoopWithTooManyJumpStatements:
+    maxJumpCount: 2
+
+naming:
+  FunctionNaming:
+    ignoreAnnotated: ['Composable']
+  TopLevelPropertyNaming:
+    constantPattern: '[A-Z][_A-Z0-9]*'
+    propertyPattern: '[A-Za-z][_A-Za-z0-9]*'
+    privatePropertyPattern: '_?[A-Za-z][_A-Za-z0-9]*'
+
+exceptions:
+  TooGenericExceptionCaught:
+    excludes: ['**/test/**', '**/commonTest/**', '**/jvmTest/**', '**/*Test.kt']
+  SwallowedException:
+    excludes: ['**/commonTest/**', '**/jvmTest/**', '**/*Test.kt']

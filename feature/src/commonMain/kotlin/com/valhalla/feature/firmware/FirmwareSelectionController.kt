@@ -72,7 +72,6 @@ class FirmwareSelectionController(
     private val checkpointStore: OtaCheckpointStore,
     private val prechecker: FirmwarePrechecker = FirmwarePrechecker(),
 ) {
-
     private val mutableState = MutableStateFlow(FirmwareSelectionState())
     val state: StateFlow<FirmwareSelectionState> = mutableState.asStateFlow()
 
@@ -107,15 +106,16 @@ class FirmwareSelectionController(
                 )
             }
 
-            val picked = try {
-                picker.pickFirmware()
-            } catch (cancellation: CancellationException) {
-                mutableState.update { it.copy(picking = false) }
-                throw cancellation
-            } catch (error: Throwable) {
-                fail(error)
-                return false
-            }
+            val picked =
+                try {
+                    picker.pickFirmware()
+                } catch (cancellation: CancellationException) {
+                    mutableState.update { it.copy(picking = false) }
+                    throw cancellation
+                } catch (error: Throwable) {
+                    fail(error)
+                    return false
+                }
 
             if (picked == null) {
                 mutableState.update { it.copy(picking = false) }
@@ -153,24 +153,26 @@ class FirmwareSelectionController(
                     errorCode = null,
                 )
             }
-            val picked = try {
-                picker.openFirmware(sourcePath)
-            } catch (cancellation: CancellationException) {
-                mutableState.update { it.copy(picking = false) }
-                throw cancellation
-            } catch (error: Throwable) {
-                mutableState.update { it.copy(picking = false) }
-                fail(error)
-                return false
-            }
+            val picked =
+                try {
+                    picker.openFirmware(sourcePath)
+                } catch (cancellation: CancellationException) {
+                    mutableState.update { it.copy(picking = false) }
+                    throw cancellation
+                } catch (error: Throwable) {
+                    mutableState.update { it.copy(picking = false) }
+                    fail(error)
+                    return false
+                }
             if (picked == null) {
                 mutableState.update {
                     it.copy(
                         picking = false,
-                        error = UiMessage(
-                            StringKey.FIRMWARE_FILE_READ_FAILED,
-                            mapOf("detail" to "firmware.library.unavailable"),
-                        ),
+                        error =
+                            UiMessage(
+                                StringKey.FIRMWARE_FILE_READ_FAILED,
+                                mapOf("detail" to "firmware.library.unavailable"),
+                            ),
                         errorCode = "firmware.library.unavailable",
                     )
                 }
@@ -194,7 +196,10 @@ class FirmwareSelectionController(
     }
 
     /** 设备信息变化后重新预检当前固件。预检期间保留旧结果但禁用 OTA。 */
-    suspend fun recheck(currentVersion: FirmwareVersion?, currentModel: String?): Boolean {
+    suspend fun recheck(
+        currentVersion: FirmwareVersion?,
+        currentModel: String?,
+    ): Boolean {
         val current = firmware ?: return false
         if (!operationMutex.tryLock()) return false
         try {
@@ -203,15 +208,16 @@ class FirmwareSelectionController(
             mutableState.update {
                 it.copy(prechecking = true, precheckProgress = 0f, error = null, errorCode = null)
             }
-            val result = withContext(Dispatchers.Default) {
-                prechecker.check(
-                    firmware = current,
-                    currentVersion = currentVersion,
-                    currentModel = currentModel,
-                    onProgress = ::publishProgress,
-                    shouldCancel = { cancelRequested.value },
-                )
-            }
+            val result =
+                withContext(Dispatchers.Default) {
+                    prechecker.check(
+                        firmware = current,
+                        currentVersion = currentVersion,
+                        currentModel = currentModel,
+                        onProgress = ::publishProgress,
+                        shouldCancel = { cancelRequested.value },
+                    )
+                }
             val resume = resolveResume(current, result)
             mutableState.update {
                 it.copy(
@@ -246,11 +252,12 @@ class FirmwareSelectionController(
     /** 从持久化存储重新加载断点，并按当前固件校验。 */
     fun refreshResume() {
         val current = firmware
-        val resolution = if (current == null) {
-            ResumeResolution(null, null)
-        } else {
-            resolveResume(current, mutableState.value.precheck)
-        }
+        val resolution =
+            if (current == null) {
+                ResumeResolution(null, null)
+            } else {
+                resolveResume(current, mutableState.value.precheck)
+            }
         mutableState.update {
             it.copy(resumePoint = resolution.point, resumeBlockedReason = resolution.blockedReason)
         }
@@ -274,10 +281,11 @@ class FirmwareSelectionController(
         if (mutableState.value.prechecking) return
         firmware?.close()
         firmware = null
-        mutableState.value = FirmwareSelectionState(
-            picking = false,
-            resumePoint = checkpointStore.load()?.takeIf { it.isValid() },
-        )
+        mutableState.value =
+            FirmwareSelectionState(
+                picking = false,
+                resumePoint = checkpointStore.load()?.takeIf { it.isValid() },
+            )
     }
 
     /** 页面销毁时调用。 */
@@ -294,46 +302,49 @@ class FirmwareSelectionController(
     ): Boolean {
         var parsed: FirmwarePackage? = null
         return try {
-            val outcome = withContext(Dispatchers.Default) {
-                val packageUnderTest = FirmwareParser.parse(picked.name, picked.source)
-                parsed = packageUnderTest
-                ParsedPrecheck(
-                    firmware = packageUnderTest,
-                    result = try {
-                        prechecker.check(
-                            firmware = packageUnderTest,
-                            currentVersion = currentVersion,
-                            currentModel = currentModel,
-                            onProgress = ::publishProgress,
-                            shouldCancel = { cancelRequested.value },
-                        )
-                    } catch (error: Throwable) {
-                        packageUnderTest.close()
-                        parsed = null
-                        throw error
-                    },
-                )
-            }
+            val outcome =
+                withContext(Dispatchers.Default) {
+                    val packageUnderTest = FirmwareParser.parse(picked.name, picked.source)
+                    parsed = packageUnderTest
+                    ParsedPrecheck(
+                        firmware = packageUnderTest,
+                        result =
+                            try {
+                                prechecker.check(
+                                    firmware = packageUnderTest,
+                                    currentVersion = currentVersion,
+                                    currentModel = currentModel,
+                                    onProgress = ::publishProgress,
+                                    shouldCancel = { cancelRequested.value },
+                                )
+                            } catch (error: Throwable) {
+                                packageUnderTest.close()
+                                parsed = null
+                                throw error
+                            },
+                    )
+                }
 
             val resume = resolveResume(outcome.firmware, outcome.result)
             val previous = firmware
             firmware = outcome.firmware
             previous?.close()
-            mutableState.value = FirmwareSelectionState(
-                picking = false,
-                prechecking = false,
-                precheckProgress = 0f,
-                packageName = picked.name,
-                version = outcome.firmware.version,
-                payloadBytes = outcome.firmware.payloadLength,
-                sourcePath = picked.sourcePath,
-                declaredCrc32 = outcome.firmware.payloadCrc32,
-                computedCrc32 = outcome.result.payloadCrc32,
-                computedCrc16 = outcome.result.payloadCrc16,
-                precheck = outcome.result,
-                resumePoint = resume.point,
-                resumeBlockedReason = resume.blockedReason,
-            )
+            mutableState.value =
+                FirmwareSelectionState(
+                    picking = false,
+                    prechecking = false,
+                    precheckProgress = 0f,
+                    packageName = picked.name,
+                    version = outcome.firmware.version,
+                    payloadBytes = outcome.firmware.payloadLength,
+                    sourcePath = picked.sourcePath,
+                    declaredCrc32 = outcome.firmware.payloadCrc32,
+                    computedCrc32 = outcome.result.payloadCrc32,
+                    computedCrc16 = outcome.result.payloadCrc16,
+                    precheck = outcome.result,
+                    resumePoint = resume.point,
+                    resumeBlockedReason = resume.blockedReason,
+                )
             outcome.result.passed
         } catch (cancelled: FirmwarePrecheckCancelledException) {
             closeParsedOrSource(parsed, picked)
@@ -354,7 +365,10 @@ class FirmwareSelectionController(
         }
     }
 
-    private fun closeParsedOrSource(parsed: FirmwarePackage?, picked: PickedFirmware) {
+    private fun closeParsedOrSource(
+        parsed: FirmwarePackage?,
+        picked: PickedFirmware,
+    ) {
         if (parsed != null) {
             parsed.close()
         } else {
@@ -369,16 +383,19 @@ class FirmwareSelectionController(
     }
 
     private fun fail(error: Throwable) {
-        val message = when (error) {
-            is FirmwareException -> UiMessage(
-                StringKey.FIRMWARE_LOAD_FAILED,
-                mapOf("detail" to (error.message ?: error.code)),
-            )
-            else -> UiMessage(
-                StringKey.FIRMWARE_FILE_READ_FAILED,
-                mapOf("detail" to (error.message ?: StringKey.UNKNOWN.name)),
-            )
-        }
+        val message =
+            when (error) {
+                is FirmwareException ->
+                    UiMessage(
+                        StringKey.FIRMWARE_LOAD_FAILED,
+                        mapOf("detail" to (error.message ?: error.code)),
+                    )
+                else ->
+                    UiMessage(
+                        StringKey.FIRMWARE_FILE_READ_FAILED,
+                        mapOf("detail" to (error.message ?: StringKey.UNKNOWN.name)),
+                    )
+            }
         val code = (error as? FirmwareException)?.code
         mutableState.update {
             it.copy(
@@ -426,8 +443,9 @@ class FirmwareSelectionController(
         if (precheck?.passed != true) {
             return ResumeResolution(null, UiMessage(StringKey.RESUME_PRECHECK_BLOCKED))
         }
-        val crc16 = precheck.payloadCrc16
-            ?: return ResumeResolution(null, UiMessage(StringKey.RESUME_CRC16_MISSING))
+        val crc16 =
+            precheck.payloadCrc16
+                ?: return ResumeResolution(null, UiMessage(StringKey.RESUME_CRC16_MISSING))
         if (stored.crc16 != crc16) {
             return ResumeResolution(null, UiMessage(StringKey.RESUME_CRC16_MISMATCH))
         }

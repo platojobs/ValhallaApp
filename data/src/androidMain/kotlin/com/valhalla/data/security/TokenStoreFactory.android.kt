@@ -1,6 +1,8 @@
 package com.valhalla.data.security
 
 import android.content.Context
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
 import android.util.Base64
 import com.valhalla.core.security.AuthToken
 import com.valhalla.core.security.AuthTokenCodec
@@ -12,8 +14,6 @@ import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
-import android.security.keystore.KeyGenParameterSpec
-import android.security.keystore.KeyProperties
 
 /**
  * Android 安全存储：令牌明文写入前用 Android Keystore 中的 AES-256/GCM 密钥加密，
@@ -24,19 +24,22 @@ import android.security.keystore.KeyProperties
  */
 actual fun createTokenStore(): TokenStore = AndroidKeystoreTokenStore(AndroidBleSupport.requireContext())
 
-private class AndroidKeystoreTokenStore(private val context: Context) : TokenStore {
-
-    private val preferences = context.getSharedPreferences(
-        StorageKeys.ANDROID_TOKEN_PREFS,
-        Context.MODE_PRIVATE,
-    )
+private class AndroidKeystoreTokenStore(
+    private val context: Context,
+) : TokenStore {
+    private val preferences =
+        context.getSharedPreferences(
+            StorageKeys.ANDROID_TOKEN_PREFS,
+            Context.MODE_PRIVATE,
+        )
 
     override fun save(token: AuthToken) {
         val plaintext = AuthTokenCodec.encode(token).encodeToByteArray()
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, key())
         val encrypted = cipher.iv + cipher.doFinal(plaintext)
-        preferences.edit()
+        preferences
+            .edit()
             .putString(StorageKeys.ANDROID_TOKEN_KEY, Base64.encodeToString(encrypted, Base64.NO_WRAP))
             .apply()
     }
@@ -76,11 +79,11 @@ private class AndroidKeystoreTokenStore(private val context: Context) : TokenSto
 
         val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEY_STORE)
         generator.init(
-            KeyGenParameterSpec.Builder(
-                StorageKeys.ANDROID_TOKEN_KEYSTORE_ALIAS,
-                KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT,
-            )
-                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+            KeyGenParameterSpec
+                .Builder(
+                    StorageKeys.ANDROID_TOKEN_KEYSTORE_ALIAS,
+                    KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT,
+                ).setBlockModes(KeyProperties.BLOCK_MODE_GCM)
                 .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
                 .setKeySize(KEY_SIZE_BITS)
                 .build(),

@@ -9,7 +9,6 @@ import kotlinx.coroutines.flow.StateFlow
  * [BlePermissionState]，并暴露「请求权限 / 去系统设置 / 开启蓝牙」三类动作。
  */
 interface BlePermissionController {
-
     val state: StateFlow<BlePermissionState>
 
     /** 请求权限；永久拒绝时不会再次弹窗（交由 [openAppSettings]）。 */

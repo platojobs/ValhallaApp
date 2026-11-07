@@ -12,29 +12,32 @@ import kotlin.test.assertTrue
  * 该测试防止各处版本号漂移，也防止回退到硬编码。
  */
 class VersionConsistencyTest {
-
-    private val root: File = generateSequence(File(System.getProperty("user.dir")).absoluteFile) { it.parentFile }
-        .firstOrNull { File(it, "settings.gradle.kts").exists() && File(it, "gradle.properties").exists() }
-        ?: error("无法定位项目根目录（user.dir=${System.getProperty("user.dir")}）")
+    private val root: File =
+        generateSequence(File(System.getProperty("user.dir")).absoluteFile) { it.parentFile }
+            .firstOrNull { File(it, "settings.gradle.kts").exists() && File(it, "gradle.properties").exists() }
+            ?: error("无法定位项目根目录（user.dir=${System.getProperty("user.dir")}）")
 
     private val gradleProperties: Map<String, String> by lazy {
-        File(root, "gradle.properties").readLines()
+        File(root, "gradle.properties")
+            .readLines()
             .mapNotNull { line ->
                 val trimmed = line.trim()
-                if (trimmed.startsWith("#") || !trimmed.contains('=')) null
-                else trimmed.substringBefore('=').trim() to trimmed.substringAfter('=').trim()
-            }
-            .toMap()
+                if (trimmed.startsWith("#") || !trimmed.contains('=')) {
+                    null
+                } else {
+                    trimmed.substringBefore('=').trim() to trimmed.substringAfter('=').trim()
+                }
+            }.toMap()
     }
 
     private val versionName: String get() = gradleProperties["valhalla.versionName"].orEmpty()
     private val versionCode: String get() = gradleProperties["valhalla.versionCode"].orEmpty()
 
     @Test
-    fun `gradle properties 提供 2_9_0 版本号`() {
-        assertEquals("2.9.0", versionName)
+    fun `gradle properties 提供 3_0_0 版本号`() {
+        assertEquals("3.0.0", versionName)
         assertTrue(versionName.matches(Regex("""\d+\.\d+\.\d+""")), "versionName 应为 x.y.z：$versionName")
-        assertEquals(29, versionCode.toIntOrNull())
+        assertEquals(30, versionCode.toIntOrNull())
     }
 
     @Test
@@ -62,8 +65,8 @@ class VersionConsistencyTest {
     @Test
     fun `iOS xcconfig 与 gradle properties 一致`() {
         val config = File(root, "iosApp/iosApp/Version.xcconfig").readText()
-        fun value(key: String): String? =
-            Regex("""^$key\s*=\s*(\S+)""", RegexOption.MULTILINE).find(config)?.groupValues?.get(1)
+
+        fun value(key: String): String? = Regex("""^$key\s*=\s*(\S+)""", RegexOption.MULTILINE).find(config)?.groupValues?.get(1)
 
         assertEquals(versionName, value("MARKETING_VERSION"))
         assertEquals(versionCode, value("CURRENT_PROJECT_VERSION"))
@@ -74,7 +77,7 @@ class VersionConsistencyTest {
         val plist = File(root, "iosApp/iosApp/Info.plist").readText()
         assertTrue(plist.contains("<string>\$(MARKETING_VERSION)</string>"))
         assertTrue(plist.contains("<string>\$(CURRENT_PROJECT_VERSION)</string>"))
-        assertFalse(plist.contains("<string>2.9.0</string>"), "Info.plist 不应硬编码版本号")
+        assertFalse(plist.contains("<string>3.0.0</string>"), "Info.plist 不应硬编码版本号")
     }
 
     @Test
@@ -94,6 +97,6 @@ class VersionConsistencyTest {
         assertTrue(script.contains("gradleProperty(\"valhalla.versionCode\")"))
         assertTrue(script.contains("versionName = appVersionName"))
         assertTrue(script.contains("versionCode = appVersionCode"))
-        assertFalse(script.contains("versionName = \"2.9.0\""), "Android 不应硬编码版本号")
+        assertFalse(script.contains("versionName = \"3.0.0\""), "Android 不应硬编码版本号")
     }
 }

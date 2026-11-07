@@ -16,8 +16,8 @@ import android.os.ParcelUuid
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.callbackFlow
 import java.util.UUID
 
 /**
@@ -29,7 +29,6 @@ import java.util.UUID
 class AndroidBleClient internal constructor(
     private val context: Context,
 ) : BleClient {
-
     private val bluetoothManager: BluetoothManager? =
         context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
 
@@ -38,13 +37,17 @@ class AndroidBleClient internal constructor(
     private val mutableAdapterState = MutableStateFlow(currentAdapterState())
     override val adapterState = mutableAdapterState.asStateFlow()
 
-    private val stateReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            if (intent?.action == BluetoothAdapter.ACTION_STATE_CHANGED) {
-                mutableAdapterState.value = currentAdapterState()
+    private val stateReceiver =
+        object : BroadcastReceiver() {
+            override fun onReceive(
+                context: Context?,
+                intent: Intent?,
+            ) {
+                if (intent?.action == BluetoothAdapter.ACTION_STATE_CHANGED) {
+                    mutableAdapterState.value = currentAdapterState()
+                }
             }
         }
-    }
 
     init {
         runCatching {
@@ -53,50 +56,62 @@ class AndroidBleClient internal constructor(
     }
 
     @SuppressLint("MissingPermission")
-    override fun scan(filter: ScanFilter): Flow<BleDevice> = callbackFlow {
-        val scanner = adapter?.bluetoothLeScanner
-        if (scanner == null) {
-            close(BleException("当前设备不支持 BLE 或蓝牙未开启"))
-            return@callbackFlow
-        }
-
-        val callback = object : ScanCallback() {
-            override fun onScanResult(callbackType: Int, result: ScanResult) {
-                val device = result.toBleDevice()
-                if (!filter.matchesName(device.name) || !filter.matchesService(device.serviceUuids)) return
-                trySend(device)
+    override fun scan(filter: ScanFilter): Flow<BleDevice> =
+        callbackFlow {
+            val scanner = adapter?.bluetoothLeScanner
+            if (scanner == null) {
+                close(BleException("当前设备不支持 BLE 或蓝牙未开启"))
+                return@callbackFlow
             }
 
-            override fun onScanFailed(errorCode: Int) {
-                close(BleException("BLE 扫描失败，errorCode=$errorCode"))
+            val callback =
+                object : ScanCallback() {
+                    override fun onScanResult(
+                        callbackType: Int,
+                        result: ScanResult,
+                    ) {
+                        val device = result.toBleDevice()
+                        if (!filter.matchesName(device.name) || !filter.matchesService(device.serviceUuids)) return
+                        trySend(device)
+                    }
+
+                    override fun onScanFailed(errorCode: Int) {
+                        close(BleException("BLE 扫描失败，errorCode=$errorCode"))
+                    }
+                }
+
+            val settings =
+                ScanSettings
+                    .Builder()
+                    .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+                    .build()
+
+            // 服务过滤交给系统扫描器，名称前缀在结果侧过滤。
+            val platformFilters =
+                filter.serviceUuid?.let { uuid ->
+                    listOf(
+                        android.bluetooth.le.ScanFilter
+                            .Builder()
+                            .setServiceUuid(ParcelUuid(UUID.fromString(uuid)))
+                            .build(),
+                    )
+                } ?: emptyList()
+
+            try {
+                scanner.startScan(platformFilters, settings, callback)
+            } catch (error: SecurityException) {
+                close(BleException("缺少蓝牙扫描权限", error))
+                return@callbackFlow
             }
+
+            awaitClose { scanner.stopScan(callback) }
         }
-
-        val settings = ScanSettings.Builder()
-            .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
-            .build()
-
-        // 服务过滤交给系统扫描器，名称前缀在结果侧过滤。
-        val platformFilters = filter.serviceUuid?.let { uuid ->
-            listOf(
-                android.bluetooth.le.ScanFilter.Builder()
-                    .setServiceUuid(ParcelUuid(UUID.fromString(uuid)))
-                    .build(),
-            )
-        } ?: emptyList()
-
-        try {
-            scanner.startScan(platformFilters, settings, callback)
-        } catch (error: SecurityException) {
-            close(BleException("缺少蓝牙扫描权限", error))
-            return@callbackFlow
-        }
-
-        awaitClose { scanner.stopScan(callback) }
-    }
 
     @SuppressLint("MissingPermission")
-    override suspend fun connect(deviceId: String, timeoutMillis: Long): BleConnection {
+    override suspend fun connect(
+        deviceId: String,
+        timeoutMillis: Long,
+    ): BleConnection {
         val target = adapter?.getRemoteDevice(deviceId) ?: throw BleException("设备地址无效：$deviceId")
         return AndroidBleConnection.open(context, target, timeoutMillis)
     }
@@ -126,10 +141,11 @@ class AndroidBleClient internal constructor(
 }
 
 @SuppressLint("MissingPermission")
-private fun ScanResult.toBleDevice(): BleDevice = BleDevice(
-    deviceId = device.address,
-    name = scanRecord?.deviceName ?: device.name,
-    rssi = rssi,
-    isConnectable = isConnectable,
-    serviceUuids = scanRecord?.serviceUuids?.map { it.uuid.toString() } ?: emptyList(),
-)
+private fun ScanResult.toBleDevice(): BleDevice =
+    BleDevice(
+        deviceId = device.address,
+        name = scanRecord?.deviceName ?: device.name,
+        rssi = rssi,
+        isConnectable = isConnectable,
+        serviceUuids = scanRecord?.serviceUuids?.map { it.uuid.toString() } ?: emptyList(),
+    )

@@ -24,11 +24,12 @@ enum class RssiBand {
 
     companion object {
         /** 阈值约定：≥ -60 dBm 强，-75..-61 中，< -75 弱。 */
-        fun of(rssi: Int): RssiBand = when {
-            rssi >= STRONG_THRESHOLD -> STRONG
-            rssi >= MEDIUM_THRESHOLD -> MEDIUM
-            else -> WEAK
-        }
+        fun of(rssi: Int): RssiBand =
+            when {
+                rssi >= STRONG_THRESHOLD -> STRONG
+                rssi >= MEDIUM_THRESHOLD -> MEDIUM
+                else -> WEAK
+            }
 
         const val STRONG_THRESHOLD: Int = -60
         const val MEDIUM_THRESHOLD: Int = -75
@@ -40,7 +41,6 @@ enum class ScanSortMode {
     SIGNAL,
     NAME,
     LAST_CONNECTED,
-    ;
 }
 
 /** 扫描页 UI 状态。 */
@@ -70,7 +70,6 @@ class ScanController(
     /** 最近一次连接时间来源（通常来自 DeviceProfile）；用于「最近连接」排序。 */
     private val lastConnectedAtProvider: (String) -> Long? = { null },
 ) {
-
     private val mutableState = MutableStateFlow(ScanUiState())
     val state: StateFlow<ScanUiState> = mutableState.asStateFlow()
 
@@ -81,47 +80,53 @@ class ScanController(
         if (scanJob?.isActive == true) return
         mutableState.value = mutableState.value.copy(scanning = true, error = null, timedOut = false)
 
-        timeoutJob = scope.launch {
-            delay(scanTimeoutMillis)
-            val current = mutableState.value
-            if (current.scanning && current.devices.isEmpty() && current.error == null) {
-                mutableState.value = current.copy(timedOut = true)
+        timeoutJob =
+            scope.launch {
+                delay(scanTimeoutMillis)
+                val current = mutableState.value
+                if (current.scanning && current.devices.isEmpty() && current.error == null) {
+                    mutableState.value = current.copy(timedOut = true)
+                }
             }
-        }
 
-        scanJob = scope.launch {
-            try {
-                bleClient.scan(filter)
-                    .catch { error ->
-                        if (error is CancellationException) throw error
-                        timeoutJob?.cancel()
-                        mutableState.value = mutableState.value.copy(
+        scanJob =
+            scope.launch {
+                try {
+                    bleClient
+                        .scan(filter)
+                        .catch { error ->
+                            if (error is CancellationException) throw error
+                            timeoutJob?.cancel()
+                            mutableState.value =
+                                mutableState.value.copy(
+                                    scanning = false,
+                                    error =
+                                        UiMessage(
+                                            StringKey.SCAN_EMPTY_ERROR,
+                                            mapOf("detail" to (error.message ?: StringKey.UNKNOWN.name)),
+                                        ),
+                                )
+                        }.collect { device -> upsert(device) }
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
+                } catch (error: Throwable) {
+                    // 兜底：catch 操作符/去重逻辑自身异常也不能让扫描协程变成未捕获异常。
+                    timeoutJob?.cancel()
+                    onError(error)
+                    mutableState.value =
+                        mutableState.value.copy(
                             scanning = false,
-                            error = UiMessage(
-                                StringKey.SCAN_EMPTY_ERROR,
-                                mapOf("detail" to (error.message ?: StringKey.UNKNOWN.name)),
-                            ),
+                            error =
+                                UiMessage(
+                                    StringKey.SCAN_EMPTY_ERROR,
+                                    mapOf("detail" to (error.message ?: StringKey.UNKNOWN.name)),
+                                ),
                         )
-                    }
-                    .collect { device -> upsert(device) }
-            } catch (cancellation: CancellationException) {
-                throw cancellation
-            } catch (error: Throwable) {
-                // 兜底：catch 操作符/去重逻辑自身异常也不能让扫描协程变成未捕获异常。
-                timeoutJob?.cancel()
-                onError(error)
-                mutableState.value = mutableState.value.copy(
-                    scanning = false,
-                    error = UiMessage(
-                        StringKey.SCAN_EMPTY_ERROR,
-                        mapOf("detail" to (error.message ?: StringKey.UNKNOWN.name)),
-                    ),
-                )
-            } finally {
-                timeoutJob?.cancel()
-                mutableState.value = mutableState.value.copy(scanning = false)
+                } finally {
+                    timeoutJob?.cancel()
+                    mutableState.value = mutableState.value.copy(scanning = false)
+                }
             }
-        }
     }
 
     fun stopScan() {
@@ -140,39 +145,48 @@ class ScanController(
     fun setSortMode(mode: ScanSortMode) {
         val current = mutableState.value
         if (current.sortMode == mode) return
-        mutableState.value = current.copy(
-            sortMode = mode,
-            devices = sort(current.devices, mode),
-        )
+        mutableState.value =
+            current.copy(
+                sortMode = mode,
+                devices = sort(current.devices, mode),
+            )
     }
 
     private fun upsert(device: BleDevice) {
         val existing = mutableState.value.devices
         val updated = existing.filterNot { it.deviceId == device.deviceId } + device
-        mutableState.value = mutableState.value.copy(
-            devices = sort(updated, mutableState.value.sortMode),
-            error = null,
-            timedOut = false,
-        )
+        mutableState.value =
+            mutableState.value.copy(
+                devices = sort(updated, mutableState.value.sortMode),
+                error = null,
+                timedOut = false,
+            )
     }
 
-    private fun sort(devices: List<BleDevice>, mode: ScanSortMode): List<BleDevice> = when (mode) {
-        ScanSortMode.SIGNAL -> devices.sortedWith(
-            compareByDescending<BleDevice> { it.rssi }.thenBy { it.deviceId },
-        )
+    private fun sort(
+        devices: List<BleDevice>,
+        mode: ScanSortMode,
+    ): List<BleDevice> =
+        when (mode) {
+            ScanSortMode.SIGNAL ->
+                devices.sortedWith(
+                    compareByDescending<BleDevice> { it.rssi }.thenBy { it.deviceId },
+                )
 
-        ScanSortMode.NAME -> devices.sortedWith(
-            compareBy<BleDevice> { it.name.isNullOrBlank() }
-                .thenBy { it.name?.lowercase().orEmpty() }
-                .thenBy { it.deviceId },
-        )
+            ScanSortMode.NAME ->
+                devices.sortedWith(
+                    compareBy<BleDevice> { it.name.isNullOrBlank() }
+                        .thenBy { it.name?.lowercase().orEmpty() }
+                        .thenBy { it.deviceId },
+                )
 
-        ScanSortMode.LAST_CONNECTED -> devices.sortedWith(
-            compareByDescending<BleDevice> {
-                lastConnectedAtProvider(it.deviceId) ?: Long.MIN_VALUE
-            }.thenByDescending { it.rssi }.thenBy { it.deviceId },
-        )
-    }
+            ScanSortMode.LAST_CONNECTED ->
+                devices.sortedWith(
+                    compareByDescending<BleDevice> {
+                        lastConnectedAtProvider(it.deviceId) ?: Long.MIN_VALUE
+                    }.thenByDescending { it.rssi }.thenBy { it.deviceId },
+                )
+        }
 
     companion object {
         /** 扫描超过该时长仍无设备时标记超时。 */

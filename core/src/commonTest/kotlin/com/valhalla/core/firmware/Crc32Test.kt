@@ -4,7 +4,6 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 
 class Crc32Test {
-
     @Test
     fun `标准测试向量与分段计算结果一致`() {
         val data = "123456789".encodeToByteArray()

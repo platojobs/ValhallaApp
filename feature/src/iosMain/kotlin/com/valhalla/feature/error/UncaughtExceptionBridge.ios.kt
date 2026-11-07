@@ -3,17 +3,18 @@
 package com.valhalla.feature.error
 
 import kotlinx.cinterop.staticCFunction
-import platform.Foundation.NSSetUncaughtExceptionHandler
 import platform.Foundation.NSException
+import platform.Foundation.NSSetUncaughtExceptionHandler
 
 private var installed = false
 private var globalReporter: ErrorReporter? = null
 
 private fun handleUncaughtException(exception: NSException?) {
     val current = exception ?: return
-    val error = IllegalStateException(
-        "NSException ${current.name}: ${current.reason ?: "unknown"}",
-    )
+    val error =
+        IllegalStateException(
+            "NSException ${current.name}: ${current.reason ?: "unknown"}",
+        )
     runCatching {
         globalReporter?.record("uncaught:ios", error, ErrorKind.FAILURE)
     }

@@ -60,13 +60,14 @@ data class ConfigEditorState(
 
     /** 能力提示的文案键：未知快照时优先提示刷新设备信息，否则说明因能力隐藏。 */
     val capabilityNoticeKey: StringKey?
-        get() = when {
-            hiddenFields.isEmpty() -> null
-            hiddenFields.any { it.capability.status == com.valhalla.core.config.ConfigCapabilityStatus.TARGET_UNKNOWN } ->
-                StringKey.CONFIG_HIDDEN_UNKNOWN_TARGET
+        get() =
+            when {
+                hiddenFields.isEmpty() -> null
+                hiddenFields.any { it.capability.status == com.valhalla.core.config.ConfigCapabilityStatus.TARGET_UNKNOWN } ->
+                    StringKey.CONFIG_HIDDEN_UNKNOWN_TARGET
 
-            else -> StringKey.CONFIG_HIDDEN_UNSUPPORTED
-        }
+                else -> StringKey.CONFIG_HIDDEN_UNSUPPORTED
+            }
 }
 
 /**
@@ -86,15 +87,16 @@ class ConfigEditorController(
     initialTarget: DeviceConfigTarget = DeviceConfigTarget(),
     private val onError: (Throwable) -> Unit = {},
 ) {
-
-    private val mutableState = MutableStateFlow(
-        ConfigEditorState(
-            fields = catalog.keys.map { spec ->
-                ConfigFieldState(spec = spec, capability = catalog.capability(spec, initialTarget))
-            },
-            target = initialTarget,
-        ),
-    )
+    private val mutableState =
+        MutableStateFlow(
+            ConfigEditorState(
+                fields =
+                    catalog.keys.map { spec ->
+                        ConfigFieldState(spec = spec, capability = catalog.capability(spec, initialTarget))
+                    },
+                target = initialTarget,
+            ),
+        )
     val state: StateFlow<ConfigEditorState> = mutableState.asStateFlow()
 
     /**
@@ -110,9 +112,10 @@ class ConfigEditorController(
             } else {
                 state.copy(
                     target = target,
-                    fields = state.fields.map { field ->
-                        field.copy(capability = catalog.capability(field.spec, target))
-                    },
+                    fields =
+                        state.fields.map { field ->
+                            field.copy(capability = catalog.capability(field.spec, target))
+                        },
                 )
             }
         }
@@ -136,9 +139,10 @@ class ConfigEditorController(
         mutableState.update { it.copy(loading = true, message = null, error = null, errorCode = null) }
         try {
             supervisorScope {
-                val jobs = visible.map { field ->
-                    async { loadOne(field.spec) }
-                }
+                val jobs =
+                    visible.map { field ->
+                        async { loadOne(field.spec) }
+                    }
                 jobs.forEach { it.await() }
             }
         } catch (cancellation: CancellationException) {
@@ -149,10 +153,11 @@ class ConfigEditorController(
             onError(error)
             mutableState.update {
                 it.copy(
-                    error = UiMessage(
-                        StringKey.CONFIG_LOAD_FAILED,
-                        mapOf("detail" to (error.message ?: StringKey.UNKNOWN.name)),
-                    ),
+                    error =
+                        UiMessage(
+                            StringKey.CONFIG_LOAD_FAILED,
+                            mapOf("detail" to (error.message ?: StringKey.UNKNOWN.name)),
+                        ),
                 )
             }
         } finally {
@@ -162,7 +167,10 @@ class ConfigEditorController(
     }
 
     /** 更新编辑框文本；不清除保存成功提示，避免用户输入时提示闪烁。 */
-    fun updateText(key: String, text: String) {
+    fun updateText(
+        key: String,
+        text: String,
+    ) {
         updateField(key) { field ->
             field.copy(text = text, validationError = null)
         }
@@ -175,8 +183,9 @@ class ConfigEditorController(
      */
     suspend fun save(key: String): Boolean {
         val snapshot = mutableState.value
-        val field = snapshot.fields.firstOrNull { it.spec.key == key }
-            ?: return fail(UiMessage(StringKey.CONFIG_UNKNOWN_KEY, mapOf("key" to key)))
+        val field =
+            snapshot.fields.firstOrNull { it.spec.key == key }
+                ?: return fail(UiMessage(StringKey.CONFIG_UNKNOWN_KEY, mapOf("key" to key)))
         // 下发前用最新设备快照二次校验能力，避免读取版本后设备状态变化导致设备回 INVALID_PARAM。
         val capability = catalog.capability(field.spec, snapshot.target)
         if (capability != field.capability) {
@@ -206,16 +215,17 @@ class ConfigEditorController(
                 message = null,
                 error = null,
                 errorCode = null,
-                fields = it.fields.map { item ->
-                    if (item.spec.key == key) item.copy(saving = true, validationError = null) else item
-                },
+                fields =
+                    it.fields.map { item ->
+                        if (item.spec.key == key) item.copy(saving = true, validationError = null) else item
+                    },
             )
         }
 
         return try {
             val response = dispatcher.execute(SetConfigRequest(key, valid.bytes))
             if (response !is SetConfigResponse) {
-                throw IllegalStateException("写配置应答类型异常: ${response::class.simpleName}")
+                error("写配置应答类型异常: ${response::class.simpleName}")
             }
             val now = clockMillis()
             mutableState.update {
@@ -224,21 +234,22 @@ class ConfigEditorController(
                     message = UiMessage(StringKey.CONFIG_SAVED_FIELD, mapOf("field" to key)),
                     error = null,
                     errorCode = null,
-                    fields = it.fields.map { item ->
-                        if (item.spec.key == key) {
-                            item.copy(
-                                text = valid.canonicalText,
-                                originalText = valid.canonicalText,
-                                loaded = true,
-                                saving = false,
-                                validationError = null,
-                                loadError = null,
-                                lastSavedAtEpochMillis = now,
-                            )
-                        } else {
-                            item
-                        }
-                    },
+                    fields =
+                        it.fields.map { item ->
+                            if (item.spec.key == key) {
+                                item.copy(
+                                    text = valid.canonicalText,
+                                    originalText = valid.canonicalText,
+                                    loaded = true,
+                                    saving = false,
+                                    validationError = null,
+                                    loadError = null,
+                                    lastSavedAtEpochMillis = now,
+                                )
+                            } else {
+                                item
+                            }
+                        },
                 )
             }
             true
@@ -249,15 +260,17 @@ class ConfigEditorController(
             mutableState.update {
                 it.copy(
                     savingKey = null,
-                    error = UiMessage(
-                        StringKey.CONFIG_LOAD_FAILED,
-                        args = mapOf("field" to key),
-                        nested = mapOf("detail" to info.ui),
-                    ),
+                    error =
+                        UiMessage(
+                            StringKey.CONFIG_LOAD_FAILED,
+                            args = mapOf("field" to key),
+                            nested = mapOf("detail" to info.ui),
+                        ),
                     errorCode = info.status,
-                    fields = it.fields.map { item ->
-                        if (item.spec.key == key) item.copy(saving = false) else item
-                    },
+                    fields =
+                        it.fields.map { item ->
+                            if (item.spec.key == key) item.copy(saving = false) else item
+                        },
                 )
             }
             false
@@ -273,7 +286,7 @@ class ConfigEditorController(
         try {
             val response = dispatcher.execute(GetConfigRequest(spec.key))
             if (response !is ConfigResponse) {
-                throw IllegalStateException("配置应答类型异常: ${response::class.simpleName}")
+                error("配置应答类型异常: ${response::class.simpleName}")
             }
             val text = catalog.format(spec, response.value)
             updateField(spec.key) {
@@ -304,12 +317,16 @@ class ConfigEditorController(
         return false
     }
 
-    private fun updateField(key: String, transform: (ConfigFieldState) -> ConfigFieldState) {
+    private fun updateField(
+        key: String,
+        transform: (ConfigFieldState) -> ConfigFieldState,
+    ) {
         mutableState.update { state ->
             state.copy(
-                fields = state.fields.map { field ->
-                    if (field.spec.key == key) transform(field) else field
-                },
+                fields =
+                    state.fields.map { field ->
+                        if (field.spec.key == key) transform(field) else field
+                    },
             )
         }
     }

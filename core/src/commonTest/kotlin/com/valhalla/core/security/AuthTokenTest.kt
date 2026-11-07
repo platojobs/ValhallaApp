@@ -7,7 +7,6 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class AuthTokenTest {
-
     @Test
     fun `带过期时间的令牌按时间判断`() {
         val token = AuthToken("abc", expiresAtEpochMillis = 1_000)

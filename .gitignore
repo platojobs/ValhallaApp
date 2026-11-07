@@ -19,6 +19,7 @@ keystore.properties
 
 # Kotlin/Native
 .konan/
+.kotlin/
 
 # iOS / Xcode
 iosApp/Pods/

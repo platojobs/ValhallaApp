@@ -3,7 +3,9 @@ package com.valhalla.feature.ota
 import com.valhalla.core.firmware.FirmwarePrecheckResult
 
 /** 固件升级向导的五个步骤。 */
-enum class OtaWizardStep(val index: Int) {
+enum class OtaWizardStep(
+    val index: Int,
+) {
     SELECT(1),
     PRECHECK(2),
     CONFIRM(3),
@@ -37,39 +39,50 @@ enum class OtaWizardCancel {
  * - 结果页可以重新回到选择步骤开始新一轮。
  */
 object OtaWizardFlow {
-
     fun next(
         current: OtaWizardStep,
         selectionReady: Boolean,
         precheckPassed: Boolean,
-    ): OtaWizardStep = when (current) {
-        OtaWizardStep.SELECT -> if (selectionReady) OtaWizardStep.PRECHECK else OtaWizardStep.SELECT
-        OtaWizardStep.PRECHECK -> if (precheckPassed) OtaWizardStep.CONFIRM else OtaWizardStep.PRECHECK
-        OtaWizardStep.CONFIRM -> OtaWizardStep.TRANSFER
-        OtaWizardStep.TRANSFER -> OtaWizardStep.TRANSFER
-        OtaWizardStep.RESULT -> OtaWizardStep.RESULT
-    }
+    ): OtaWizardStep =
+        when (current) {
+            OtaWizardStep.SELECT -> if (selectionReady) OtaWizardStep.PRECHECK else OtaWizardStep.SELECT
+            OtaWizardStep.PRECHECK -> if (precheckPassed) OtaWizardStep.CONFIRM else OtaWizardStep.PRECHECK
+            OtaWizardStep.CONFIRM -> OtaWizardStep.TRANSFER
+            OtaWizardStep.TRANSFER -> OtaWizardStep.TRANSFER
+            OtaWizardStep.RESULT -> OtaWizardStep.RESULT
+        }
 
-    fun previous(current: OtaWizardStep, running: Boolean): OtaWizardStep = when (current) {
-        OtaWizardStep.SELECT -> OtaWizardStep.SELECT
-        OtaWizardStep.PRECHECK -> OtaWizardStep.SELECT
-        OtaWizardStep.CONFIRM -> OtaWizardStep.PRECHECK
-        OtaWizardStep.TRANSFER -> if (running) OtaWizardStep.TRANSFER else OtaWizardStep.PRECHECK
-        OtaWizardStep.RESULT -> OtaWizardStep.SELECT
-    }
+    fun previous(
+        current: OtaWizardStep,
+        running: Boolean,
+    ): OtaWizardStep =
+        when (current) {
+            OtaWizardStep.SELECT -> OtaWizardStep.SELECT
+            OtaWizardStep.PRECHECK -> OtaWizardStep.SELECT
+            OtaWizardStep.CONFIRM -> OtaWizardStep.PRECHECK
+            OtaWizardStep.TRANSFER -> if (running) OtaWizardStep.TRANSFER else OtaWizardStep.PRECHECK
+            OtaWizardStep.RESULT -> OtaWizardStep.SELECT
+        }
 
-    fun cancel(current: OtaWizardStep, running: Boolean): OtaWizardCancel = when {
-        running -> OtaWizardCancel.ABORT
-        current == OtaWizardStep.TRANSFER || current == OtaWizardStep.RESULT -> OtaWizardCancel.EXIT
-        else -> OtaWizardCancel.CLEAR_AND_EXIT
-    }
+    fun cancel(
+        current: OtaWizardStep,
+        running: Boolean,
+    ): OtaWizardCancel =
+        when {
+            running -> OtaWizardCancel.ABORT
+            current == OtaWizardStep.TRANSFER || current == OtaWizardStep.RESULT -> OtaWizardCancel.EXIT
+            else -> OtaWizardCancel.CLEAR_AND_EXIT
+        }
 
     fun onRunStarted(): OtaWizardStep = OtaWizardStep.TRANSFER
 
     fun onTerminal(): OtaWizardStep = OtaWizardStep.RESULT
 
     /** 断点进度百分比（0..100）；总量无效时返回 0。 */
-    fun resumePercent(sentBytes: Long, totalBytes: Long): Int {
+    fun resumePercent(
+        sentBytes: Long,
+        totalBytes: Long,
+    ): Int {
         if (totalBytes <= 0L) return 0
         return ((sentBytes.toDouble() / totalBytes.toDouble()) * 100.0)
             .coerceIn(0.0, 100.0)
@@ -111,7 +124,6 @@ data class OtaPrecheckRuleResult(
 )
 
 object OtaPrecheckRuleEvaluator {
-
     /** 把预检结果映射为固定的逐条规则列表；[FirmwarePrecheckResult.warnings] 另作非阻断提示展示。 */
     fun evaluate(result: FirmwarePrecheckResult): List<OtaPrecheckRuleResult> {
         val blockingByRule = result.errors.groupBy { ruleOf(it.code) }
@@ -130,12 +142,13 @@ object OtaPrecheckRuleEvaluator {
         }
     }
 
-    fun ruleOf(code: String): OtaPrecheckRule = when {
-        code.startsWith("firmware.signature") -> OtaPrecheckRule.SIGNATURE
-        code == "firmware.payload_crc" -> OtaPrecheckRule.PAYLOAD_CRC
-        code == "firmware.too_large" -> OtaPrecheckRule.SIZE_LIMIT
-        code == "firmware.model" || code == "firmware.hardware_unknown" -> OtaPrecheckRule.DEVICE_MODEL
-        code.startsWith("firmware.version") -> OtaPrecheckRule.VERSION_DIRECTION
-        else -> OtaPrecheckRule.FILE_STRUCTURE
-    }
+    fun ruleOf(code: String): OtaPrecheckRule =
+        when {
+            code.startsWith("firmware.signature") -> OtaPrecheckRule.SIGNATURE
+            code == "firmware.payload_crc" -> OtaPrecheckRule.PAYLOAD_CRC
+            code == "firmware.too_large" -> OtaPrecheckRule.SIZE_LIMIT
+            code == "firmware.model" || code == "firmware.hardware_unknown" -> OtaPrecheckRule.DEVICE_MODEL
+            code.startsWith("firmware.version") -> OtaPrecheckRule.VERSION_DIRECTION
+            else -> OtaPrecheckRule.FILE_STRUCTURE
+        }
 }

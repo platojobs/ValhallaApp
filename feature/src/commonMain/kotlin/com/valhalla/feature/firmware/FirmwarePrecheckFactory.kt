@@ -23,7 +23,6 @@ expect fun rememberFirmwareSigningKeyPem(): String?
 
 /** 生产固件预检装配：ECDSA-P256 验签，HMAC 实现仅保留在测试/模拟器路径。 */
 object FirmwarePrecheckFactory {
-
     /**
      * 装配规则：
      * - 已注入且可解析 → ECDSA 验签 + [FirmwareSignaturePolicy.REQUIRE]；
@@ -49,8 +48,13 @@ object FirmwarePrecheckFactory {
     }
 
     /** 公钥配置错误时的失败关闭实现：任何签名都不通过。 */
-    private class RejectingFirmwareVerifier(private val reason: String) : FirmwareSignatureVerifier {
-        override fun verify(digest: ByteArray, signature: FirmwareSignature): Boolean = false
+    private class RejectingFirmwareVerifier(
+        private val reason: String,
+    ) : FirmwareSignatureVerifier {
+        override fun verify(
+            digest: ByteArray,
+            signature: FirmwareSignature,
+        ): Boolean = false
 
         override fun toString(): String = "RejectingFirmwareVerifier($reason)"
     }

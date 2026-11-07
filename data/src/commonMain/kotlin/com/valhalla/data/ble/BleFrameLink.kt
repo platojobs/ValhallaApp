@@ -34,15 +34,15 @@ class BleFrameLink(
     private val writeCharacteristicUuid: String = BleUuids.PROTOCOL_WRITE,
     private val notifyCharacteristicUuid: String = BleUuids.PROTOCOL_NOTIFY,
 ) : FrameLink {
-
     private val writeMutex = Mutex()
 
-    override val incoming: Flow<Frame> = flow {
-        val parser = FrameParser()
-        connection.observe(serviceUuid, notifyCharacteristicUuid).collect { chunk ->
-            parser.feed(chunk).forEach { frame -> emit(frame) }
+    override val incoming: Flow<Frame> =
+        flow {
+            val parser = FrameParser()
+            connection.observe(serviceUuid, notifyCharacteristicUuid).collect { chunk ->
+                parser.feed(chunk).forEach { frame -> emit(frame) }
+            }
         }
-    }
 
     override suspend fun send(frame: Frame) {
         val encoded = FrameCodec.encode(frame)

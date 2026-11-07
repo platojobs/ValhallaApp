@@ -13,8 +13,10 @@ data class UiMessage(
     val nested: Map<String, UiMessage> = emptyMap(),
 ) {
     companion object {
-        fun of(key: StringKey, vararg args: Pair<String, String>): UiMessage =
-            UiMessage(key, args.toMap())
+        fun of(
+            key: StringKey,
+            vararg args: Pair<String, String>,
+        ): UiMessage = UiMessage(key, args.toMap())
     }
 }
 

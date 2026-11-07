@@ -3,6 +3,9 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
     alias(libs.plugins.android.library)
+    alias(libs.plugins.detekt)
+    alias(libs.plugins.ktlint)
+    alias(libs.plugins.kover)
 }
 
 // ---------------------------------------------------------------------------
@@ -34,17 +37,19 @@ val generateAppInfo by tasks.registering {
     // 提交号来自 git/CI 环境，无法作为稳定输入，因此每次构建都重新生成。
     outputs.upToDateWhen { false }
     doLast {
-        val commit = runCatching {
-            envCommit.orNull
-                ?: envSha.orNull
-                ?: ProcessBuilder("git", "rev-parse", "--short=8", "HEAD")
-                    .directory(rootProject.projectDir)
-                    .redirectErrorStream(true)
-                    .start()
-                    .inputStream.bufferedReader()
-                    .use { it.readText() }
-                    .trim()
-        }.getOrNull().orEmpty().takeIf { it.isNotBlank() } ?: ""
+        val commit =
+            runCatching {
+                envCommit.orNull
+                    ?: envSha.orNull
+                    ?: ProcessBuilder("git", "rev-parse", "--short=8", "HEAD")
+                        .directory(rootProject.projectDir)
+                        .redirectErrorStream(true)
+                        .start()
+                        .inputStream
+                        .bufferedReader()
+                        .use { it.readText() }
+                        .trim()
+            }.getOrNull().orEmpty().takeIf { it.isNotBlank() } ?: ""
 
         val file = generatedAppInfoDir.get().asFile.resolve("com/valhalla/core/AppBuildInfo.kt")
         file.parentFile.mkdirs()
@@ -76,18 +81,19 @@ val generateAppInfo by tasks.registering {
 
             /** 关于页展示的开源许可清单，只列实际声明的依赖。 */
             object AppDependencyInfo {
-                val entries: List<AppDependency> = listOf(
-                    AppDependency("Kotlin", "$kotlinVersion", "Apache-2.0", "runtime"),
-                    AppDependency("Kotlinx Coroutines", "$coroutinesVersion", "Apache-2.0", "runtime"),
-                    AppDependency("Compose Multiplatform", "$composeVersion", "Apache-2.0", "runtime"),
-                    AppDependency("AndroidX Activity Compose", "$activityComposeVersion", "Apache-2.0", "android"),
-                    AppDependency("AndroidX Core", "$androidxCoreVersion", "Apache-2.0", "android"),
-                    AppDependency("Kotlin Test", "$kotlinVersion", "Apache-2.0", "test"),
-                    AppDependency("Kotlinx Coroutines Test", "$coroutinesVersion", "Apache-2.0", "test"),
-                    AppDependency("AndroidX Test Ext JUnit", "$androidxTestJunitVersion", "Apache-2.0", "test"),
-                    AppDependency("AndroidX Test Runner", "$androidxTestRunnerVersion", "Apache-2.0", "test"),
-                    AppDependency("Android Gradle Plugin", "$agpVersion", "Apache-2.0", "build"),
-                )
+                val entries: List<AppDependency> =
+                    listOf(
+                        AppDependency("Kotlin", "$kotlinVersion", "Apache-2.0", "runtime"),
+                        AppDependency("Kotlinx Coroutines", "$coroutinesVersion", "Apache-2.0", "runtime"),
+                        AppDependency("Compose Multiplatform", "$composeVersion", "Apache-2.0", "runtime"),
+                        AppDependency("AndroidX Activity Compose", "$activityComposeVersion", "Apache-2.0", "android"),
+                        AppDependency("AndroidX Core", "$androidxCoreVersion", "Apache-2.0", "android"),
+                        AppDependency("Kotlin Test", "$kotlinVersion", "Apache-2.0", "test"),
+                        AppDependency("Kotlinx Coroutines Test", "$coroutinesVersion", "Apache-2.0", "test"),
+                        AppDependency("AndroidX Test Ext JUnit", "$androidxTestJunitVersion", "Apache-2.0", "test"),
+                        AppDependency("AndroidX Test Runner", "$androidxTestRunnerVersion", "Apache-2.0", "test"),
+                        AppDependency("Android Gradle Plugin", "$agpVersion", "Apache-2.0", "build"),
+                    )
             }
 
             """.trimIndent(),
@@ -95,7 +101,10 @@ val generateAppInfo by tasks.registering {
     }
 }
 
-kotlin.sourceSets.getByName("commonMain").kotlin.srcDir(generateAppInfo)
+kotlin.sourceSets
+    .getByName("commonMain")
+    .kotlin
+    .srcDir(generateAppInfo)
 tasks.matching { it.name.startsWith("compileKotlin") }.configureEach {
     dependsOn(generateAppInfo)
 }
@@ -139,10 +148,16 @@ kotlin {
 
 android {
     namespace = "com.valhalla.core"
-    compileSdk = libs.versions.androidCompileSdk.get().toInt()
+    compileSdk =
+        libs.versions.androidCompileSdk
+            .get()
+            .toInt()
 
     defaultConfig {
-        minSdk = libs.versions.androidMinSdk.get().toInt()
+        minSdk =
+            libs.versions.androidMinSdk
+                .get()
+                .toInt()
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -156,7 +171,11 @@ android {
  * 导出基准：默认 5000 条 / 16 MiB 的 JSON 导出，输出耗时、吞吐与峰值缓冲。
  * 独立任务，不挂到 `check`/`jvmTest`，避免阻塞常规测试与 CI。
  */
-val jvmTestCompilation = kotlin.targets.getByName("jvm").compilations.getByName("test")
+val jvmTestCompilation =
+    kotlin.targets
+        .getByName("jvm")
+        .compilations
+        .getByName("test")
 
 tasks.register<JavaExec>("benchmarkExport") {
     group = "benchmark"
@@ -165,4 +184,15 @@ tasks.register<JavaExec>("benchmarkExport") {
     classpath = jvmTestCompilation.output.allOutputs + jvmTestCompilation.runtimeDependencyFiles
     mainClass.set("com.valhalla.core.logging.PacketLogExportBenchmarkKt")
     jvmArgs("-Xmx1g")
+}
+
+// 只统计 JVM 单元测试覆盖率，不含 Android instrumented；行覆盖阈值 75%。
+kover {
+    reports {
+        verify {
+            rule {
+                minBound(75)
+            }
+        }
+    }
 }

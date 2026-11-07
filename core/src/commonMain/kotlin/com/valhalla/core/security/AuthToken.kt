@@ -10,7 +10,6 @@ data class AuthToken(
     val value: String,
     val expiresAtEpochMillis: Long,
 ) {
-
     init {
         require(value.isNotEmpty()) { "令牌不能为空" }
         require(expiresAtEpochMillis >= 0) { "过期时间不能为负: $expiresAtEpochMillis" }
@@ -24,7 +23,6 @@ data class AuthToken(
 
 /** 令牌在存储层的字符串编码，用于平台 Keychain/SharedPreferences 持久化。 */
 object AuthTokenCodec {
-
     private const val SEPARATOR = '\u0001'
 
     fun encode(token: AuthToken): String = "${token.value}$SEPARATOR${token.expiresAtEpochMillis}"
@@ -46,7 +44,6 @@ object AuthTokenCodec {
  * JVM 内存）。存储层不得抛出平台异常，损坏数据一律按「无令牌」处理。
  */
 interface TokenStore {
-
     fun save(token: AuthToken)
 
     fun load(): AuthToken?
@@ -68,7 +65,6 @@ interface TokenStore {
 
 /** 内存实现：JVM 测试宿主使用，进程退出即丢失。 */
 class InMemoryTokenStore : TokenStore {
-
     private var raw: String? = null
 
     override fun save(token: AuthToken) {

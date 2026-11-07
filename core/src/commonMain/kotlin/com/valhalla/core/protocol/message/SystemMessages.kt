@@ -5,8 +5,9 @@ import com.valhalla.core.protocol.CommandType
 import com.valhalla.core.state.DeviceState
 
 /** 恢复出厂设置，payload：`confirmToken:str1`（可为空串）。 */
-class FactoryResetRequest(val confirmToken: String = "") : DeviceRequest() {
-
+class FactoryResetRequest(
+    val confirmToken: String = "",
+) : DeviceRequest() {
     override val command: CommandType = CommandType.FACTORY_RESET
 
     override fun encodeBody(writer: PayloadWriter) {
@@ -15,8 +16,9 @@ class FactoryResetRequest(val confirmToken: String = "") : DeviceRequest() {
 }
 
 /** 恢复出厂设置应答，payload 只有状态码。 */
-class FactoryResetResponse(status: DeviceStatus) : DeviceResponse() {
-
+class FactoryResetResponse(
+    status: DeviceStatus,
+) : DeviceResponse() {
     override val command: CommandType = CommandType.FACTORY_RESET
 
     override val status: DeviceStatus = status
@@ -29,7 +31,6 @@ class RebootRequest(
     val delayMillis: Int = 0,
     val reason: Int = 0,
 ) : DeviceRequest() {
-
     init {
         require(delayMillis in 0..0xFFFF) { "delayMillis 超出范围: $delayMillis" }
         require(reason in 0..0xFF) { "reason 超出范围: $reason" }
@@ -44,8 +45,9 @@ class RebootRequest(
 }
 
 /** 重启应答，payload 只有状态码。 */
-class RebootResponse(status: DeviceStatus) : DeviceResponse() {
-
+class RebootResponse(
+    status: DeviceStatus,
+) : DeviceResponse() {
     override val command: CommandType = CommandType.REBOOT
 
     override val status: DeviceStatus = status
@@ -58,7 +60,6 @@ class LogDumpRequest(
     val sinceSequence: Long = 0,
     val maxEntries: Int = 64,
 ) : DeviceRequest() {
-
     init {
         require(sinceSequence in 0..0xFFFFFFFFL) { "sinceSequence 超出范围: $sinceSequence" }
         require(maxEntries in 1..0xFFFF) { "maxEntries 超出范围: $maxEntries" }
@@ -84,7 +85,6 @@ class LogDumpResponse(
     status: DeviceStatus,
     val entries: List<DeviceLogEntry>,
 ) : DeviceResponse() {
-
     override val command: CommandType = CommandType.LOG_DUMP
 
     override val status: DeviceStatus = status
@@ -100,8 +100,9 @@ class LogDumpResponse(
 }
 
 /** 心跳请求：`uptimeSeconds:u32`。 */
-class HeartbeatRequest(val uptimeSeconds: Long) : DeviceRequest() {
-
+class HeartbeatRequest(
+    val uptimeSeconds: Long,
+) : DeviceRequest() {
     init {
         require(uptimeSeconds in 0..0xFFFFFFFFL) { "uptimeSeconds 超出范围: $uptimeSeconds" }
     }
@@ -119,7 +120,6 @@ class HeartbeatResponse(
     val uptimeSeconds: Long,
     val batteryPercent: Int,
 ) : DeviceResponse() {
-
     init {
         require(batteryPercent in 0..100) { "电池百分比超出范围: $batteryPercent" }
     }
@@ -139,7 +139,6 @@ class HeartbeatReplyNotification(
     val batteryPercent: Int,
     val uptimeSeconds: Long,
 ) : DeviceNotification() {
-
     init {
         require(batteryPercent in 0..100) { "电池百分比超出范围: $batteryPercent" }
         require(uptimeSeconds in 0..0xFFFFFFFFL) { "uptimeSeconds 超出范围: $uptimeSeconds" }
@@ -159,7 +158,6 @@ class DeviceStatusNotification(
     val batteryPercent: Int,
     val faultCode: Int,
 ) : DeviceNotification() {
-
     init {
         require(batteryPercent in 0..100) { "电池百分比超出范围: $batteryPercent" }
         require(faultCode in 0..0xFFFF) { "faultCode 超出范围: $faultCode" }
@@ -174,25 +172,27 @@ class DeviceStatusNotification(
     }
 
     companion object {
-        fun deviceStateCode(state: DeviceState): Int = when (state) {
-            DeviceState.DISCONNECTED -> 0x00
-            DeviceState.CONNECTING -> 0x01
-            DeviceState.CONNECTED -> 0x02
-            DeviceState.AUTHENTICATING -> 0x03
-            DeviceState.READY -> 0x04
-            DeviceState.DISCONNECTING -> 0x05
-            DeviceState.FAULT -> 0x06
-        }
+        fun deviceStateCode(state: DeviceState): Int =
+            when (state) {
+                DeviceState.DISCONNECTED -> 0x00
+                DeviceState.CONNECTING -> 0x01
+                DeviceState.CONNECTED -> 0x02
+                DeviceState.AUTHENTICATING -> 0x03
+                DeviceState.READY -> 0x04
+                DeviceState.DISCONNECTING -> 0x05
+                DeviceState.FAULT -> 0x06
+            }
 
-        fun deviceStateFromCode(code: Int): DeviceState? = when (code) {
-            0x00 -> DeviceState.DISCONNECTED
-            0x01 -> DeviceState.CONNECTING
-            0x02 -> DeviceState.CONNECTED
-            0x03 -> DeviceState.AUTHENTICATING
-            0x04 -> DeviceState.READY
-            0x05 -> DeviceState.DISCONNECTING
-            0x06 -> DeviceState.FAULT
-            else -> null
-        }
+        fun deviceStateFromCode(code: Int): DeviceState? =
+            when (code) {
+                0x00 -> DeviceState.DISCONNECTED
+                0x01 -> DeviceState.CONNECTING
+                0x02 -> DeviceState.CONNECTED
+                0x03 -> DeviceState.AUTHENTICATING
+                0x04 -> DeviceState.READY
+                0x05 -> DeviceState.DISCONNECTING
+                0x06 -> DeviceState.FAULT
+                else -> null
+            }
     }
 }

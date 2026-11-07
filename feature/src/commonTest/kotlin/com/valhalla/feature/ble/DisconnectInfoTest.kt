@@ -1,24 +1,24 @@
 package com.valhalla.feature.ble
 
 import com.valhalla.data.ble.BleAdapterState
-import kotlin.test.Test
 import com.valhalla.feature.i18n.StringKey
 import com.valhalla.feature.i18n.UiMessage
+import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class DisconnectInfoTest {
-
     @Test
     fun `主动断开优先级最高且不自动重连`() {
-        val info = classifyDisconnect(
-            DisconnectSignals(
-                userRequested = true,
-                adapterState = BleAdapterState.POWERED_OFF,
-                permissionState = BlePermissionState.PERMANENTLY_DENIED,
-            ),
-        )
+        val info =
+            classifyDisconnect(
+                DisconnectSignals(
+                    userRequested = true,
+                    adapterState = BleAdapterState.POWERED_OFF,
+                    permissionState = BlePermissionState.PERMANENTLY_DENIED,
+                ),
+            )
 
         assertEquals(DisconnectReason.USER_REQUESTED, info.reason)
         assertEquals(DisconnectAction.RESCAN, info.action)
@@ -36,17 +36,19 @@ class DisconnectInfoTest {
                 assertFalse(info.autoReconnectAllowed)
             }
 
-        val unauthorized = classifyDisconnect(
-            DisconnectSignals(adapterState = BleAdapterState.UNAUTHORIZED),
-        )
+        val unauthorized =
+            classifyDisconnect(
+                DisconnectSignals(adapterState = BleAdapterState.UNAUTHORIZED),
+            )
         assertEquals(DisconnectReason.PERMISSION_LOST, unauthorized.reason)
     }
 
     @Test
     fun `蓝牙关闭映射为开启蓝牙并允许自动重连`() {
-        val info = classifyDisconnect(
-            DisconnectSignals(adapterState = BleAdapterState.POWERED_OFF),
-        )
+        val info =
+            classifyDisconnect(
+                DisconnectSignals(adapterState = BleAdapterState.POWERED_OFF),
+            )
 
         assertEquals(DisconnectReason.BLUETOOTH_OFF, info.reason)
         assertEquals(DisconnectAction.ENABLE_BLUETOOTH, info.action)
@@ -90,9 +92,10 @@ class DisconnectInfoTest {
 
     @Test
     fun `蓝牙重置时提示重置并允许重连`() {
-        val info = classifyDisconnect(
-            DisconnectSignals(adapterState = BleAdapterState.RESETTING),
-        )
+        val info =
+            classifyDisconnect(
+                DisconnectSignals(adapterState = BleAdapterState.RESETTING),
+            )
 
         assertEquals(DisconnectReason.BLUETOOTH_OFF, info.reason)
         assertEquals(StringKey.DISCONNECT_RESETTING_TITLE, info.title.key)

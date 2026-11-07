@@ -19,11 +19,9 @@ import platform.UserNotifications.UNNotificationSound
 import platform.UserNotifications.UNUserNotificationCenter
 
 @Composable
-actual fun rememberNotificationPresenter(): NotificationPresenter =
-    remember { IosNotificationPresenter() }
+actual fun rememberNotificationPresenter(): NotificationPresenter = remember { IosNotificationPresenter() }
 
 private class IosNotificationPresenter : NotificationPresenter {
-
     private val center = UNUserNotificationCenter.currentNotificationCenter()
     private val mutableState = MutableStateFlow(BlePermissionState.NOT_REQUESTED)
     private var nextId = 1
@@ -43,12 +41,13 @@ private class IosNotificationPresenter : NotificationPresenter {
         center.requestAuthorizationWithOptions(
             options = UNAuthorizationOptionAlert or UNAuthorizationOptionBadge or UNAuthorizationOptionSound,
         ) { granted: Boolean, _: NSError? ->
-            mutableState.value = if (granted) {
-                BlePermissionState.GRANTED
-            } else {
-                // iOS 拒绝后系统不再弹窗，只能引导到系统设置。
-                BlePermissionState.PERMANENTLY_DENIED
-            }
+            mutableState.value =
+                if (granted) {
+                    BlePermissionState.GRANTED
+                } else {
+                    // iOS 拒绝后系统不再弹窗，只能引导到系统设置。
+                    BlePermissionState.PERMANENTLY_DENIED
+                }
         }
     }
 
@@ -59,31 +58,39 @@ private class IosNotificationPresenter : NotificationPresenter {
     override fun refresh() {
         center.getNotificationSettingsWithCompletionHandler { settings ->
             val status = settings?.authorizationStatus
-            val granted = status == UNAuthorizationStatusAuthorized ||
-                status == UNAuthorizationStatusProvisional ||
-                status == UNAuthorizationStatusEphemeral
-            mutableState.value = when {
-                granted -> BlePermissionState.GRANTED
-                status == null -> BlePermissionState.NOT_REQUESTED
-                else -> BlePermissionState.PERMANENTLY_DENIED
-            }
+            val granted =
+                status == UNAuthorizationStatusAuthorized ||
+                    status == UNAuthorizationStatusProvisional ||
+                    status == UNAuthorizationStatusEphemeral
+            mutableState.value =
+                when {
+                    granted -> BlePermissionState.GRANTED
+                    status == null -> BlePermissionState.NOT_REQUESTED
+                    else -> BlePermissionState.PERMANENTLY_DENIED
+                }
         }
     }
 
-    override fun show(title: String, body: String, target: NotificationTarget) {
+    override fun show(
+        title: String,
+        body: String,
+        target: NotificationTarget,
+    ) {
         if (!canNotify) return
-        val content = UNMutableNotificationContent().apply {
-            setTitle(title)
-            setBody(body)
-            setSound(UNNotificationSound.defaultSound())
-            // Swift 的 UNUserNotificationCenterDelegate 读取该字段并交给 Compose 根界面跳转。
-            setUserInfo(mapOf("route" to target.wireValue()))
-        }
-        val request = UNNotificationRequest.requestWithIdentifier(
-            identifier = "valhalla.local.${nextId++}",
-            content = content,
-            trigger = null,
-        )
+        val content =
+            UNMutableNotificationContent().apply {
+                setTitle(title)
+                setBody(body)
+                setSound(UNNotificationSound.defaultSound())
+                // Swift 的 UNUserNotificationCenterDelegate 读取该字段并交给 Compose 根界面跳转。
+                setUserInfo(mapOf("route" to target.wireValue()))
+            }
+        val request =
+            UNNotificationRequest.requestWithIdentifier(
+                identifier = "valhalla.local.${nextId++}",
+                content = content,
+                trigger = null,
+            )
         center.addNotificationRequest(request, withCompletionHandler = null)
     }
 }

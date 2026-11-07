@@ -7,7 +7,6 @@ import platform.Foundation.NSUserDefaults
 actual fun createFirmwareLibraryStore(): FirmwareLibraryStore = NSUserDefaultsFirmwareLibraryStore()
 
 private class NSUserDefaultsFirmwareLibraryStore : FirmwareLibraryStore {
-
     private val defaults: NSUserDefaults = NSUserDefaults.standardUserDefaults
 
     override fun loadRaw(): String? = defaults.stringForKey(StorageKeys.IOS_FIRMWARE_KEY)

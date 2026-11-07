@@ -1,8 +1,8 @@
 package com.valhalla.feature.error
 
 import androidx.compose.runtime.staticCompositionLocalOf
-import com.valhalla.data.ble.BleTimeoutException
 import com.valhalla.core.command.CommandFailure
+import com.valhalla.data.ble.BleTimeoutException
 import com.valhalla.feature.i18n.StringKey
 import com.valhalla.feature.i18n.UiMessage
 import kotlinx.coroutines.CancellationException
@@ -34,7 +34,9 @@ enum class ErrorKind {
 }
 
 /** 用户主动取消的显式信号，供调用方与协程取消区分。 */
-class UserCancelledException(message: String = "用户取消") : CancellationException(message)
+class UserCancelledException(
+    message: String = "用户取消",
+) : CancellationException(message)
 
 /**
  * 把任意异常归类为四类之一。
@@ -42,14 +44,15 @@ class UserCancelledException(message: String = "用户取消") : CancellationExc
  * 判定顺序很重要：用户取消与超时都继承自 [CancellationException]，
  * 若先按协程取消处理会被误吞，导致 UI 无法区分「用户取消」与「宿主销毁」。
  */
-fun classifyError(error: Throwable): ErrorKind = when {
-    error is UserCancelledException -> ErrorKind.USER_CANCELLED
-    error is TimeoutCancellationException -> ErrorKind.TIMEOUT
-    error is CancellationException -> ErrorKind.COROUTINE_CANCELLED
-    error is BleTimeoutException -> ErrorKind.TIMEOUT
-    error is CommandFailure.Timeout -> ErrorKind.TIMEOUT
-    else -> ErrorKind.FAILURE
-}
+fun classifyError(error: Throwable): ErrorKind =
+    when {
+        error is UserCancelledException -> ErrorKind.USER_CANCELLED
+        error is TimeoutCancellationException -> ErrorKind.TIMEOUT
+        error is CancellationException -> ErrorKind.COROUTINE_CANCELLED
+        error is BleTimeoutException -> ErrorKind.TIMEOUT
+        error is CommandFailure.Timeout -> ErrorKind.TIMEOUT
+        else -> ErrorKind.FAILURE
+    }
 
 /**
  * 结构化错误记录。
@@ -67,10 +70,11 @@ data class AppError(
     val stackTrace: String,
 ) {
     /** 界面展示用文案：现象 + 原始类型与消息，便于用户反馈。 */
-    fun toUiMessage(): UiMessage = UiMessage(
-        StringKey.FAILURE_UNKNOWN,
-        mapOf("detail" to "$type: $message".trim()),
-    )
+    fun toUiMessage(): UiMessage =
+        UiMessage(
+            StringKey.FAILURE_UNKNOWN,
+            mapOf("detail" to "$type: $message".trim()),
+        )
 }
 
 /**
@@ -86,7 +90,6 @@ class ErrorReporter(
     /** 可选的远端批量上报调度器；默认 null（仅本地环形记录）。 */
     private val remoteDispatcher: RemoteErrorDispatcher? = null,
 ) {
-
     init {
         require(capacity > 0) { "capacity 必须大于 0" }
     }
@@ -104,15 +107,16 @@ class ErrorReporter(
         error: Throwable,
         kind: ErrorKind = classifyError(error),
     ): AppError {
-        val entry = AppError(
-            id = counter.updateAndGet { it + 1 } - 1,
-            timestampMillis = clockMillis(),
-            kind = kind,
-            origin = origin,
-            type = error::class.simpleName ?: "Throwable",
-            message = error.message ?: kind.name,
-            stackTrace = error.stackTraceToString().take(MAX_STACK_TRACE_CHARS),
-        )
+        val entry =
+            AppError(
+                id = counter.updateAndGet { it + 1 } - 1,
+                timestampMillis = clockMillis(),
+                kind = kind,
+                origin = origin,
+                type = error::class.simpleName ?: "Throwable",
+                message = error.message ?: kind.name,
+                stackTrace = error.stackTraceToString().take(MAX_STACK_TRACE_CHARS),
+            )
         mutableItems.update { current ->
             val appended = current + entry
             if (appended.size > capacity) {
@@ -155,26 +159,28 @@ fun CoroutineScope.launchSafely(
     origin: String,
     onError: ((AppError) -> Unit)? = null,
     block: suspend CoroutineScope.() -> Unit,
-): Job = launch {
-    try {
-        block()
-    } catch (timeout: TimeoutCancellationException) {
-        val error = reporter.record(origin, timeout, ErrorKind.TIMEOUT)
-        onError?.invoke(error)
-    } catch (cancelled: CancellationException) {
-        if (cancelled is UserCancelledException) {
-            val error = reporter.record(origin, cancelled, ErrorKind.USER_CANCELLED)
+): Job =
+    launch {
+        try {
+            block()
+        } catch (timeout: TimeoutCancellationException) {
+            val error = reporter.record(origin, timeout, ErrorKind.TIMEOUT)
             onError?.invoke(error)
-        } else {
-            throw cancelled
+        } catch (cancelled: CancellationException) {
+            if (cancelled is UserCancelledException) {
+                val error = reporter.record(origin, cancelled, ErrorKind.USER_CANCELLED)
+                onError?.invoke(error)
+            } else {
+                throw cancelled
+            }
+        } catch (error: Throwable) {
+            val recorded = reporter.record(origin, error)
+            onError?.invoke(recorded)
         }
-    } catch (error: Throwable) {
-        val recorded = reporter.record(origin, error)
-        onError?.invoke(recorded)
     }
-}
 
 /** 全局错误记录器；根界面会覆盖此默认值，保证整个 UI 共用一份记录。 */
-val LocalErrorReporter = staticCompositionLocalOf<ErrorReporter> {
-    ErrorReporter()
-}
+val LocalErrorReporter =
+    staticCompositionLocalOf<ErrorReporter> {
+        ErrorReporter()
+    }

@@ -12,7 +12,6 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class PrivacyDisclosureTest {
-
     @Test
     fun `隐私页为每种存储类别提供说明`() {
         val keys = privacyKeysForAllItems()
@@ -58,7 +57,10 @@ class PrivacyDisclosureTest {
         val version = com.valhalla.core.AppBuildInfo.VERSION_NAME
         assertTrue(Regex("^\\d+\\.\\d+\\.\\d+$").matches(version), "版本号格式异常：$version")
         assertTrue(com.valhalla.core.AppBuildInfo.VERSION_CODE > 0)
-        assertTrue(com.valhalla.core.AppBuildInfo.APP_NAME.isNotBlank())
+        assertTrue(
+            com.valhalla.core.AppBuildInfo.APP_NAME
+                .isNotBlank(),
+        )
     }
 
     @Test

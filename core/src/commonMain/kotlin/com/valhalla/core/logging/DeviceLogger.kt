@@ -1,6 +1,9 @@
 package com.valhalla.core.logging
 
-enum class LogLevel(val priority: Int, val label: String) {
+enum class LogLevel(
+    val priority: Int,
+    val label: String,
+) {
     VERBOSE(0, "V"),
     DEBUG(1, "D"),
     INFO(2, "I"),
@@ -22,7 +25,12 @@ data class LogEntry(
  * 设备日志接口。实现方需保证 UI 侧只读快照即可渲染，避免直接暴露可变集合。
  */
 interface DeviceLogger {
-    fun log(level: LogLevel, tag: String, message: String, timestampMillis: Long = 0L)
+    fun log(
+        level: LogLevel,
+        tag: String,
+        message: String,
+        timestampMillis: Long = 0L,
+    )
 
     fun entries(): List<LogEntry>
 
@@ -35,8 +43,9 @@ interface DeviceLogger {
  * 说明：写入采用「整体替换不可变快照」的方式，读侧永远拿到一致的列表；
  * 并发写入时允许丢失极端场景下的日志，但不会产生结构性损坏。
  */
-class InMemoryDeviceLogger(private val capacity: Int = 200) : DeviceLogger {
-
+class InMemoryDeviceLogger(
+    private val capacity: Int = 200,
+) : DeviceLogger {
     init {
         require(capacity > 0) { "capacity 必须大于 0" }
     }
@@ -44,22 +53,29 @@ class InMemoryDeviceLogger(private val capacity: Int = 200) : DeviceLogger {
     private var snapshot: List<LogEntry> = emptyList()
     private var nextId: Long = 0
 
-    override fun log(level: LogLevel, tag: String, message: String, timestampMillis: Long) {
-        val entry = LogEntry(
-            id = nextId++,
-            timestampMillis = timestampMillis,
-            level = level,
-            tag = SensitiveTextRedaction.redactInline(tag),
-            // 设备回传的自由文本可能夹带 deviceId/序列号/密钥片段，入库前统一过滤；
-            // UI 与后续导出都读取同一份已脱敏快照，不存在绕过路径。
-            message = SensitiveTextRedaction.redact(message),
-        )
+    override fun log(
+        level: LogLevel,
+        tag: String,
+        message: String,
+        timestampMillis: Long,
+    ) {
+        val entry =
+            LogEntry(
+                id = nextId++,
+                timestampMillis = timestampMillis,
+                level = level,
+                tag = SensitiveTextRedaction.redactInline(tag),
+                // 设备回传的自由文本可能夹带 deviceId/序列号/密钥片段，入库前统一过滤；
+                // UI 与后续导出都读取同一份已脱敏快照，不存在绕过路径。
+                message = SensitiveTextRedaction.redact(message),
+            )
         val appended = snapshot + entry
-        snapshot = if (appended.size > capacity) {
-            appended.subList(appended.size - capacity, appended.size).toList()
-        } else {
-            appended
-        }
+        snapshot =
+            if (appended.size > capacity) {
+                appended.subList(appended.size - capacity, appended.size).toList()
+            } else {
+                appended
+            }
     }
 
     override fun entries(): List<LogEntry> = snapshot

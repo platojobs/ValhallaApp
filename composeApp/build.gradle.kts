@@ -6,6 +6,8 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.compose.multiplatform)
     alias(libs.plugins.compose.compiler)
+    alias(libs.plugins.detekt)
+    alias(libs.plugins.ktlint)
 }
 
 // ---------------------------------------------------------------------------
@@ -20,13 +22,17 @@ val appVersionCode: Int = providers.gradleProperty("valhalla.versionCode").getOr
 // 全部缺失时允许产出未签名 APK（并给出警告）；只配置了一部分则直接报错。
 // ---------------------------------------------------------------------------
 val keystorePropertiesFile = rootProject.file("keystore.properties")
-val keystoreProperties = Properties().apply {
-    if (keystorePropertiesFile.exists()) {
-        keystorePropertiesFile.inputStream().use { load(it) }
+val keystoreProperties =
+    Properties().apply {
+        if (keystorePropertiesFile.exists()) {
+            keystorePropertiesFile.inputStream().use { load(it) }
+        }
     }
-}
 
-fun signingValue(propertyKey: String, envKey: String): String? =
+fun signingValue(
+    propertyKey: String,
+    envKey: String,
+): String? =
     System.getenv(envKey)?.takeIf { it.isNotBlank() }
         ?: keystoreProperties.getProperty(propertyKey)?.takeIf { it.isNotBlank() }
 
@@ -79,12 +85,21 @@ kotlin {
 
 android {
     namespace = "com.valhalla.app"
-    compileSdk = libs.versions.androidCompileSdk.get().toInt()
+    compileSdk =
+        libs.versions.androidCompileSdk
+            .get()
+            .toInt()
 
     defaultConfig {
         applicationId = "com.valhalla.app"
-        minSdk = libs.versions.androidMinSdk.get().toInt()
-        targetSdk = libs.versions.androidTargetSdk.get().toInt()
+        minSdk =
+            libs.versions.androidMinSdk
+                .get()
+                .toInt()
+        targetSdk =
+            libs.versions.androidTargetSdk
+                .get()
+                .toInt()
         versionCode = appVersionCode
         versionName = appVersionName
     }
@@ -138,7 +153,10 @@ if (!signingComplete) {
 // baseConfigurationReference 读取）。文件需随仓库提交，`verifyVersionConsistency`
 // 会校验它与 gradle.properties 未漂移。
 // ---------------------------------------------------------------------------
-val iosVersionConfig = rootProject.layout.projectDirectory.file("iosApp/iosApp/Version.xcconfig").asFile
+val iosVersionConfig =
+    rootProject.layout.projectDirectory
+        .file("iosApp/iosApp/Version.xcconfig")
+        .asFile
 
 tasks.register("syncIosVersion") {
     group = "version"
@@ -173,8 +191,8 @@ tasks.register("verifyVersionConsistency") {
             "缺少 ${iosVersionConfig.path}；请先运行 ./gradlew :composeApp:syncIosVersion"
         }
         val config = iosVersionConfig.readText()
-        fun xcconfigValue(key: String): String? =
-            Regex("""^$key\s*=\s*(\S+)""", RegexOption.MULTILINE).find(config)?.groupValues?.get(1)
+
+        fun xcconfigValue(key: String): String? = Regex("""^$key\s*=\s*(\S+)""", RegexOption.MULTILINE).find(config)?.groupValues?.get(1)
 
         check(xcconfigValue("MARKETING_VERSION") == appVersionName) {
             "Version.xcconfig 的 MARKETING_VERSION 与 gradle.properties 不一致"
@@ -191,7 +209,11 @@ tasks.register("verifyVersionConsistency") {
             "Info.plist 的 CFBundleVersion 应引用 \$(CURRENT_PROJECT_VERSION)"
         }
 
-        val androidScript = layout.projectDirectory.file("build.gradle.kts").asFile.readText()
+        val androidScript =
+            layout.projectDirectory
+                .file("build.gradle.kts")
+                .asFile
+                .readText()
         check(androidScript.contains("valhalla.versionName") && androidScript.contains("valhalla.versionCode")) {
             "composeApp/build.gradle.kts 应从 gradle.properties 读取版本号，而不是硬编码"
         }
@@ -204,7 +226,11 @@ tasks.register("verifyReleaseArtifact") {
     description = "构建 release 并校验 APK 产物存在（未配置签名时给出警告）"
     dependsOn(tasks.named("assembleRelease"))
     doLast {
-        val apkDir = layout.buildDirectory.dir("outputs/apk/release").get().asFile
+        val apkDir =
+            layout.buildDirectory
+                .dir("outputs/apk/release")
+                .get()
+                .asFile
         val apks = apkDir.listFiles { file -> file.extension == "apk" }.orEmpty().sortedBy { it.name }
         check(apks.isNotEmpty()) { "未找到 release APK：${apkDir.path}" }
         val unsigned = apks.filter { it.name.contains("unsigned") }

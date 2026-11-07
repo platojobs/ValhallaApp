@@ -31,11 +31,12 @@ actual fun rememberFirmwarePicker(): FirmwarePicker {
     val context = LocalContext.current
     val resolver = context.contentResolver
     val pending = remember { PendingPick() }
-    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        val deferred = pending.deferred
-        pending.deferred = null
-        deferred?.complete(uri)
-    }
+    val launcher =
+        rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            val deferred = pending.deferred
+            pending.deferred = null
+            deferred?.complete(uri)
+        }
 
     return remember(resolver, launcher, pending) {
         object : FirmwarePicker {
@@ -53,21 +54,25 @@ actual fun rememberFirmwarePicker(): FirmwarePicker {
                 )
             }
 
-            override suspend fun openFirmware(sourcePath: String): PickedFirmware? = runCatching {
-                val uri = Uri.parse(sourcePath)
-                if (uri.scheme == null) return@runCatching null
-                val name = queryDisplayName(resolver, uri) ?: "firmware.bin"
-                PickedFirmware(
-                    name = name,
-                    source = ContentUriFirmwareSource(resolver, uri),
-                    sourcePath = sourcePath,
-                )
-            }.getOrNull()
+            override suspend fun openFirmware(sourcePath: String): PickedFirmware? =
+                runCatching {
+                    val uri = Uri.parse(sourcePath)
+                    if (uri.scheme == null) return@runCatching null
+                    val name = queryDisplayName(resolver, uri) ?: "firmware.bin"
+                    PickedFirmware(
+                        name = name,
+                        source = ContentUriFirmwareSource(resolver, uri),
+                        sourcePath = sourcePath,
+                    )
+                }.getOrNull()
         }
     }
 }
 
-private fun queryDisplayName(resolver: ContentResolver, uri: Uri): String? =
+private fun queryDisplayName(
+    resolver: ContentResolver,
+    uri: Uri,
+): String? =
     runCatching {
         resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
             if (cursor.moveToFirst()) cursor.getString(0) else null
@@ -84,7 +89,6 @@ private class ContentUriFirmwareSource(
     resolver: ContentResolver,
     private val uri: Uri,
 ) : FirmwareSource {
-
     private val mutex = Mutex()
     private val descriptor: ParcelFileDescriptor =
         resolver.openFileDescriptor(uri, "r") ?: throw IOException("无法打开固件文件: $uri")
@@ -94,7 +98,10 @@ private class ContentUriFirmwareSource(
     override val size: Long =
         descriptor.statSize.takeIf { it > 0 } ?: runCatching { channel.size() }.getOrDefault(0L)
 
-    override suspend fun read(offset: Long, length: Int): ByteArray {
+    override suspend fun read(
+        offset: Long,
+        length: Int,
+    ): ByteArray {
         if (offset < 0 || length < 0 || offset + length > size) {
             throw FirmwareException.ReadFailure(offset, length)
         }

@@ -55,7 +55,6 @@ import platform.Security.kSecValueData
 actual fun createTokenStore(): TokenStore = KeychainTokenStore()
 
 private class KeychainTokenStore : TokenStore {
-
     override fun save(token: AuthToken) {
         val payload = AuthTokenCodec.encode(token).encodeToByteArray()
         val query = baseQuery()
@@ -64,10 +63,11 @@ private class KeychainTokenStore : TokenStore {
             SecItemDelete(query.dict)
             query.addGlobal(kSecAttrAccessible, kSecAttrAccessibleAfterFirstUnlock)
             memScoped {
-                val data = NSData.create(
-                    bytes = allocArrayOf(payload),
-                    length = payload.size.toULong(),
-                )
+                val data =
+                    NSData.create(
+                        bytes = allocArrayOf(payload),
+                        length = payload.size.toULong(),
+                    )
                 val retainedData = CFBridgingRetain(data)
                 query.addRetained(kSecValueData, retainedData)
                 SecItemAdd(query.dict, null)
@@ -110,8 +110,9 @@ private class KeychainTokenStore : TokenStore {
     }
 
     private fun baseQuery(): KeychainQuery {
-        val dictionary = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, null, null)
-            ?: error("无法创建 Keychain 查询字典")
+        val dictionary =
+            CFDictionaryCreateMutable(kCFAllocatorDefault, 0, null, null)
+                ?: error("无法创建 Keychain 查询字典")
         val retained = mutableListOf<CFTypeRef?>()
         val service = CFBridgingRetain(StorageKeys.IOS_KEYCHAIN_SERVICE)
         val account = CFBridgingRetain(StorageKeys.IOS_KEYCHAIN_ACCOUNT)
@@ -134,12 +135,17 @@ private class KeychainQuery(
     val dict: CFMutableDictionaryRef,
     val retained: MutableList<CFTypeRef?>,
 ) {
-
-    fun addGlobal(key: CFStringRef?, value: CFTypeRef?) {
+    fun addGlobal(
+        key: CFStringRef?,
+        value: CFTypeRef?,
+    ) {
         CFDictionaryAddValue(dict, key, value)
     }
 
-    fun addRetained(key: CFStringRef?, value: CFTypeRef?) {
+    fun addRetained(
+        key: CFStringRef?,
+        value: CFTypeRef?,
+    ) {
         retained += value
         CFDictionaryAddValue(dict, key, value)
     }

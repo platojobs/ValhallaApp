@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 应用主主题：深色底，避免启动瞬间白屏。 -->
+    <style name="Theme.Valhalla" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/valhalla_background</item>
+        <item name="android:colorBackground">@color/valhalla_background</item>
+        <item name="android:statusBarColor">@color/valhalla_background</item>
+        <item name="android:navigationBarColor">@color/valhalla_background</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+    </style>
+
+    <!-- 启动主题：Android 12 以下使用深色 windowBackground 作为启动窗口。 -->
+    <style name="Theme.Valhalla.Starting" parent="Theme.Valhalla" />
+</resources>

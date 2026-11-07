@@ -52,7 +52,6 @@ class ConcurrentCommandDispatcher(
     private val logger: DeviceLogger? = null,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
 ) {
-
     private class PendingRequest(
         val command: CommandType,
         val deferred: CompletableDeferred<Frame> = CompletableDeferred(),
@@ -70,16 +69,17 @@ class ConcurrentCommandDispatcher(
      * 收集协程的异常边界：把原始异常类型与消息写入日志后结束该协程。
      * 不使用默认 uncaught handler，避免 Android 主线程默认行为直接崩溃进程。
      */
-    private val collectorExceptionHandler = CoroutineExceptionHandler { _, error ->
-        if (error !is CancellationException) {
-            logger?.log(
-                LogLevel.ERROR,
-                TAG,
-                "上行收集协程异常终止（${error::class.simpleName}）：${error.message}；" +
-                    "将在下一次请求时重建收集协程",
-            )
+    private val collectorExceptionHandler =
+        CoroutineExceptionHandler { _, error ->
+            if (error !is CancellationException) {
+                logger?.log(
+                    LogLevel.ERROR,
+                    TAG,
+                    "上行收集协程异常终止（${error::class.simpleName}）：${error.message}；" +
+                        "将在下一次请求时重建收集协程",
+                )
+            }
         }
-    }
 
     /** 设备主动通知流。解码失败的通知会被丢弃并记录日志，不打断业务请求。 */
     val notifications: SharedFlow<DeviceNotification> = notificationSink.asSharedFlow()
@@ -90,11 +90,12 @@ class ConcurrentCommandDispatcher(
         policy: RetryPolicy = defaultPolicy,
     ): DeviceResponse {
         val frame = executeRaw(request.command, request.encode(), policy)
-        val response = try {
-            MessageCodec.decodeResponse(request, frame)
-        } catch (error: MessageDecodeException) {
-            throw CommandFailure.InvalidResponse(error.message ?: "payload 解析失败")
-        }
+        val response =
+            try {
+                MessageCodec.decodeResponse(request, frame)
+            } catch (error: MessageDecodeException) {
+                throw CommandFailure.InvalidResponse(error.message ?: "payload 解析失败")
+            }
         if (!response.isSuccess) {
             throw CommandFailure.DeviceRejected(
                 command = request.command,
@@ -138,9 +139,10 @@ class ConcurrentCommandDispatcher(
                 }
 
                 if (transportError == null) {
-                    val response = withTimeoutOrNull(policy.timeoutMillis) {
-                        pendingRequest.deferred.await()
-                    }
+                    val response =
+                        withTimeoutOrNull(policy.timeoutMillis) {
+                            pendingRequest.deferred.await()
+                        }
                     if (response != null) {
                         logger?.log(
                             LogLevel.DEBUG,
@@ -173,13 +175,14 @@ class ConcurrentCommandDispatcher(
 
     /** 取消上行收集并终结所有在途请求。 */
     suspend fun close() {
-        val toCancel = stateMutex.withLock {
-            collectorJob?.cancel()
-            collectorJob = null
-            val values = pending.values.toList()
-            pending.clear()
-            values
-        }
+        val toCancel =
+            stateMutex.withLock {
+                collectorJob?.cancel()
+                collectorJob = null
+                val values = pending.values.toList()
+                pending.clear()
+                values
+            }
         toCancel.forEach { it.deferred.cancel() }
     }
 
@@ -187,9 +190,10 @@ class ConcurrentCommandDispatcher(
         startMutex.withLock {
             if (collectorJob?.isActive != true) {
                 val previous = collectorJob
-                collectorJob = scope.launch(collectorExceptionHandler) {
-                    link.incoming.collect { frame -> dispatch(frame) }
-                }
+                collectorJob =
+                    scope.launch(collectorExceptionHandler) {
+                        link.incoming.collect { frame -> dispatch(frame) }
+                    }
                 if (previous != null) {
                     logger?.log(LogLevel.INFO, TAG, "已重建上行收集协程")
                 }
@@ -200,12 +204,13 @@ class ConcurrentCommandDispatcher(
     private suspend fun dispatch(frame: Frame) {
         when {
             frame.isNotification -> {
-                val notification = try {
-                    MessageCodec.decodeNotification(frame)
-                } catch (error: MessageDecodeException) {
-                    logger?.log(LogLevel.WARN, TAG, "通知帧 ${frame.type.name} 解析失败: ${error.message}")
-                    null
-                }
+                val notification =
+                    try {
+                        MessageCodec.decodeNotification(frame)
+                    } catch (error: MessageDecodeException) {
+                        logger?.log(LogLevel.WARN, TAG, "通知帧 ${frame.type.name} 解析失败: ${error.message}")
+                        null
+                    }
                 if (notification != null) {
                     notificationSink.tryEmit(notification)
                 }
@@ -214,39 +219,44 @@ class ConcurrentCommandDispatcher(
             frame.isResponse -> {
                 val target = stateMutex.withLock { pending[frame.sequence] }
                 when {
-                    target == null -> logger?.log(
-                        LogLevel.DEBUG,
-                        TAG,
-                        "丢弃无主或迟到应答 seq=${frame.sequence}，type=${frame.type.name}",
-                    )
+                    target == null ->
+                        logger?.log(
+                            LogLevel.DEBUG,
+                            TAG,
+                            "丢弃无主或迟到应答 seq=${frame.sequence}，type=${frame.type.name}",
+                        )
 
-                    target.command != frame.type -> logger?.log(
-                        LogLevel.WARN,
-                        TAG,
-                        "应答指令不匹配 seq=${frame.sequence}：期望 ${target.command.name}，实际 ${frame.type.name}",
-                    )
+                    target.command != frame.type ->
+                        logger?.log(
+                            LogLevel.WARN,
+                            TAG,
+                            "应答指令不匹配 seq=${frame.sequence}：期望 ${target.command.name}，实际 ${frame.type.name}",
+                        )
 
-                    !target.deferred.complete(frame) -> logger?.log(
-                        LogLevel.DEBUG,
-                        TAG,
-                        "重复应答已忽略 seq=${frame.sequence}，type=${frame.type.name}",
-                    )
+                    !target.deferred.complete(frame) ->
+                        logger?.log(
+                            LogLevel.DEBUG,
+                            TAG,
+                            "重复应答已忽略 seq=${frame.sequence}，type=${frame.type.name}",
+                        )
                 }
             }
 
-            else -> logger?.log(
-                LogLevel.WARN,
-                TAG,
-                "丢弃非应答/非通知帧 seq=${frame.sequence}，type=${frame.type.name}",
-            )
+            else ->
+                logger?.log(
+                    LogLevel.WARN,
+                    TAG,
+                    "丢弃非应答/非通知帧 seq=${frame.sequence}，type=${frame.type.name}",
+                )
         }
     }
 
-    private suspend fun allocateSequence(): Int = stateMutex.withLock {
-        val current = nextSequenceValue
-        nextSequenceValue = (nextSequenceValue + 1) and Frame.MAX_SEQUENCE
-        current
-    }
+    private suspend fun allocateSequence(): Int =
+        stateMutex.withLock {
+            val current = nextSequenceValue
+            nextSequenceValue = (nextSequenceValue + 1) and Frame.MAX_SEQUENCE
+            current
+        }
 
     private companion object {
         const val TAG = "ConcurrentCommandDispatcher"

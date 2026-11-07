@@ -1,0 +1,121 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>ComplexCondition:OtaController.kt$OtaController$current !is OtaState.Preparing &amp;&amp; current !is OtaState.Transferring &amp;&amp; current !is OtaState.Verifying &amp;&amp; current !is OtaState.Paused</ID>
+    <ID>ComplexCondition:PreferencesBackup.kt$PreferencesBackupParser$id.isNullOrBlank() || name.isNullOrBlank() || createdAt == null || lastUsed == null || valuesObject == null</ID>
+    <ID>ComplexCondition:PreferencesBackup.kt$PreferencesBackupParser$id.isNullOrBlank() || trigger == null || action == null || enabled == null || order == null || order &lt; 0</ID>
+    <ID>ComplexCondition:ValhallaApp.kt$libraryBusyId != null || running || selectionState.picking || selectionState.prechecking</ID>
+    <ID>ComplexCondition:ValhallaApp.kt$version != null &amp;&amp; path != null &amp;&amp; crc != null &amp;&amp; firmware != null &amp;&amp; selectionState.packageName != null</ID>
+    <ID>CyclomaticComplexMethod:BatchQueueScreens.kt$@Composable internal fun BatchScreen( devices: List&lt;BatchDeviceOption&gt;, presets: List&lt;ConfigPreset&gt;, controller: BatchOperationController, onBack: () -&gt; Unit, execute: suspend (BatchOperationKind, ConfigPreset?, BatchTarget, (String) -&gt; Unit) -&gt; BatchDeviceOutcome, )</ID>
+    <ID>CyclomaticComplexMethod:BatchQueueScreens.kt$@Composable internal fun OtaQueueScreen( devices: List&lt;BatchDeviceOption&gt;, firmwareRecords: List&lt;FirmwareLibraryRecord&gt;, controller: OtaQueueController, onBack: () -&gt; Unit, )</ID>
+    <ID>CyclomaticComplexMethod:DeviceHealthCheck.kt$DeviceHealthCheckController$suspend fun run(): HealthCheckResult?</ID>
+    <ID>CyclomaticComplexMethod:FeatureScreens.kt$@OptIn(ExperimentalTime::class) @Composable internal fun PresetSection( presets: ConfigPresetRepository, applier: ConfigPresetApplier, config: ConfigEditorController, deviceId: String, events: DeviceEventTimeline, writeLocked: Boolean = false, )</ID>
+    <ID>CyclomaticComplexMethod:ValhallaApp.kt$@Composable private fun ConfigFieldRow( field: ConfigFieldState, savingAny: Boolean, onTextChange: (String) -&gt; Unit, onSave: () -&gt; Unit, )</ID>
+    <ID>CyclomaticComplexMethod:ValhallaApp.kt$@Composable private fun DeviceDashboardCard( detail: DeviceDetailState, series: DeviceMetricSeries, rssi: Int?, rssiSource: RssiSource, degradedReason: RssiDegradedReason?, legacyMetricsIgnored: Boolean, observedAtMillis: Long, strings: StringResolver, format: LocaleFormat, zoneOffsetMinutes: Int, accent: androidx.compose.ui.graphics.Color, muted: androidx.compose.ui.graphics.Color, )</ID>
+    <ID>CyclomaticComplexMethod:ValhallaApp.kt$@Composable private fun DisconnectBanner( info: DisconnectInfo, reconnectState: ReconnectState?, onRetryReconnect: () -&gt; Unit, onCancelReconnect: () -&gt; Unit, onBleAction: (BleGuidanceAction) -&gt; Unit, onBack: () -&gt; Unit, )</ID>
+    <ID>CyclomaticComplexMethod:ValhallaApp.kt$@Composable private fun ParamFieldRow( field: ParamFieldState, stateBusy: Boolean, connected: Boolean, onTextChange: (String) -&gt; Unit, onSave: () -&gt; Unit, )</ID>
+    <ID>CyclomaticComplexMethod:ValhallaApp.kt$@OptIn(ExperimentalFoundationApi::class) @Composable private fun DetailScreen( session: DeviceSession, settings: AppSettings, metrics: DeviceMetricRepository, presets: ConfigPresetRepository, notificationPresenter: NotificationPresenter, notificationCenter: NotificationCenter, onNotificationFallback: (NotificationEvent) -&gt; Unit, connectedCount: Int, disconnectInfo: DisconnectInfo?, reconnectState: ReconnectState?, onConnectionLost: () -&gt; Unit, onRetryReconnect: () -&gt; Unit, onCancelReconnect: () -&gt; Unit, onBleAction: (BleGuidanceAction) -&gt; Unit, onOpenDevices: () -&gt; Unit, onBack: () -&gt; Unit, onOpenOta: () -&gt; Unit, onOpenLogs: () -&gt; Unit, onOpenDiagnostics: () -&gt; Unit, writeLocked: Boolean, )</ID>
+    <ID>CyclomaticComplexMethod:ValhallaApp.kt$@OptIn(ExperimentalTime::class) @Composable private fun DiagnosticScreen( session: DeviceSession, metrics: DeviceMetricRepository, onBack: () -&gt; Unit, )</ID>
+    <ID>CyclomaticComplexMethod:ValhallaApp.kt$@OptIn(ExperimentalTime::class) @Composable private fun OtaScreen( session: DeviceSession, library: FirmwareLibraryRepository, settings: AppSettings, notificationPresenter: NotificationPresenter, notificationCenter: NotificationCenter, onNotificationFallback: (NotificationEvent) -&gt; Unit, onBack: () -&gt; Unit, onOtaSucceeded: () -&gt; Unit, writeLocked: Boolean, )</ID>
+    <ID>CyclomaticComplexMethod:ValhallaApp.kt$@OptIn(ExperimentalTime::class) @Composable private fun PacketLogScreen( packetLog: InMemoryPacketLog, initialOptions: PacketLogExportOptions, onBack: () -&gt; Unit, )</ID>
+    <ID>CyclomaticComplexMethod:ValhallaApp.kt$@OptIn(ExperimentalTime::class) @Composable private fun ValhallaContent( preferences: com.valhalla.feature.theme.AppPreferences, settings: AppSettings, showOnboardingOnLaunch: Boolean, startRoute: String?, onboardingStore: com.valhalla.data.settings.AppSettingsStore, preferencesMigrationStatus: com.valhalla.core.storage.StorageMigrationStatus, onLanguageChange: (AppLanguageMode) -&gt; Unit, onThemeChange: (ThemeMode) -&gt; Unit, onSettingsChange: (AppSettings) -&gt; Unit, onReloadPersisted: () -&gt; Unit, )</ID>
+    <ID>InstanceOfCheckForException:ErrorReporter.kt$cancelled is UserCancelledException</ID>
+    <ID>LargeClass:DeviceSimulatorE2ETest.kt$DeviceSimulatorE2ETest</ID>
+    <ID>LargeClass:OtaController.kt$OtaController</ID>
+    <ID>LargeClass:OtaControllerPackageTest.kt$OtaControllerPackageTest</ID>
+    <ID>LargeClass:Strings.kt$AppStrings</ID>
+    <ID>LongMethod:BatchQueueScreens.kt$@Composable internal fun BatchScreen( devices: List&lt;BatchDeviceOption&gt;, presets: List&lt;ConfigPreset&gt;, controller: BatchOperationController, onBack: () -&gt; Unit, execute: suspend (BatchOperationKind, ConfigPreset?, BatchTarget, (String) -&gt; Unit) -&gt; BatchDeviceOutcome, )</ID>
+    <ID>LongMethod:BatchQueueScreens.kt$@Composable internal fun OtaQueueScreen( devices: List&lt;BatchDeviceOption&gt;, firmwareRecords: List&lt;FirmwareLibraryRecord&gt;, controller: OtaQueueController, onBack: () -&gt; Unit, )</ID>
+    <ID>LongMethod:FeatureScreens.kt$@OptIn(ExperimentalTime::class) @Composable fun BackupScreen( store: AppSettingsStore, presets: ConfigPresetRepository, rules: AutomationRuleRepository, onReloadPersisted: () -&gt; Unit, onBack: () -&gt; Unit, )</ID>
+    <ID>LongMethod:FeatureScreens.kt$@OptIn(ExperimentalTime::class) @Composable fun UsageStatsScreen( profileRepository: DeviceProfileRepository, onBack: () -&gt; Unit, )</ID>
+    <ID>LongMethod:FeatureScreens.kt$@OptIn(ExperimentalTime::class) @Composable internal fun PresetSection( presets: ConfigPresetRepository, applier: ConfigPresetApplier, config: ConfigEditorController, deviceId: String, events: DeviceEventTimeline, writeLocked: Boolean = false, )</ID>
+    <ID>LongMethod:InfoScreens.kt$@Composable private fun SettingsValuesSection( settings: AppSettings, onSettingsChange: (AppSettings) -&gt; Unit, )</ID>
+    <ID>LongMethod:OtaController.kt$OtaController$private suspend fun runTransfer( totalBytes: Long, crc16: Int, crc32: Long, version: FirmwareVersion, resumeFrom: OtaResumePoint?, read: suspend (offset: Long, length: Int) -&gt; ByteArray, ): OtaState</ID>
+    <ID>LongMethod:ValhallaApp.kt$@Composable private fun DeviceDashboardCard( detail: DeviceDetailState, series: DeviceMetricSeries, rssi: Int?, rssiSource: RssiSource, degradedReason: RssiDegradedReason?, legacyMetricsIgnored: Boolean, observedAtMillis: Long, strings: StringResolver, format: LocaleFormat, zoneOffsetMinutes: Int, accent: androidx.compose.ui.graphics.Color, muted: androidx.compose.ui.graphics.Color, )</ID>
+    <ID>LongMethod:ValhallaApp.kt$@Composable private fun ScanScreen( state: ScanUiState, availability: BleAvailability, connectingDeviceId: String?, errorMessage: UiMessage?, deviceCount: Int, profileLookup: (String) -&gt; DeviceProfile?, onStart: () -&gt; Unit, onStop: () -&gt; Unit, onSortChange: (ScanSortMode) -&gt; Unit, onOpenDevices: () -&gt; Unit, onSelect: (BleDevice) -&gt; Unit, onBleAction: (BleGuidanceAction) -&gt; Unit, onOpenSettings: () -&gt; Unit, )</ID>
+    <ID>LongMethod:ValhallaApp.kt$@OptIn(ExperimentalFoundationApi::class) @Composable private fun DetailScreen( session: DeviceSession, settings: AppSettings, metrics: DeviceMetricRepository, presets: ConfigPresetRepository, notificationPresenter: NotificationPresenter, notificationCenter: NotificationCenter, onNotificationFallback: (NotificationEvent) -&gt; Unit, connectedCount: Int, disconnectInfo: DisconnectInfo?, reconnectState: ReconnectState?, onConnectionLost: () -&gt; Unit, onRetryReconnect: () -&gt; Unit, onCancelReconnect: () -&gt; Unit, onBleAction: (BleGuidanceAction) -&gt; Unit, onOpenDevices: () -&gt; Unit, onBack: () -&gt; Unit, onOpenOta: () -&gt; Unit, onOpenLogs: () -&gt; Unit, onOpenDiagnostics: () -&gt; Unit, writeLocked: Boolean, )</ID>
+    <ID>LongMethod:ValhallaApp.kt$@OptIn(ExperimentalFoundationApi::class) @Composable private fun QuickActionSection( controller: DeviceDetailController, quickAction: QuickActionState, connected: Boolean, writeLocked: Boolean, )</ID>
+    <ID>LongMethod:ValhallaApp.kt$@OptIn(ExperimentalTime::class) @Composable private fun DiagnosticScreen( session: DeviceSession, metrics: DeviceMetricRepository, onBack: () -&gt; Unit, )</ID>
+    <ID>LongMethod:ValhallaApp.kt$@OptIn(ExperimentalTime::class) @Composable private fun OtaScreen( session: DeviceSession, library: FirmwareLibraryRepository, settings: AppSettings, notificationPresenter: NotificationPresenter, notificationCenter: NotificationCenter, onNotificationFallback: (NotificationEvent) -&gt; Unit, onBack: () -&gt; Unit, onOtaSucceeded: () -&gt; Unit, writeLocked: Boolean, )</ID>
+    <ID>LongMethod:ValhallaApp.kt$@OptIn(ExperimentalTime::class) @Composable private fun PacketLogScreen( packetLog: InMemoryPacketLog, initialOptions: PacketLogExportOptions, onBack: () -&gt; Unit, )</ID>
+    <ID>LongMethod:ValhallaApp.kt$@OptIn(ExperimentalTime::class) @Composable private fun ValhallaContent( preferences: com.valhalla.feature.theme.AppPreferences, settings: AppSettings, showOnboardingOnLaunch: Boolean, startRoute: String?, onboardingStore: com.valhalla.data.settings.AppSettingsStore, preferencesMigrationStatus: com.valhalla.core.storage.StorageMigrationStatus, onLanguageChange: (AppLanguageMode) -&gt; Unit, onThemeChange: (ThemeMode) -&gt; Unit, onSettingsChange: (AppSettings) -&gt; Unit, onReloadPersisted: () -&gt; Unit, )</ID>
+    <ID>LongMethod:ValhallaApp.kt$fun startExport(action: ExportAction)</ID>
+    <ID>LongParameterList:FeatureScreens.kt$( rule: AutomationRule, actionLabel: String, triggerLabel: String, enabledLabel: String, canMoveUp: Boolean, canMoveDown: Boolean, upLabel: String, downLabel: String, deleteLabel: String, onToggle: () -&gt; Unit, onMoveUp: () -&gt; Unit, onMoveDown: () -&gt; Unit, onDelete: () -&gt; Unit, )</ID>
+    <ID>LongParameterList:InfoScreens.kt$( language: AppLanguageMode, theme: ThemeMode, settings: AppSettings, notificationPresenter: NotificationPresenter, onLanguageChange: (AppLanguageMode) -&gt; Unit, onThemeChange: (ThemeMode) -&gt; Unit, onSettingsChange: (AppSettings) -&gt; Unit, onBack: () -&gt; Unit, onAbout: () -&gt; Unit, onHelp: () -&gt; Unit, onPrivacy: () -&gt; Unit, onOnboardingReview: () -&gt; Unit, onOpenAutomation: () -&gt; Unit, onOpenStats: () -&gt; Unit, onOpenBackup: () -&gt; Unit, )</ID>
+    <ID>LongParameterList:ValhallaApp.kt$( detail: DeviceDetailState, series: DeviceMetricSeries, rssi: Int?, rssiSource: RssiSource, degradedReason: RssiDegradedReason?, legacyMetricsIgnored: Boolean, observedAtMillis: Long, strings: StringResolver, format: LocaleFormat, zoneOffsetMinutes: Int, accent: androidx.compose.ui.graphics.Color, muted: androidx.compose.ui.graphics.Color, )</ID>
+    <ID>LongParameterList:ValhallaApp.kt$( preferences: com.valhalla.feature.theme.AppPreferences, settings: AppSettings, showOnboardingOnLaunch: Boolean, startRoute: String?, onboardingStore: com.valhalla.data.settings.AppSettingsStore, preferencesMigrationStatus: com.valhalla.core.storage.StorageMigrationStatus, onLanguageChange: (AppLanguageMode) -&gt; Unit, onThemeChange: (ThemeMode) -&gt; Unit, onSettingsChange: (AppSettings) -&gt; Unit, onReloadPersisted: () -&gt; Unit, )</ID>
+    <ID>LongParameterList:ValhallaApp.kt$( session: DeviceSession, settings: AppSettings, metrics: DeviceMetricRepository, presets: ConfigPresetRepository, notificationPresenter: NotificationPresenter, notificationCenter: NotificationCenter, onNotificationFallback: (NotificationEvent) -&gt; Unit, connectedCount: Int, disconnectInfo: DisconnectInfo?, reconnectState: ReconnectState?, onConnectionLost: () -&gt; Unit, onRetryReconnect: () -&gt; Unit, onCancelReconnect: () -&gt; Unit, onBleAction: (BleGuidanceAction) -&gt; Unit, onOpenDevices: () -&gt; Unit, onBack: () -&gt; Unit, onOpenOta: () -&gt; Unit, onOpenLogs: () -&gt; Unit, onOpenDiagnostics: () -&gt; Unit, writeLocked: Boolean, )</ID>
+    <ID>LongParameterList:ValhallaApp.kt$( state: ScanUiState, availability: BleAvailability, connectingDeviceId: String?, errorMessage: UiMessage?, deviceCount: Int, profileLookup: (String) -&gt; DeviceProfile?, onStart: () -&gt; Unit, onStop: () -&gt; Unit, onSortChange: (ScanSortMode) -&gt; Unit, onOpenDevices: () -&gt; Unit, onSelect: (BleDevice) -&gt; Unit, onBleAction: (BleGuidanceAction) -&gt; Unit, onOpenSettings: () -&gt; Unit, )</ID>
+    <ID>LoopWithTooManyJumpStatements:BatchOperationController.kt$BatchOperationController$for</ID>
+    <ID>MagicNumber:AutomationRuleRunner.kt$AutomationRuleRunner$5</ID>
+    <ID>MagicNumber:DesignTokens.kt$0.0722</ID>
+    <ID>MagicNumber:DesignTokens.kt$0.2126</ID>
+    <ID>MagicNumber:DesignTokens.kt$0.5</ID>
+    <ID>MagicNumber:DesignTokens.kt$0.7152</ID>
+    <ID>MagicNumber:DeviceHealthCheck.kt$DeviceHealthCheckController$0xFFFFFFFFL</ID>
+    <ID>MagicNumber:DiagnosticPackage.kt$DiagnosticPackageBuilder$0.15f</ID>
+    <ID>MagicNumber:DiagnosticPackage.kt$DiagnosticPackageBuilder$0.3f</ID>
+    <ID>MagicNumber:DiagnosticPackage.kt$DiagnosticPackageBuilder$0.45f</ID>
+    <ID>MagicNumber:DiagnosticPackage.kt$DiagnosticPackageBuilder$0.6f</ID>
+    <ID>MagicNumber:DiagnosticPackage.kt$DiagnosticPackageBuilder$0.75f</ID>
+    <ID>MagicNumber:LocaleFormat.kt$LocaleFormat$10</ID>
+    <ID>MagicNumber:LocaleFormat.kt$LocaleFormat$10.0</ID>
+    <ID>MagicNumber:LocaleFormat.kt$LocaleFormat$1024.0</ID>
+    <ID>MagicNumber:LocaleFormat.kt$LocaleFormat$1024L</ID>
+    <ID>MagicNumber:MiniJson.kt$MiniJson$0x20</ID>
+    <ID>MagicNumber:OtaController.kt$OtaController$0xFFFF</ID>
+    <ID>MagicNumber:OtaController.kt$OtaController$1024</ID>
+    <ID>MagicNumber:OtaWizard.kt$OtaWizardStep.RESULT$5</ID>
+    <ID>MagicNumber:ValhallaApp.kt$10</ID>
+    <ID>MagicNumber:ValhallaApp.kt$3_600</ID>
+    <ID>MagicNumber:ValhallaApp.kt$60</ID>
+    <ID>MagicNumber:ValhallaApp.kt$SessionOtaQueueExecutor$0.99f</ID>
+    <ID>MatchingDeclarationName:BatchQueueScreens.kt$BatchDeviceOption</ID>
+    <ID>MatchingDeclarationName:CommandFailureInfo.kt$FailureInfo</ID>
+    <ID>MaxLineLength:Strings.kt$AppStrings$"Clear the app's data in system settings or uninstall the app to remove the local data above. Packet logs clear when the app exits; OTA checkpoints can be cleared on the update page."</ID>
+    <ID>MaxLineLength:Strings.kt$AppStrings$"Confirm the device is powered on, advertising, close to the phone, and Bluetooth is on. On timeout or device-side disconnect the app retries with backoff (up to 5 attempts); you can cancel and retry manually. Retries pause while Bluetooth is off and resume afterwards."</ID>
+    <ID>MaxLineLength:Strings.kt$AppStrings$"Everything comes from on-device packet logs: success rate, average/max latency, retransmissions, out-of-order responses, and error-code distribution. Under 20 requests only \"not enough samples\" is shown."</ID>
+    <ID>MaxLineLength:Strings.kt$AppStrings$"Firmware library: file name, version, channel, CRC-32, and the original file reference; firmware binaries are not cached and missing files must be re-selected."</ID>
+    <ID>MaxLineLength:Strings.kt$AppStrings$"Make sure the device is powered on and advertising. Scanning needs Bluetooth permission: Android 12+ uses Nearby devices, older versions use location; iOS uses Bluetooth authorization."</ID>
+    <ID>MaxLineLength:Strings.kt$AppStrings$"Only metadata (file name, version, channel, CRC-32) and the original file reference are stored; firmware binaries are never cached. Missing files must be re-selected."</ID>
+    <ID>MaxLineLength:Strings.kt$AppStrings$"Packet logs live in memory only (500 entries by default, oldest evicted) and are never written to disk or uploaded automatically. Open Packet logs from device details, filter by command, error, time range, and keyword, then save a file or share it. In-memory logs are cleared when the app exits, so export them before leaving."</ID>
+    <ID>MaxLineLength:Strings.kt$AppStrings$"Pick a device to connect. Pre-shared-key mode asks for the key; signed mode uses a device challenge. After authentication you can read info, configuration, and parameters."</ID>
+    <ID>MaxLineLength:Strings.kt$AppStrings$"Read the failure reason first. On a CRC mismatch or model mismatch, select the correct firmware and re-run the precheck. If the link dropped, reconnect and use \"Resume last update\" to continue from the checkpoint. Checkpoints stay on this device and are removed after success or when cleared. Keep the device nearby and leave Bluetooth on during the update."</ID>
+    <ID>MaxLineLength:Strings.kt$AppStrings$"Reboot and factory reset require confirmation, and factory reset cannot be undone; heartbeat only reads uptime and battery. Confirm-token semantics must be confirmed with the firmware."</ID>
+    <ID>MaxLineLength:Strings.kt$AppStrings$"Scanning needs Bluetooth permission. On Android 12+ grant Nearby devices; on Android 11 and below grant location. On iOS allow Bluetooth access. If you denied it, enable it in system settings for this app, come back, and retry."</ID>
+    <ID>MaxLineLength:Strings.kt$AppStrings$"Scanning needs Bluetooth permission: Nearby devices on Android 12+, location on Android 11 and below, and Bluetooth access on iOS. Turn Bluetooth on in system settings if it is off. This step only explains; the system prompt appears only after you tap the button."</ID>
+    <ID>MaxLineLength:Strings.kt$AppStrings$"The panel reads and writes parameters through GET_PARAM / SET_PARAM, validating type, range, and byte length locally before sending. The table comes from protocol conventions and is not yet confirmed with the firmware, so it is labelled \"Needs firmware confirmation\"; rejections show the device error code."</ID>
+    <ID>MaxLineLength:Strings.kt$AppStrings$"The parameter table comes from protocol conventions and is not yet confirmed with the firmware. Results are whatever the device returns, and rejections show the error code."</ID>
+    <ID>MaxLineLength:Strings.kt$AppStrings$"The three-step guide can be skipped and its completion is stored locally; you can reopen it from Settings. It never triggers the system permission prompt automatically; only a tap runs the existing permission state machine."</ID>
+    <ID>MaxLineLength:Strings.kt$AppStrings$"This app uses Kotlin, Kotlinx Coroutines, Compose Multiplatform (Apache License 2.0), and platform Bluetooth frameworks. See each dependency's LICENSE file for full terms."</ID>
+    <ID>MaxLineLength:Strings.kt$AppStrings$"This version has no network upload: the app requests no internet permission, and profiles, checkpoints, tokens, and logs never leave this device."</ID>
+    <ID>MaxLineLength:Strings.kt$AppStrings$"Up to 4 devices can be connected at once. At the limit you must disconnect one first; switching only changes which device details, configuration, and OTA apply to."</ID>
+    <ID>RethrowCaughtException:ValhallaApp.kt$throw cancellation</ID>
+    <ID>ReturnCount:ScanEmptyReason.kt$fun classifyScanEmpty( scanning: Boolean, deviceCount: Int, availability: BleAvailability, error: String? = null, timedOut: Boolean = false, ): ScanEmptyReason</ID>
+    <ID>SwallowedException:FirmwareLibraryReuse.kt$FirmwareLibraryReuse$error: Throwable</ID>
+    <ID>SwallowedException:FirmwareSelectionController.kt$FirmwareSelectionController$cancelled: FirmwarePrecheckCancelledException</ID>
+    <ID>ThrowsCount:DeviceHealthCheck.kt$DeviceHealthCheckController$suspend fun run(): HealthCheckResult?</ID>
+    <ID>ThrowsCount:OtaController.kt$OtaController$private fun resolveStartOffset( requestedOffset: Int, acceptedOffset: Long, totalBytes: Int, ): Int</ID>
+    <ID>ThrowsCount:OtaController.kt$OtaController$private suspend fun runTransfer( totalBytes: Long, crc16: Int, crc32: Long, version: FirmwareVersion, resumeFrom: OtaResumePoint?, read: suspend (offset: Long, length: Int) -&gt; ByteArray, ): OtaState</ID>
+    <ID>ThrowsCount:OtaController.kt$OtaController$private suspend fun sendChunk( offset: Int, chunk: ByteArray, )</ID>
+    <ID>TooGenericExceptionCaught:AutoReconnectController.kt$AutoReconnectController$error: Throwable</ID>
+    <ID>TooGenericExceptionCaught:AutomationRuleRunner.kt$AutomationRuleRunner$error: Throwable</ID>
+    <ID>TooGenericExceptionCaught:BatchOperationController.kt$BatchOperationController$error: Throwable</ID>
+    <ID>TooGenericExceptionCaught:ConfigEditorController.kt$ConfigEditorController$error: Throwable</ID>
+    <ID>TooGenericExceptionCaught:ConfigPresetApplier.kt$ConfigPresetApplier$error: Throwable</ID>
+    <ID>TooGenericExceptionCaught:DeviceDetailController.kt$DeviceDetailController$error: Throwable</ID>
+    <ID>TooGenericExceptionCaught:DeviceHealthCheck.kt$DeviceHealthCheckController$error: Throwable</ID>
+    <ID>TooGenericExceptionCaught:ErrorReporter.kt$error: Throwable</ID>
+    <ID>TooGenericExceptionCaught:FileSaver.android.kt$&lt;no name provided&gt;$error: Throwable</ID>
+    <ID>TooGenericExceptionCaught:FirmwareLibraryImporter.kt$FirmwareLibraryImporter$error: Throwable</ID>
+    <ID>TooGenericExceptionCaught:FirmwareLibraryReuse.kt$FirmwareLibraryReuse$error: Throwable</ID>
+    <ID>TooGenericExceptionCaught:FirmwareSelectionController.kt$FirmwareSelectionController$error: Throwable</ID>
+    <ID>TooGenericExceptionCaught:OtaController.kt$OtaController$error: Throwable</ID>
+    <ID>TooGenericExceptionCaught:OtaQueueController.kt$OtaQueueController$error: Throwable</ID>
+    <ID>TooGenericExceptionCaught:ParamEditorController.kt$ParamEditorController$error: Throwable</ID>
+    <ID>TooGenericExceptionCaught:ScanController.kt$ScanController$error: Throwable</ID>
+    <ID>TooGenericExceptionCaught:ValhallaApp.kt$error: Throwable</ID>
+    <ID>UnusedParameter:ValhallaApp.kt$format: LocaleFormat</ID>
+  </CurrentIssues>
+</SmellBaseline>

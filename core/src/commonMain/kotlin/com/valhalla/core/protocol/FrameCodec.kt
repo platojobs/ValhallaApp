@@ -13,7 +13,6 @@ package com.valhalla.core.protocol
  * flags.bit0 表示响应帧，flags.bit1 表示通知帧（互斥）；CRC 覆盖 version 到 payload 结束。
  */
 object FrameCodec {
-
     const val PROTOCOL_VERSION: Byte = 1
 
     val SOF_FIRST: Byte = 0xA5.toByte()
@@ -27,13 +26,19 @@ object FrameCodec {
     private const val FLAG_RESPONSE = 0x01
     private const val FLAG_NOTIFICATION = 0x02
 
-    private fun writeUInt16(target: ByteArray, offset: Int, value: Int) {
+    private fun writeUInt16(
+        target: ByteArray,
+        offset: Int,
+        value: Int,
+    ) {
         target[offset] = (value and 0xFF).toByte()
         target[offset + 1] = ((value shr 8) and 0xFF).toByte()
     }
 
-    internal fun readUInt16(source: ByteArray, offset: Int): Int =
-        (source[offset].toInt() and 0xFF) or ((source[offset + 1].toInt() and 0xFF) shl 8)
+    internal fun readUInt16(
+        source: ByteArray,
+        offset: Int,
+    ): Int = (source[offset].toInt() and 0xFF) or ((source[offset + 1].toInt() and 0xFF) shl 8)
 
     fun encode(frame: Frame): ByteArray {
         val payload = frame.payload
@@ -94,7 +99,7 @@ object FrameCodec {
         val expectedCrc = Crc16.ccittFalse(bytes, startIndex = 2, endIndex = HEADER_SIZE + payloadLength)
         if (actualCrc != expectedCrc) {
             throw FrameDecodeException(
-                "CRC 校验失败: 报文 0x${actualCrc.toString(16)}，计算 0x${expectedCrc.toString(16)}"
+                "CRC 校验失败: 报文 0x${actualCrc.toString(16)}，计算 0x${expectedCrc.toString(16)}",
             )
         }
 

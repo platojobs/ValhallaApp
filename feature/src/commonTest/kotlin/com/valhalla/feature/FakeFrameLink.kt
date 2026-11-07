@@ -19,7 +19,6 @@ import kotlinx.coroutines.flow.receiveAsFlow
 class FakeFrameLink(
     var responder: suspend (DeviceRequest) -> DeviceResponse? = { null },
 ) : FrameLink {
-
     private val incomingChannel = Channel<Frame>(Channel.UNLIMITED)
     override val incoming: Flow<Frame> = incomingChannel.receiveAsFlow()
 
@@ -33,13 +32,14 @@ class FakeFrameLink(
     var onSend: suspend (index: Int, frame: Frame) -> Unit = { _, _ -> }
 
     override suspend fun send(frame: Frame) {
-        frames += Frame(
-            type = frame.type,
-            sequence = frame.sequence,
-            payload = frame.payloadCopy(),
-            isResponse = frame.isResponse,
-            isNotification = frame.isNotification,
-        )
+        frames +=
+            Frame(
+                type = frame.type,
+                sequence = frame.sequence,
+                payload = frame.payloadCopy(),
+                isResponse = frame.isResponse,
+                isNotification = frame.isNotification,
+            )
         onSend(frames.size, frame)
         val request = MessageCodec.decodeRequest(frame.type, frame.payload)
         requests += request

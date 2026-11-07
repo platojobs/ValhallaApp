@@ -32,7 +32,6 @@ actual fun rememberFirmwarePicker(): FirmwarePicker = remember { IosFirmwarePick
 
 /** iOS 文件选择器：导入模式会先把文件复制到 App 沙盒，可直接按路径随机读取。 */
 private class IosFirmwarePicker : FirmwarePicker {
-
     private var delegate: PickerDelegate? = null
 
     override suspend fun pickFirmware(): PickedFirmware? {
@@ -41,10 +40,11 @@ private class IosFirmwarePicker : FirmwarePicker {
         val pickerDelegate = PickerDelegate { url -> deferred.complete(url) }
         delegate = pickerDelegate
 
-        val controller = UIDocumentPickerViewController(
-            forOpeningContentTypes = listOf(UTTypeData),
-            asCopy = true,
-        )
+        val controller =
+            UIDocumentPickerViewController(
+                forOpeningContentTypes = listOf(UTTypeData),
+                asCopy = true,
+            )
         controller.delegate = pickerDelegate
 
         val presenter = topViewController()
@@ -82,8 +82,8 @@ private class IosFirmwarePicker : FirmwarePicker {
 /** UIDocumentPicker 回调包装；回调在主队列执行。 */
 private class PickerDelegate(
     private val onResult: (NSURL?) -> Unit,
-) : NSObject(), UIDocumentPickerDelegateProtocol {
-
+) : NSObject(),
+    UIDocumentPickerDelegateProtocol {
     override fun documentPicker(
         controller: UIDocumentPickerViewController,
         didPickDocumentsAtURLs: List<*>,
@@ -110,8 +110,9 @@ private fun topViewController(): UIViewController? {
  * 文件在导入模式下已位于 App 沙盒，无需 security-scoped resource 访问。
  */
 @OptIn(ExperimentalForeignApi::class)
-private class PosixFirmwareSource(path: String) : FirmwareSource {
-
+private class PosixFirmwareSource(
+    path: String,
+) : FirmwareSource {
     private val mutex = Mutex()
     private val descriptor: Int = open(path, O_RDONLY)
 
@@ -119,12 +120,16 @@ private class PosixFirmwareSource(path: String) : FirmwareSource {
         if (descriptor < 0) throw FirmwareException.ReadFailure(0, 0)
     }
 
-    override val size: Long = memScoped {
-        val info = alloc<stat>()
-        if (fstat(descriptor, info.ptr) != 0) 0L else info.st_size.toLong()
-    }
+    override val size: Long =
+        memScoped {
+            val info = alloc<stat>()
+            if (fstat(descriptor, info.ptr) != 0) 0L else info.st_size.toLong()
+        }
 
-    override suspend fun read(offset: Long, length: Int): ByteArray {
+    override suspend fun read(
+        offset: Long,
+        length: Int,
+    ): ByteArray {
         if (offset < 0 || length < 0 || offset + length > size) {
             throw FirmwareException.ReadFailure(offset, length)
         }
@@ -133,12 +138,13 @@ private class PosixFirmwareSource(path: String) : FirmwareSource {
             bytes.usePinned { pinned ->
                 var done = 0
                 while (done < length) {
-                    val read = pread(
-                        descriptor,
-                        pinned.addressOf(done),
-                        (length - done).toULong(),
-                        offset + done,
-                    )
+                    val read =
+                        pread(
+                            descriptor,
+                            pinned.addressOf(done),
+                            (length - done).toULong(),
+                            offset + done,
+                        )
                     if (read <= 0) throw FirmwareException.ReadFailure(offset + done, length - done)
                     done += read.toInt()
                 }

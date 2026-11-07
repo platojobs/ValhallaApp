@@ -8,7 +8,6 @@ import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
 class AuthSignerTest {
-
     private val challenge = byteArrayOf(0x01, 0x02, 0x03, 0x04)
     private val clientNonce = byteArrayOf(0x10, 0x20, 0x30)
     private val deviceDigest = "d3adb33f"
@@ -17,8 +16,14 @@ class AuthSignerTest {
     fun `规范化消息对三个要素都敏感`() {
         val base = AuthSignatureMessage.canonical(challenge, clientNonce, deviceDigest)
         assertNotEquals(base.contentHashCode(), AuthSignatureMessage.canonical(challenge, clientNonce, "other").contentHashCode())
-        assertNotEquals(base.contentHashCode(), AuthSignatureMessage.canonical(challenge, byteArrayOf(0x11), deviceDigest).contentHashCode())
-        assertNotEquals(base.contentHashCode(), AuthSignatureMessage.canonical(byteArrayOf(0x09), clientNonce, deviceDigest).contentHashCode())
+        assertNotEquals(
+            base.contentHashCode(),
+            AuthSignatureMessage.canonical(challenge, byteArrayOf(0x11), deviceDigest).contentHashCode(),
+        )
+        assertNotEquals(
+            base.contentHashCode(),
+            AuthSignatureMessage.canonical(byteArrayOf(0x09), clientNonce, deviceDigest).contentHashCode(),
+        )
     }
 
     @Test

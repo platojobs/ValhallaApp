@@ -7,7 +7,6 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class ReconnectSchedulerTest {
-
     @Test
     fun `默认退避序列为 1 2 4 8 16 秒`() {
         assertEquals(listOf(1_000L, 2_000L, 4_000L, 8_000L, 16_000L), ReconnectPolicy().delaySequence())
@@ -15,20 +14,22 @@ class ReconnectSchedulerTest {
 
     @Test
     fun `退避按上限封顶`() {
-        val policy = ReconnectPolicy(
-            initialDelayMillis = 1_000,
-            multiplier = 2.0,
-            maxDelayMillis = 10_000,
-            maxAttempts = 6,
-        )
+        val policy =
+            ReconnectPolicy(
+                initialDelayMillis = 1_000,
+                multiplier = 2.0,
+                maxDelayMillis = 10_000,
+                maxAttempts = 6,
+            )
         assertEquals(listOf(1_000L, 2_000L, 4_000L, 8_000L, 10_000L, 10_000L), policy.delaySequence())
     }
 
     @Test
     fun `完整失败序列达到上限后耗尽`() {
-        val scheduler = ReconnectScheduler(
-            ReconnectPolicy(initialDelayMillis = 100, multiplier = 2.0, maxDelayMillis = 1_000, maxAttempts = 3),
-        )
+        val scheduler =
+            ReconnectScheduler(
+                ReconnectPolicy(initialDelayMillis = 100, multiplier = 2.0, maxDelayMillis = 1_000, maxAttempts = 3),
+            )
 
         val delays = mutableListOf<Long>()
         scheduler.onDisconnected()

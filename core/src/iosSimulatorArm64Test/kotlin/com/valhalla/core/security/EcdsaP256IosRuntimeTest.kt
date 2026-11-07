@@ -14,7 +14,6 @@ import kotlin.test.assertTrue
  * 与 JVM、Android 共用 [EcdsaTestVectors] 中的同一批 OpenSSL 向量。
  */
 class EcdsaP256IosRuntimeTest {
-
     @Test
     fun sharedVectorsVerifyOnIosRuntime() {
         val verifier = EcdsaP256Verifier.fromPem(EcdsaTestVectors.PUBLIC_KEY_PEM)
@@ -34,10 +33,11 @@ class EcdsaP256IosRuntimeTest {
     fun tamperedDigestIsRejected() {
         val verifier = EcdsaP256Verifier.fromPem(EcdsaTestVectors.PUBLIC_KEY_PEM)
         val vector = EcdsaTestVectors.VECTOR_1
-        val result = verifier.verifyDetailed(
-            EcdsaTestVectors.tamperedDigest(vector),
-            vector.signature(),
-        )
+        val result =
+            verifier.verifyDetailed(
+                EcdsaTestVectors.tamperedDigest(vector),
+                vector.signature(),
+            )
         assertEquals(
             EcdsaFailureCode.SIGNATURE_MISMATCH,
             assertIs<EcdsaVerificationResult.Invalid>(result).code,
@@ -78,9 +78,10 @@ class EcdsaP256IosRuntimeTest {
 
     @Test
     fun nonP256KeyIsRejected() {
-        val error = runCatching {
-            EcdsaP256Verifier.fromPem(EcdsaTestVectors.P384_PUBLIC_KEY_PEM)
-        }.exceptionOrNull()
+        val error =
+            runCatching {
+                EcdsaP256Verifier.fromPem(EcdsaTestVectors.P384_PUBLIC_KEY_PEM)
+            }.exceptionOrNull()
         assertEquals(
             EcdsaFailureCode.PUBLIC_KEY_UNSUPPORTED,
             assertIs<EcdsaKeyException>(error).code,

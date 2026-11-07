@@ -1,7 +1,7 @@
 # 交付说明
 
 本文汇总 ValhallaApp 的可交付内容、构建方式、产物路径与完成度对照。最新发布说明见
-[release-notes/v2.8.0.md](release-notes/v2.8.0.md)，历史版本见
+[release-notes/v3.0.0.md](release-notes/v3.0.0.md)，历史版本见
 [release-notes/v2.0.0.md](release-notes/v2.0.0.md)，全部文档入口见 [README.md](README.md)。
 
 ## 1. 交付物清单
@@ -75,6 +75,8 @@ xcodebuild -project iosApp/iosApp.xcodeproj -scheme iosApp \
 | 测试报告 | `core/build/reports/tests/jvmTest/index.html` 等三份 |
 | 测试结果 XML | `*/build/test-results/jvmTest/*.xml` |
 | 版本校验日志 | CI 产物 `logs-version-check` |
+| 静态分析日志 | CI 产物 `logs-static-analysis`（失败时，含 detekt 报告） |
+| 覆盖率报告 | CI 产物 `kover-reports`（三模块 XML/HTML） |
 | Android 构建日志 | CI 产物 `logs-android`（失败时） |
 
 ## 4. CI 入口
@@ -87,6 +89,8 @@ xcodebuild -project iosApp/iosApp.xcodeproj -scheme iosApp \
 | Job | Runner | 内容 |
 | --- | --- | --- |
 | `version-check` | macos-14 | `verifyVersionConsistency` |
+| `static-analysis` | ubuntu-latest | `detekt` + `ktlintCheck`，任一失败即 job 失败；失败上传日志与 detekt 报告 |
+| `coverage` | ubuntu-latest | 三模块 Kover XML/HTML + `koverVerifyJvm`（core 75 / data 55 / feature 60），始终上传 `kover-reports` |
 | `jvm-tests` | ubuntu-latest | core / data / feature 三模块 `jvmTest`（矩阵并行） |
 | `android` | macos-14 | 安装 SDK → `assembleDebug` → `assembleRelease` + `verifyReleaseArtifact` → 上传 APK |
 | `ios` | macos-14 | `linkDebugFrameworkIosSimulatorArm64` |
@@ -109,12 +113,14 @@ xcodebuild -project iosApp/iosApp.xcodeproj -scheme iosApp \
 | [product.md](product.md) | 面向使用者的功能、文案规范、验收边界 |
 | [testing.md](testing.md) | 设备模拟器、场景矩阵、故障注入、端到端用例 |
 | [environment-report.md](environment-report.md) | 本机工具链与实际构建记录 |
+| [static-analysis-baseline.md](static-analysis-baseline.md) | detekt 基线逐条清单与保留原因、实修/剩余统计 |
 | [delivery.md](delivery.md) | 本文：交付物、构建命令、产物路径、完成度对照 |
+| [release-notes/v3.0.0.md](release-notes/v3.0.0.md) | v3.0.0 静态分析、覆盖率、存储迁移、真实资源与进程恢复 |
 | [release-notes/v2.5.0.md](release-notes/v2.5.0.md) | v2.5.0 固件库、诊断报告、事件时间线与本地提醒 |
 | [release-notes/v2.4.0.md](release-notes/v2.4.0.md) | v2.4.0 参数面板、连接质量、引导与设置扩展 |
 | [release-notes/v2.3.0.md](release-notes/v2.3.0.md) | v2.3.0 多设备管理、扫描增强、快捷操作与 OTA 历史 |
 | [release-notes/v2.0.0.md](release-notes/v2.0.0.md) | v2.0.0 发布说明与真机验收清单 |
-| [CHANGELOG.md](../CHANGELOG.md) | v0.0.1 → v2.5.0 版本演进 |
+| [CHANGELOG.md](../CHANGELOG.md) | v0.0.1 → v3.0.0 版本演进 |
 
 ## 6. 可交付状态与未完成项
 
@@ -223,3 +229,18 @@ xcodebuild -project iosApp/iosApp.xcodeproj -scheme iosApp \
 - 批量与队列都只在 App 前台串行执行，不提供后台批量或跨进程续跑；
 - 队列暂停只在分片边界生效，断点复用沿用既有四重门控；
 - 固件库条目只存元数据与文件引用，使用前仍完整执行 CRC 与签名预检。
+
+## 12. 工程收口与真实资源（v3.0.0）
+
+| 能力 | 实现位置 | 自动化验证 |
+| --- | --- | --- |
+| 静态分析（detekt + ktlint） | `config/detekt/detekt.yml`、`.editorconfig`、各模块 `detekt-baseline.xml` | CI `static-analysis` job；本地 `detekt` / `ktlintCheck` |
+| 覆盖率与阈值 | 各模块 `kover { reports { verify { rule { minBound(...) } } } }` | CI `coverage` job；本地 `koverVerifyJvm` |
+| 存储 schema 迁移 | `core/storage/StorageSchema.kt`、`data/settings/PreferencesSchema.kt`、`feature/settings/PreferencesBackup.kt` | `PreferencesSchemaTest`、`DeviceMetricSamplesTest`、`PreferencesBackupTest` |
+| 图标与启动屏 | `composeApp/src/androidMain/res/`、`iosApp/iosApp/Assets.xcassets/`、`LaunchScreen.storyboard` | Android AAPT 资源编译 + Xcode 资源构建阶段 |
+| 进程死亡恢复 | `feature/storage/StartupRecovery.kt` + 启动页 banner | `StartupRecoveryTest`（有/无/损坏断点） |
+
+- CI 新增 `static-analysis` 与 `coverage` 两个 job，均不设 `continue-on-error`；
+- 覆盖率只统计 JVM 单元测试，不含 Android instrumented；feature 排除 `com.valhalla.feature.ui`；
+- 静态分析基线共 391 条，逐条原因见 [static-analysis-baseline.md](static-analysis-baseline.md)；
+- 本轮未放宽阈值、未跳过 job、未关闭规则。

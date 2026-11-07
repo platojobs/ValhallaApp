@@ -11,12 +11,12 @@ import kotlin.test.assertTrue
  * 注释、开发者日志与协议层诊断文本允许保留中文，但界面字符串不允许。
  */
 class NoHardcodedChineseTest {
-
-    private val scannedDirs = listOf(
-        "feature/src/commonMain/kotlin/com/valhalla/feature/ui",
-        "feature/src/commonMain/kotlin/com/valhalla/feature/theme",
-        "composeApp/src/commonMain/kotlin",
-    )
+    private val scannedDirs =
+        listOf(
+            "feature/src/commonMain/kotlin/com/valhalla/feature/ui",
+            "feature/src/commonMain/kotlin/com/valhalla/feature/theme",
+            "composeApp/src/commonMain/kotlin",
+        )
 
     private val cjk = Regex("[\\u4e00-\\u9fff]")
 
@@ -28,7 +28,8 @@ class NoHardcodedChineseTest {
         scannedDirs.forEach { relative ->
             val dir = File(root, relative)
             if (!dir.exists()) return@forEach
-            dir.walkTopDown()
+            dir
+                .walkTopDown()
                 .filter { it.isFile && it.extension == "kt" && "/i18n/" !in it.path }
                 .forEach { file ->
                     var inBlockComment = false

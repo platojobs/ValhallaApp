@@ -11,7 +11,6 @@ import kotlinx.coroutines.flow.StateFlow
  * - iOS：CBCentralManager + CBPeripheralDelegate。
  */
 interface BleClient {
-
     /** 适配器状态，UI 据此提示「请开启蓝牙」等。 */
     val adapterState: StateFlow<BleAdapterState>
 
@@ -25,7 +24,10 @@ interface BleClient {
     fun scan(filter: ScanFilter = ScanFilter()): Flow<BleDevice>
 
     /** 建立链路并完成服务/特征发现，超时或失败抛 [BleException]。 */
-    suspend fun connect(deviceId: String, timeoutMillis: Long = 15_000L): BleConnection
+    suspend fun connect(
+        deviceId: String,
+        timeoutMillis: Long = 15_000L,
+    ): BleConnection
 
     /** 释放客户端持有资源（停止扫描、注销监听等）。 */
     fun close()
@@ -33,7 +35,6 @@ interface BleClient {
 
 /** 一条已建立的链路，提供 GATT 读写与通知订阅。 */
 interface BleConnection {
-
     val deviceId: String
 
     /** 链路是否仍然有效；底层断开时置为 false。 */
@@ -48,10 +49,16 @@ interface BleConnection {
     )
 
     /** 读特征值。 */
-    suspend fun read(serviceUuid: String, characteristicUuid: String): ByteArray
+    suspend fun read(
+        serviceUuid: String,
+        characteristicUuid: String,
+    ): ByteArray
 
     /** 订阅特征值通知（开启 CCCD 或 iOS notify），返回冷流，收集结束即退订。 */
-    fun observe(serviceUuid: String, characteristicUuid: String): Flow<ByteArray>
+    fun observe(
+        serviceUuid: String,
+        characteristicUuid: String,
+    ): Flow<ByteArray>
 
     /**
      * 读取当前链路的实时 RSSI（dBm）。

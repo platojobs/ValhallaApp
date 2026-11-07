@@ -5,7 +5,6 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class InMemoryDeviceLoggerTest {
-
     @Test
     fun `日志按写入顺序排列并分配自增 id`() {
         val logger = InMemoryDeviceLogger(capacity = 10)

@@ -35,7 +35,6 @@ class FirmwarePackage(
     /** 文件头标志位声明了签名段时为解析结果，否则为 null。 */
     val signature: FirmwareSignature? = null,
 ) {
-
     /** payload 在文件中的起始偏移（= 文件头长度）。 */
     val payloadOffset: Long get() = FirmwareHeader.SIZE.toLong()
 
@@ -50,7 +49,10 @@ class FirmwarePackage(
     val payloadCrc32: Long get() = header.payloadCrc32
 
     /** 读取 payload 的一段，[offset] 相对 payload 起点；越界抛 [FirmwareException.ReadFailure]。 */
-    suspend fun readPayload(offset: Long, length: Int): ByteArray {
+    suspend fun readPayload(
+        offset: Long,
+        length: Int,
+    ): ByteArray {
         if (offset < 0 || length < 0 || offset + length > payloadLength) {
             throw FirmwareException.ReadFailure(payloadOffset + offset, length)
         }
@@ -95,8 +97,7 @@ class FirmwarePackage(
     }
 
     /** 流式计算 payload CRC-32；分块大小仅影响读取粒度，不改变结果。 */
-    suspend fun computePayloadCrc32(chunkSize: Int = DEFAULT_CRC_CHUNK_SIZE): Long =
-        computePayloadChecksums(chunkSize).crc32
+    suspend fun computePayloadCrc32(chunkSize: Int = DEFAULT_CRC_CHUNK_SIZE): Long = computePayloadChecksums(chunkSize).crc32
 
     /**
      * 计算签名摘要：`SHA-256(文件头 104 字节 || payload)`。
@@ -121,14 +122,16 @@ class FirmwarePackage(
 
 /** 固件包解析：先校验文件头，再核对头里声明的 payload 长度与真实文件长度。 */
 object FirmwareParser {
-
     /**
      * 解析固件文件。
      *
      * 失败时抛出 [FirmwareException]，由调用方负责 [FirmwareSource.close]；
      * 成功时返回的 [FirmwarePackage] 接管 source 的生命周期。
      */
-    suspend fun parse(name: String, source: FirmwareSource): FirmwarePackage {
+    suspend fun parse(
+        name: String,
+        source: FirmwareSource,
+    ): FirmwarePackage {
         if (source.size < FirmwareHeader.SIZE.toLong()) {
             throw FirmwareException.Truncated(FirmwareHeader.SIZE.toLong(), source.size)
         }

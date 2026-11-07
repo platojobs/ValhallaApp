@@ -36,7 +36,6 @@ internal class AndroidBleConnection private constructor(
     override val deviceId: String,
     private val gatt: BluetoothGatt,
 ) : BleConnection {
-
     private val operationMutex = Mutex()
     private val mutableConnected = MutableStateFlow(true)
     override val connected = mutableConnected.asStateFlow()
@@ -56,11 +55,12 @@ internal class AndroidBleConnection private constructor(
     ) = operationMutex.withLock {
         val characteristic = requireCharacteristic(serviceUuid, characteristicUuid)
         characteristic.value = payload
-        characteristic.writeType = if (withResponse) {
-            BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
-        } else {
-            BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
-        }
+        characteristic.writeType =
+            if (withResponse) {
+                BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+            } else {
+                BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+            }
 
         if (!withResponse) {
             if (!gatt.writeCharacteristic(characteristic)) {
@@ -82,7 +82,10 @@ internal class AndroidBleConnection private constructor(
         }
     }
 
-    override suspend fun read(serviceUuid: String, characteristicUuid: String): ByteArray =
+    override suspend fun read(
+        serviceUuid: String,
+        characteristicUuid: String,
+    ): ByteArray =
         operationMutex.withLock {
             val characteristic = requireCharacteristic(serviceUuid, characteristicUuid)
             val deferred = CompletableDeferred<ByteArray>()
@@ -99,44 +102,49 @@ internal class AndroidBleConnection private constructor(
         }
 
     @SuppressLint("MissingPermission")
-    override suspend fun readRssi(): Int? = operationMutex.withLock {
-        if (closed || !mutableConnected.value) return@withLock null
-        val deferred = CompletableDeferred<Int>()
-        pendingRssi = deferred
-        if (!runCatching { gatt.readRemoteRssi() }.getOrDefault(false)) {
-            pendingRssi = null
-            return@withLock null
+    override suspend fun readRssi(): Int? =
+        operationMutex.withLock {
+            if (closed || !mutableConnected.value) return@withLock null
+            val deferred = CompletableDeferred<Int>()
+            pendingRssi = deferred
+            if (!runCatching { gatt.readRemoteRssi() }.getOrDefault(false)) {
+                pendingRssi = null
+                return@withLock null
+            }
+            try {
+                withTimeoutOrNull(OPERATION_TIMEOUT_MILLIS) { deferred.await() }
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (_: Throwable) {
+                null
+            } finally {
+                pendingRssi = null
+            }
         }
-        try {
-            withTimeoutOrNull(OPERATION_TIMEOUT_MILLIS) { deferred.await() }
-        } catch (cancellation: CancellationException) {
-            throw cancellation
-        } catch (_: Throwable) {
-            null
-        } finally {
-            pendingRssi = null
-        }
-    }
 
-    override fun observe(serviceUuid: String, characteristicUuid: String): Flow<ByteArray> =
+    override fun observe(
+        serviceUuid: String,
+        characteristicUuid: String,
+    ): Flow<ByteArray> =
         callbackFlow {
             val characteristic = requireCharacteristic(serviceUuid, characteristicUuid)
             gatt.setCharacteristicNotification(characteristic, true)
             enableNotifications(characteristic)
 
-            val job = launch {
-                try {
-                    notifications
-                        .filter { it.first.equals(characteristicUuid, ignoreCase = true) }
-                        .map { it.second }
-                        .collect { trySend(it) }
-                } catch (cancellation: CancellationException) {
-                    throw cancellation
-                } catch (error: Throwable) {
-                    // 生产者异常向上游关闭 flow，由收集侧统一处理，避免未捕获异常崩溃进程。
-                    close(error)
+            val job =
+                launch {
+                    try {
+                        notifications
+                            .filter { it.first.equals(characteristicUuid, ignoreCase = true) }
+                            .map { it.second }
+                            .collect { trySend(it) }
+                    } catch (cancellation: CancellationException) {
+                        throw cancellation
+                    } catch (error: Throwable) {
+                        // 生产者异常向上游关闭 flow，由收集侧统一处理，避免未捕获异常崩溃进程。
+                        close(error)
+                    }
                 }
-            }
 
             awaitClose {
                 job.cancel()
@@ -161,33 +169,43 @@ internal class AndroidBleConnection private constructor(
         pendingRssi = null
     }
 
-    private fun requireCharacteristic(serviceUuid: String, characteristicUuid: String): BluetoothGattCharacteristic {
-        val service = runCatching { gatt.getService(UUID.fromString(serviceUuid)) }.getOrNull()
-            ?: throw BleException("未找到服务 $serviceUuid")
-        val characteristic = runCatching { service.getCharacteristic(UUID.fromString(characteristicUuid)) }.getOrNull()
-            ?: throw BleException("服务 $serviceUuid 下未找到特征 $characteristicUuid")
+    private fun requireCharacteristic(
+        serviceUuid: String,
+        characteristicUuid: String,
+    ): BluetoothGattCharacteristic {
+        val service =
+            runCatching { gatt.getService(UUID.fromString(serviceUuid)) }.getOrNull()
+                ?: throw BleException("未找到服务 $serviceUuid")
+        val characteristic =
+            runCatching { service.getCharacteristic(UUID.fromString(characteristicUuid)) }.getOrNull()
+                ?: throw BleException("服务 $serviceUuid 下未找到特征 $characteristicUuid")
         return characteristic
     }
 
     @SuppressLint("MissingPermission")
     private fun enableNotifications(characteristic: BluetoothGattCharacteristic) {
-        val descriptor = characteristic.getDescriptor(UUID.fromString(BleUuids.CLIENT_CHARACTERISTIC_CONFIG))
-            ?: return
+        val descriptor =
+            characteristic.getDescriptor(UUID.fromString(BleUuids.CLIENT_CHARACTERISTIC_CONFIG))
+                ?: return
         // 协议通道可能只支持 indicate：按特征属性选择使能值，两种模式都走 onCharacteristicChanged 回调。
-        val enableValue = when {
-            characteristic.properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY != 0 ->
-                BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+        val enableValue =
+            when {
+                characteristic.properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY != 0 ->
+                    BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
 
-            characteristic.properties and BluetoothGattCharacteristic.PROPERTY_INDICATE != 0 ->
-                BluetoothGattDescriptor.ENABLE_INDICATION_VALUE
+                characteristic.properties and BluetoothGattCharacteristic.PROPERTY_INDICATE != 0 ->
+                    BluetoothGattDescriptor.ENABLE_INDICATION_VALUE
 
-            else -> return
-        }
+                else -> return
+            }
         descriptor.value = enableValue
         runCatching { gatt.writeDescriptor(descriptor) }
     }
 
-    private fun handleNotification(characteristic: BluetoothGattCharacteristic, value: ByteArray) {
+    private fun handleNotification(
+        characteristic: BluetoothGattCharacteristic,
+        value: ByteArray,
+    ) {
         notifications.tryEmit(characteristic.uuid.toString() to value)
     }
 
@@ -200,7 +218,10 @@ internal class AndroidBleConnection private constructor(
         }
     }
 
-    private fun handleRssi(status: Int, rssi: Int) {
+    private fun handleRssi(
+        status: Int,
+        rssi: Int,
+    ) {
         val deferred = pendingRssi ?: return
         if (status == BluetoothGatt.GATT_SUCCESS) {
             deferred.complete(rssi)
@@ -209,7 +230,10 @@ internal class AndroidBleConnection private constructor(
         }
     }
 
-    private fun handleRead(status: Int, value: ByteArray?) {
+    private fun handleRead(
+        status: Int,
+        value: ByteArray?,
+    ) {
         val deferred = pendingRead ?: return
         if (status == BluetoothGatt.GATT_SUCCESS && value != null) {
             deferred.complete(value)
@@ -230,107 +254,112 @@ internal class AndroidBleConnection private constructor(
             val holder = ConnectionHolder()
 
             return withTimeoutOrNull(timeoutMillis) {
-                    kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
-                        var settled = false
+                kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
+                    var settled = false
 
-                        val callback = object : BluetoothGattCallback() {
-                        override fun onConnectionStateChange(
-                            gatt: BluetoothGatt,
-                            status: Int,
-                            newState: Int,
-                        ) {
-                            when (newState) {
-                                BluetoothProfile.STATE_CONNECTED -> {
-                                    if (status != BluetoothGatt.GATT_SUCCESS) {
-                                        fail(holder, gatt, continuation, settled, "连接失败，status=$status")
-                                        settled = true
-                                    } else {
-                                        gatt.discoverServices()
+                    val callback =
+                        object : BluetoothGattCallback() {
+                            override fun onConnectionStateChange(
+                                gatt: BluetoothGatt,
+                                status: Int,
+                                newState: Int,
+                            ) {
+                                when (newState) {
+                                    BluetoothProfile.STATE_CONNECTED -> {
+                                        if (status != BluetoothGatt.GATT_SUCCESS) {
+                                            fail(holder, gatt, continuation, settled, "连接失败，status=$status")
+                                            settled = true
+                                        } else {
+                                            gatt.discoverServices()
+                                        }
                                     }
-                                }
 
-                                BluetoothProfile.STATE_DISCONNECTED -> {
-                                    holder.connection?.markDisconnected()
-                                    if (!settled) {
-                                        settled = true
-                                        continuation.resumeWith(
-                                            Result.failure(BleException("设备在服务发现前断开")),
-                                        )
+                                    BluetoothProfile.STATE_DISCONNECTED -> {
+                                        holder.connection?.markDisconnected()
+                                        if (!settled) {
+                                            settled = true
+                                            continuation.resumeWith(
+                                                Result.failure(BleException("设备在服务发现前断开")),
+                                            )
+                                        }
+                                        runCatching { gatt.close() }
                                     }
-                                    runCatching { gatt.close() }
                                 }
                             }
-                        }
 
-                        override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
-                            if (settled) return
-                            if (status != BluetoothGatt.GATT_SUCCESS) {
-                                fail(holder, gatt, continuation, settled, "服务发现失败，status=$status")
+                            override fun onServicesDiscovered(
+                                gatt: BluetoothGatt,
+                                status: Int,
+                            ) {
+                                if (settled) return
+                                if (status != BluetoothGatt.GATT_SUCCESS) {
+                                    fail(holder, gatt, continuation, settled, "服务发现失败，status=$status")
+                                    settled = true
+                                    return
+                                }
+                                val connection = AndroidBleConnection(device.address, gatt)
+                                holder.connection = connection
                                 settled = true
-                                return
+                                continuation.resumeWith(Result.success(connection))
                             }
-                            val connection = AndroidBleConnection(device.address, gatt)
-                            holder.connection = connection
-                            settled = true
-                            continuation.resumeWith(Result.success(connection))
+
+                            override fun onCharacteristicWrite(
+                                gatt: BluetoothGatt,
+                                characteristic: BluetoothGattCharacteristic,
+                                status: Int,
+                            ) {
+                                holder.connection?.handleWrite(status)
+                            }
+
+                            override fun onCharacteristicRead(
+                                gatt: BluetoothGatt,
+                                characteristic: BluetoothGattCharacteristic,
+                                status: Int,
+                            ) {
+                                holder.connection?.handleRead(status, characteristic.value)
+                            }
+
+                            @Suppress("DEPRECATION")
+                            override fun onCharacteristicRead(
+                                gatt: BluetoothGatt,
+                                characteristic: BluetoothGattCharacteristic,
+                                value: ByteArray,
+                                status: Int,
+                            ) {
+                                holder.connection?.handleRead(status, value)
+                            }
+
+                            override fun onCharacteristicChanged(
+                                gatt: BluetoothGatt,
+                                characteristic: BluetoothGattCharacteristic,
+                            ) {
+                                holder.connection?.handleNotification(characteristic, characteristic.value)
+                            }
+
+                            override fun onCharacteristicChanged(
+                                gatt: BluetoothGatt,
+                                characteristic: BluetoothGattCharacteristic,
+                                value: ByteArray,
+                            ) {
+                                holder.connection?.handleNotification(characteristic, value)
+                            }
+
+                            override fun onReadRemoteRssi(
+                                gatt: BluetoothGatt,
+                                rssi: Int,
+                                status: Int,
+                            ) {
+                                holder.connection?.handleRssi(status, rssi)
+                            }
                         }
 
-                        override fun onCharacteristicWrite(
-                            gatt: BluetoothGatt,
-                            characteristic: BluetoothGattCharacteristic,
-                            status: Int,
-                        ) {
-                            holder.connection?.handleWrite(status)
-                        }
-
-                        override fun onCharacteristicRead(
-                            gatt: BluetoothGatt,
-                            characteristic: BluetoothGattCharacteristic,
-                            status: Int,
-                        ) {
-                            holder.connection?.handleRead(status, characteristic.value)
-                        }
-
-                        @Suppress("DEPRECATION")
-                        override fun onCharacteristicRead(
-                            gatt: BluetoothGatt,
-                            characteristic: BluetoothGattCharacteristic,
-                            value: ByteArray,
-                            status: Int,
-                        ) {
-                            holder.connection?.handleRead(status, value)
-                        }
-
-                        override fun onCharacteristicChanged(
-                            gatt: BluetoothGatt,
-                            characteristic: BluetoothGattCharacteristic,
-                        ) {
-                            holder.connection?.handleNotification(characteristic, characteristic.value)
-                        }
-
-                        override fun onCharacteristicChanged(
-                            gatt: BluetoothGatt,
-                            characteristic: BluetoothGattCharacteristic,
-                            value: ByteArray,
-                        ) {
-                            holder.connection?.handleNotification(characteristic, value)
-                        }
-
-                        override fun onReadRemoteRssi(
-                            gatt: BluetoothGatt,
-                            rssi: Int,
-                            status: Int,
-                        ) {
-                            holder.connection?.handleRssi(status, rssi)
-                        }
-                    }
-
-                    val gatt = device.connectGatt(context, false, callback, BluetoothDevice.TRANSPORT_LE)
-                        ?: run {
-                            settled = true
-                            continuation.resumeWith(Result.failure(BleException("connectGatt 返回空")))
-                            return@suspendCancellableCoroutine
-                        }
+                    val gatt =
+                        device.connectGatt(context, false, callback, BluetoothDevice.TRANSPORT_LE)
+                            ?: run {
+                                settled = true
+                                continuation.resumeWith(Result.failure(BleException("connectGatt 返回空")))
+                                return@suspendCancellableCoroutine
+                            }
 
                     continuation.invokeOnCancellation {
                         runCatching { gatt.disconnect() }

@@ -31,7 +31,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.unit.dp
 import com.valhalla.core.batch.BatchItemStatus
 import com.valhalla.core.batch.BatchOperationKind
 import com.valhalla.core.batch.BatchSummary
@@ -61,42 +60,46 @@ internal data class BatchDeviceOption(
     val displayName: String,
 )
 
-internal fun BatchItemStatus.labelKey(): StringKey = when (this) {
-    BatchItemStatus.QUEUED -> StringKey.BATCH_STATUS_QUEUED
-    BatchItemStatus.RUNNING -> StringKey.BATCH_STATUS_RUNNING
-    BatchItemStatus.SUCCEEDED -> StringKey.BATCH_STATUS_SUCCEEDED
-    BatchItemStatus.SKIPPED -> StringKey.BATCH_STATUS_SKIPPED
-    BatchItemStatus.FAILED -> StringKey.BATCH_STATUS_FAILURE
-    BatchItemStatus.CANCELLED -> StringKey.BATCH_STATUS_CANCELLED
-    BatchItemStatus.REMOVED -> StringKey.BATCH_STATUS_REMOVED
-}
+internal fun BatchItemStatus.labelKey(): StringKey =
+    when (this) {
+        BatchItemStatus.QUEUED -> StringKey.BATCH_STATUS_QUEUED
+        BatchItemStatus.RUNNING -> StringKey.BATCH_STATUS_RUNNING
+        BatchItemStatus.SUCCEEDED -> StringKey.BATCH_STATUS_SUCCEEDED
+        BatchItemStatus.SKIPPED -> StringKey.BATCH_STATUS_SKIPPED
+        BatchItemStatus.FAILED -> StringKey.BATCH_STATUS_FAILURE
+        BatchItemStatus.CANCELLED -> StringKey.BATCH_STATUS_CANCELLED
+        BatchItemStatus.REMOVED -> StringKey.BATCH_STATUS_REMOVED
+    }
 
 /** 批量执行中的步骤代号到文案键；未知步骤直接原样展示。 */
-internal fun batchStepLabelKey(step: String?): StringKey? = when (step) {
-    "batch.started" -> StringKey.BATCH_STEP_STARTED
-    "batch.health" -> StringKey.BATCH_STEP_HEALTH
-    "batch.preset" -> StringKey.BATCH_STEP_PRESET
-    null -> null
-    else -> null
-}
+internal fun batchStepLabelKey(step: String?): StringKey? =
+    when (step) {
+        "batch.started" -> StringKey.BATCH_STEP_STARTED
+        "batch.health" -> StringKey.BATCH_STEP_HEALTH
+        "batch.preset" -> StringKey.BATCH_STEP_PRESET
+        null -> null
+        else -> null
+    }
 
-internal fun OtaQueueItemStatus.labelKey(): StringKey = when (this) {
-    OtaQueueItemStatus.QUEUED -> StringKey.QUEUE_STATUS_QUEUED
-    OtaQueueItemStatus.RUNNING -> StringKey.QUEUE_STATUS_RUNNING
-    OtaQueueItemStatus.PAUSED -> StringKey.QUEUE_STATUS_PAUSED
-    OtaQueueItemStatus.SUCCEEDED -> StringKey.QUEUE_STATUS_SUCCEEDED
-    OtaQueueItemStatus.FAILED -> StringKey.QUEUE_STATUS_FAILURE
-    OtaQueueItemStatus.SKIPPED -> StringKey.QUEUE_STATUS_SKIPPED
-    OtaQueueItemStatus.ABORTED -> StringKey.QUEUE_STATUS_ABORTED
-    OtaQueueItemStatus.REMOVED -> StringKey.QUEUE_STATUS_REMOVED
-}
+internal fun OtaQueueItemStatus.labelKey(): StringKey =
+    when (this) {
+        OtaQueueItemStatus.QUEUED -> StringKey.QUEUE_STATUS_QUEUED
+        OtaQueueItemStatus.RUNNING -> StringKey.QUEUE_STATUS_RUNNING
+        OtaQueueItemStatus.PAUSED -> StringKey.QUEUE_STATUS_PAUSED
+        OtaQueueItemStatus.SUCCEEDED -> StringKey.QUEUE_STATUS_SUCCEEDED
+        OtaQueueItemStatus.FAILED -> StringKey.QUEUE_STATUS_FAILURE
+        OtaQueueItemStatus.SKIPPED -> StringKey.QUEUE_STATUS_SKIPPED
+        OtaQueueItemStatus.ABORTED -> StringKey.QUEUE_STATUS_ABORTED
+        OtaQueueItemStatus.REMOVED -> StringKey.QUEUE_STATUS_REMOVED
+    }
 
-internal fun OtaQueueStage.labelKey(): StringKey = when (this) {
-    OtaQueueStage.PRECHECK -> StringKey.QUEUE_STAGE_PRECHECK
-    OtaQueueStage.TRANSFER -> StringKey.QUEUE_STAGE_TRANSFER
-    OtaQueueStage.VERIFY -> StringKey.QUEUE_STAGE_VERIFY
-    OtaQueueStage.DONE -> StringKey.QUEUE_STAGE_DONE
-}
+internal fun OtaQueueStage.labelKey(): StringKey =
+    when (this) {
+        OtaQueueStage.PRECHECK -> StringKey.QUEUE_STAGE_PRECHECK
+        OtaQueueStage.TRANSFER -> StringKey.QUEUE_STAGE_TRANSFER
+        OtaQueueStage.VERIFY -> StringKey.QUEUE_STAGE_VERIFY
+        OtaQueueStage.DONE -> StringKey.QUEUE_STAGE_DONE
+    }
 
 /**
  * 批量操作页面：多选已连接设备，串行执行体检或应用预设。
@@ -128,8 +131,10 @@ internal fun BatchScreen(
     var message by remember { mutableStateOf<String?>(null) }
 
     val selectedPreset = presets.firstOrNull { it.id == selectedPresetId }
-    val canStart = !running && selectedIds.isNotEmpty() &&
-        (kind == BatchOperationKind.HEALTH_CHECK || selectedPreset != null)
+    val canStart =
+        !running &&
+            selectedIds.isNotEmpty() &&
+            (kind == BatchOperationKind.HEALTH_CHECK || selectedPreset != null)
 
     Column(
         modifier = Modifier.fillMaxSize().padding(DesignTokens.Spacing.lg),
@@ -194,11 +199,12 @@ internal fun BatchScreen(
                     Checkbox(
                         checked = device.deviceId in selectedIds,
                         onCheckedChange = { checked ->
-                            selectedIds = if (checked) {
-                                selectedIds + device.deviceId
-                            } else {
-                                selectedIds - device.deviceId
-                            }
+                            selectedIds =
+                                if (checked) {
+                                    selectedIds + device.deviceId
+                                } else {
+                                    selectedIds - device.deviceId
+                                }
                         },
                         enabled = !running,
                     )
@@ -214,14 +220,16 @@ internal fun BatchScreen(
                     message = null
                     lastSummary = null
                     scope.launchSafely(errorReporter, "batch-run") {
-                        val summary = controller.run(
-                            kind = kind,
-                            targets = devices
-                                .filter { it.deviceId in selectedIds }
-                                .map { BatchTarget(it.deviceId, it.displayName) },
-                        ) { target, step ->
-                            execute(kind, selectedPreset, target, step)
-                        }
+                        val summary =
+                            controller.run(
+                                kind = kind,
+                                targets =
+                                    devices
+                                        .filter { it.deviceId in selectedIds }
+                                        .map { BatchTarget(it.deviceId, it.displayName) },
+                            ) { target, step ->
+                                execute(kind, selectedPreset, target, step)
+                            }
                         lastSummary = summary
                     }
                 },
@@ -266,11 +274,12 @@ internal fun BatchScreen(
                             Text(
                                 strings.t(item.status.labelKey()),
                                 style = MaterialTheme.typography.labelMedium,
-                                color = if (item.status == BatchItemStatus.FAILED) {
-                                    MaterialTheme.colorScheme.error
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                },
+                                color =
+                                    if (item.status == BatchItemStatus.FAILED) {
+                                        MaterialTheme.colorScheme.error
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
                             )
                         }
                         if (expanded) {
@@ -321,26 +330,30 @@ internal fun BatchScreen(
                 }) { Text(strings.t(StringKey.BATCH_COPY)) }
                 TextButton(onClick = {
                     scope.launch {
-                        val result = fileSaver.save(
-                            SaveableFile(
-                                fileName = "valhalla-batch-summary.txt",
-                                content = summary.toText(),
-                                mimeType = "text/plain",
-                            ),
-                        )
-                        message = when (result.status) {
-                            FileSaveStatus.SAVED -> strings.t(
-                                StringKey.BATCH_SAVED,
-                                "name" to "valhalla-batch-summary.txt",
+                        val result =
+                            fileSaver.save(
+                                SaveableFile(
+                                    fileName = "valhalla-batch-summary.txt",
+                                    content = summary.toText(),
+                                    mimeType = "text/plain",
+                                ),
                             )
+                        message =
+                            when (result.status) {
+                                FileSaveStatus.SAVED ->
+                                    strings.t(
+                                        StringKey.BATCH_SAVED,
+                                        "name" to "valhalla-batch-summary.txt",
+                                    )
 
-                            FileSaveStatus.CANCELLED -> strings.t(StringKey.BATCH_SAVE_CANCELLED)
-                            FileSaveStatus.UNAVAILABLE -> strings.t(StringKey.BATCH_SAVE_UNAVAILABLE)
-                            FileSaveStatus.FAILED -> strings.t(
-                                StringKey.BATCH_SAVE_FAILED,
-                                "detail" to (result.message ?: strings.t(StringKey.UNKNOWN)),
-                            )
-                        }
+                                FileSaveStatus.CANCELLED -> strings.t(StringKey.BATCH_SAVE_CANCELLED)
+                                FileSaveStatus.UNAVAILABLE -> strings.t(StringKey.BATCH_SAVE_UNAVAILABLE)
+                                FileSaveStatus.FAILED ->
+                                    strings.t(
+                                        StringKey.BATCH_SAVE_FAILED,
+                                        "detail" to (result.message ?: strings.t(StringKey.UNKNOWN)),
+                                    )
+                            }
                     }
                 }) { Text(strings.t(StringKey.BATCH_SAVE)) }
             }
@@ -355,16 +368,17 @@ internal fun BatchScreen(
     }
 }
 
-internal fun batchReasonLabelKey(reason: String): StringKey? = when (reason) {
-    "batch.device_locked" -> StringKey.BATCH_REASON_DEVICE_LOCKED
-    "batch.disconnected" -> StringKey.BATCH_REASON_DISCONNECTED
-    "batch.disconnected_after_step" -> StringKey.BATCH_REASON_DISCONNECTED_AFTER
-    "batch.cancelled_remaining" -> StringKey.BATCH_REASON_CANCELLED_REMAINING
-    "batch.job_cancelled" -> StringKey.BATCH_REASON_JOB_CANCELLED
-    "batch.execution_error" -> StringKey.BATCH_REASON_EXECUTION_ERROR
-    "batch.no_preset" -> StringKey.BATCH_REASON_NO_PRESET
-    else -> null
-}
+internal fun batchReasonLabelKey(reason: String): StringKey? =
+    when (reason) {
+        "batch.device_locked" -> StringKey.BATCH_REASON_DEVICE_LOCKED
+        "batch.disconnected" -> StringKey.BATCH_REASON_DISCONNECTED
+        "batch.disconnected_after_step" -> StringKey.BATCH_REASON_DISCONNECTED_AFTER
+        "batch.cancelled_remaining" -> StringKey.BATCH_REASON_CANCELLED_REMAINING
+        "batch.job_cancelled" -> StringKey.BATCH_REASON_JOB_CANCELLED
+        "batch.execution_error" -> StringKey.BATCH_REASON_EXECUTION_ERROR
+        "batch.no_preset" -> StringKey.BATCH_REASON_NO_PRESET
+        else -> null
+    }
 
 /**
  * OTA 队列页面：已连接设备 + 固件库包排成队列，逐台串行升级。
@@ -391,8 +405,14 @@ internal fun OtaQueueScreen(
     val selectedFirmware = firmwareRecords.firstOrNull { it.id == firmwareId }
     val hasPaused = snapshot.items.any { it.status == OtaQueueItemStatus.PAUSED }
     val hasQueued = snapshot.items.any { it.status == OtaQueueItemStatus.QUEUED }
-    val currentDevice = snapshot.currentDeviceId
-        ?.let { id -> snapshot.items.firstOrNull { it.target.deviceId == id }?.target?.displayName }
+    val currentDevice =
+        snapshot.currentDeviceId
+            ?.let { id ->
+                snapshot.items
+                    .firstOrNull { it.target.deviceId == id }
+                    ?.target
+                    ?.displayName
+            }
 
     Column(
         modifier = Modifier.fillMaxSize().padding(DesignTokens.Spacing.lg),
@@ -418,11 +438,12 @@ internal fun OtaQueueScreen(
                     Checkbox(
                         checked = device.deviceId in selectedIds,
                         onCheckedChange = { checked ->
-                            selectedIds = if (checked) {
-                                selectedIds + device.deviceId
-                            } else {
-                                selectedIds - device.deviceId
-                            }
+                            selectedIds =
+                                if (checked) {
+                                    selectedIds + device.deviceId
+                                } else {
+                                    selectedIds - device.deviceId
+                                }
                         },
                         enabled = !snapshot.running,
                     )
@@ -461,14 +482,15 @@ internal fun OtaQueueScreen(
                     val firmware = selectedFirmware ?: return@OutlinedButton
                     var added = 0
                     devices.filter { it.deviceId in selectedIds }.forEach { device ->
-                        val ok = controller.enqueue(
-                            OtaQueueTarget(
-                                deviceId = device.deviceId,
-                                displayName = device.displayName,
-                                firmwareId = firmware.id,
-                                firmwareLabel = firmware.displayName,
-                            ),
-                        )
+                        val ok =
+                            controller.enqueue(
+                                OtaQueueTarget(
+                                    deviceId = device.deviceId,
+                                    displayName = device.displayName,
+                                    firmwareId = firmware.id,
+                                    firmwareLabel = firmware.displayName,
+                                ),
+                            )
                         if (ok) added++
                     }
                     message = if (added == 0) strings.t(StringKey.QUEUE_DUPLICATE) else null
@@ -555,26 +577,30 @@ internal fun OtaQueueScreen(
                 }) { Text(strings.t(StringKey.BATCH_COPY)) }
                 TextButton(onClick = {
                     scope.launch {
-                        val result = fileSaver.save(
-                            SaveableFile(
-                                fileName = "valhalla-ota-queue-summary.txt",
-                                content = summary.toText(),
-                                mimeType = "text/plain",
-                            ),
-                        )
-                        message = when (result.status) {
-                            FileSaveStatus.SAVED -> strings.t(
-                                StringKey.BATCH_SAVED,
-                                "name" to "valhalla-ota-queue-summary.txt",
+                        val result =
+                            fileSaver.save(
+                                SaveableFile(
+                                    fileName = "valhalla-ota-queue-summary.txt",
+                                    content = summary.toText(),
+                                    mimeType = "text/plain",
+                                ),
                             )
+                        message =
+                            when (result.status) {
+                                FileSaveStatus.SAVED ->
+                                    strings.t(
+                                        StringKey.BATCH_SAVED,
+                                        "name" to "valhalla-ota-queue-summary.txt",
+                                    )
 
-                            FileSaveStatus.CANCELLED -> strings.t(StringKey.BATCH_SAVE_CANCELLED)
-                            FileSaveStatus.UNAVAILABLE -> strings.t(StringKey.BATCH_SAVE_UNAVAILABLE)
-                            FileSaveStatus.FAILED -> strings.t(
-                                StringKey.BATCH_SAVE_FAILED,
-                                "detail" to (result.message ?: strings.t(StringKey.UNKNOWN)),
-                            )
-                        }
+                                FileSaveStatus.CANCELLED -> strings.t(StringKey.BATCH_SAVE_CANCELLED)
+                                FileSaveStatus.UNAVAILABLE -> strings.t(StringKey.BATCH_SAVE_UNAVAILABLE)
+                                FileSaveStatus.FAILED ->
+                                    strings.t(
+                                        StringKey.BATCH_SAVE_FAILED,
+                                        "detail" to (result.message ?: strings.t(StringKey.UNKNOWN)),
+                                    )
+                            }
                     }
                 }) { Text(strings.t(StringKey.BATCH_SAVE)) }
             }
@@ -609,11 +635,12 @@ private fun QueueItemCard(
                 Text(
                     strings.t(item.status.labelKey()),
                     style = MaterialTheme.typography.labelMedium,
-                    color = if (item.status == OtaQueueItemStatus.FAILED) {
-                        MaterialTheme.colorScheme.error
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
+                    color =
+                        if (item.status == OtaQueueItemStatus.FAILED) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
                 )
             }
             Text(item.target.firmwareLabel, style = MaterialTheme.typography.bodySmall)

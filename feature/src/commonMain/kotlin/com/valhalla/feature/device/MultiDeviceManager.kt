@@ -3,8 +3,8 @@ package com.valhalla.feature.device
 import com.valhalla.data.ble.BleClient
 import com.valhalla.data.ble.BleConnection
 import com.valhalla.data.ble.BleDevice
-import com.valhalla.data.pool.ConnectionSession
 import com.valhalla.data.pool.ConnectResult
+import com.valhalla.data.pool.ConnectionSession
 import com.valhalla.data.pool.MultiDeviceConnectionPool
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -37,13 +37,19 @@ data class MultiDeviceState(
 
 /** 连接结果。容量满时直接拒绝并给出明确提示，不进入连接池排队。 */
 sealed interface MultiDeviceConnectResult {
-    data class Connected(val device: ManagedDeviceInfo) : MultiDeviceConnectResult
+    data class Connected(
+        val device: ManagedDeviceInfo,
+    ) : MultiDeviceConnectResult
 
     data object AlreadyConnected : MultiDeviceConnectResult
 
-    data class LimitReached(val capacity: Int) : MultiDeviceConnectResult
+    data class LimitReached(
+        val capacity: Int,
+    ) : MultiDeviceConnectResult
 
-    data class Failed(val message: String) : MultiDeviceConnectResult
+    data class Failed(
+        val message: String,
+    ) : MultiDeviceConnectResult
 
     data object InProgress : MultiDeviceConnectResult
 }
@@ -63,61 +69,66 @@ class MultiDeviceManager(
     val capacity: Int = 4,
     private val clockMillis: () -> Long = { Clock.System.now().toEpochMilliseconds() },
 ) {
-
     private val mutex = Mutex()
     private val sessionByDevice = mutableMapOf<String, BlePoolSession>()
 
-    private val pool = MultiDeviceConnectionPool(
-        maxConcurrentConnections = capacity,
-        sessionFactory = { deviceId ->
-            BlePoolSession(bleClient, deviceId).also { sessionByDevice[deviceId] = it }
-        },
-    )
+    private val pool =
+        MultiDeviceConnectionPool(
+            maxConcurrentConnections = capacity,
+            sessionFactory = { deviceId ->
+                BlePoolSession(bleClient, deviceId).also { sessionByDevice[deviceId] = it }
+            },
+        )
 
     private val mutableState = MutableStateFlow(MultiDeviceState(capacity = capacity))
     val state: StateFlow<MultiDeviceState> = mutableState.asStateFlow()
 
     suspend fun connect(device: BleDevice): MultiDeviceConnectResult {
-        val snapshot = mutex.withLock {
-            val existing = mutableState.value.devices.firstOrNull { it.deviceId == device.deviceId }
-            when {
-                existing != null -> return@withLock MultiDeviceConnectResult.AlreadyConnected
-                mutableState.value.occupied >= capacity ->
-                    return@withLock MultiDeviceConnectResult.LimitReached(capacity)
+        val snapshot =
+            mutex.withLock {
+                val existing = mutableState.value.devices.firstOrNull { it.deviceId == device.deviceId }
+                when {
+                    existing != null -> return@withLock MultiDeviceConnectResult.AlreadyConnected
+                    mutableState.value.occupied >= capacity ->
+                        return@withLock MultiDeviceConnectResult.LimitReached(capacity)
 
-                else -> null
+                    else -> null
+                }
             }
-        }
         if (snapshot != null) return snapshot
 
         return when (val result = pool.connect(device.deviceId)) {
             ConnectResult.Connected, ConnectResult.AlreadyConnected -> {
-                val connection = sessionByDevice[device.deviceId]?.connection
-                    ?: return MultiDeviceConnectResult.Failed("底层链路未建立")
+                val connection =
+                    sessionByDevice[device.deviceId]?.connection
+                        ?: return MultiDeviceConnectResult.Failed("底层链路未建立")
                 mutex.withLock {
                     val current = mutableState.value
                     val existing = current.devices.firstOrNull { it.deviceId == device.deviceId }
                     if (existing != null) return@withLock MultiDeviceConnectResult.AlreadyConnected
                     val slot = lowestFreeSlot(current.devices.map { it.slot })
-                    val info = ManagedDeviceInfo(
-                        deviceId = device.deviceId,
-                        displayName = device.name?.takeIf { it.isNotBlank() } ?: device.deviceId,
-                        connectedAtMillis = clockMillis(),
-                        slot = slot,
-                        connection = connection,
-                    )
-                    mutableState.value = current.copy(
-                        devices = current.devices + info,
-                        activeDeviceId = current.activeDeviceId ?: info.deviceId,
-                    )
+                    val info =
+                        ManagedDeviceInfo(
+                            deviceId = device.deviceId,
+                            displayName = device.name?.takeIf { it.isNotBlank() } ?: device.deviceId,
+                            connectedAtMillis = clockMillis(),
+                            slot = slot,
+                            connection = connection,
+                        )
+                    mutableState.value =
+                        current.copy(
+                            devices = current.devices + info,
+                            activeDeviceId = current.activeDeviceId ?: info.deviceId,
+                        )
                     MultiDeviceConnectResult.Connected(info)
                 }
             }
 
             ConnectResult.InProgress -> MultiDeviceConnectResult.InProgress
-            is ConnectResult.Failed -> MultiDeviceConnectResult.Failed(
-                result.failure.toString(),
-            )
+            is ConnectResult.Failed ->
+                MultiDeviceConnectResult.Failed(
+                    result.failure.toString(),
+                )
         }
     }
 
@@ -127,13 +138,15 @@ class MultiDeviceManager(
             sessionByDevice.remove(deviceId)
             val remaining = mutableState.value.devices.filterNot { it.deviceId == deviceId }
             val renumbered = remaining.mapIndexed { index, item -> item.copy(slot = index + 1) }
-            val active = mutableState.value.activeDeviceId
-                ?.takeIf { id -> renumbered.any { it.deviceId == id } }
-                ?: renumbered.firstOrNull()?.deviceId
-            mutableState.value = mutableState.value.copy(
-                devices = renumbered,
-                activeDeviceId = active,
-            )
+            val active =
+                mutableState.value.activeDeviceId
+                    ?.takeIf { id -> renumbered.any { it.deviceId == id } }
+                    ?: renumbered.firstOrNull()?.deviceId
+            mutableState.value =
+                mutableState.value.copy(
+                    devices = renumbered,
+                    activeDeviceId = active,
+                )
         }
     }
 
@@ -155,20 +168,25 @@ class MultiDeviceManager(
     }
 
     /** 自动重连成功后，把管理器内的链路引用替换为新连接，保持断开语义一致。 */
-    fun replaceConnection(deviceId: String, connection: BleConnection): Boolean {
+    fun replaceConnection(
+        deviceId: String,
+        connection: BleConnection,
+    ): Boolean {
         val current = mutableState.value
         if (current.devices.none { it.deviceId == deviceId }) return false
         sessionByDevice[deviceId]?.adopt(connection)
         val connectedAt = clockMillis()
-        mutableState.value = current.copy(
-            devices = current.devices.map {
-                if (it.deviceId == deviceId) {
-                    it.copy(connection = connection, connectedAtMillis = connectedAt)
-                } else {
-                    it
-                }
-            },
-        )
+        mutableState.value =
+            current.copy(
+                devices =
+                    current.devices.map {
+                        if (it.deviceId == deviceId) {
+                            it.copy(connection = connection, connectedAtMillis = connectedAt)
+                        } else {
+                            it
+                        }
+                    },
+            )
         return true
     }
 
@@ -184,7 +202,6 @@ private class BlePoolSession(
     private val bleClient: BleClient,
     override val deviceId: String,
 ) : ConnectionSession {
-
     var connection: BleConnection? = null
         private set
 

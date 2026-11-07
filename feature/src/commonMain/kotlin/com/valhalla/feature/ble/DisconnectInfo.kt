@@ -47,13 +47,14 @@ data class DisconnectInfo(
     val autoReconnectAllowed: Boolean = false,
 ) {
     val actionLabel: UiMessage?
-        get() = when (action) {
-            DisconnectAction.NONE -> null
-            DisconnectAction.RECONNECT -> UiMessage(StringKey.RECONNECT_NOW)
-            DisconnectAction.OPEN_SETTINGS -> UiMessage(StringKey.ACTION_OPEN_SETTINGS)
-            DisconnectAction.ENABLE_BLUETOOTH -> UiMessage(StringKey.ACTION_ENABLE_BLUETOOTH)
-            DisconnectAction.RESCAN -> UiMessage(StringKey.ACTION_RESCAN)
-        }
+        get() =
+            when (action) {
+                DisconnectAction.NONE -> null
+                DisconnectAction.RECONNECT -> UiMessage(StringKey.RECONNECT_NOW)
+                DisconnectAction.OPEN_SETTINGS -> UiMessage(StringKey.ACTION_OPEN_SETTINGS)
+                DisconnectAction.ENABLE_BLUETOOTH -> UiMessage(StringKey.ACTION_ENABLE_BLUETOOTH)
+                DisconnectAction.RESCAN -> UiMessage(StringKey.ACTION_RESCAN)
+            }
 }
 
 /**
@@ -75,70 +76,79 @@ data class DisconnectSignals(
  * 断连原因映射，优先级从高到低：
  * 主动断开 > 权限丢失 > 蓝牙关闭 > 超时 > 设备侧断开 > 连接失败 > 未知。
  */
-fun classifyDisconnect(signals: DisconnectSignals): DisconnectInfo = when {
-    signals.userRequested -> DisconnectInfo(
-        reason = DisconnectReason.USER_REQUESTED,
-        title = UiMessage(StringKey.DISCONNECT_USER_TITLE),
-        message = UiMessage(StringKey.DISCONNECT_USER_MESSAGE),
-        action = DisconnectAction.RESCAN,
-        autoReconnectAllowed = false,
-    )
+fun classifyDisconnect(signals: DisconnectSignals): DisconnectInfo =
+    when {
+        signals.userRequested ->
+            DisconnectInfo(
+                reason = DisconnectReason.USER_REQUESTED,
+                title = UiMessage(StringKey.DISCONNECT_USER_TITLE),
+                message = UiMessage(StringKey.DISCONNECT_USER_MESSAGE),
+                action = DisconnectAction.RESCAN,
+                autoReconnectAllowed = false,
+            )
 
-    signals.permissionState == BlePermissionState.PERMANENTLY_DENIED ||
-        signals.permissionState == BlePermissionState.DENIED ||
-        signals.adapterState == BleAdapterState.UNAUTHORIZED -> DisconnectInfo(
-        reason = DisconnectReason.PERMISSION_LOST,
-        title = UiMessage(StringKey.DISCONNECT_PERMISSION_TITLE),
-        message = UiMessage(StringKey.DISCONNECT_PERMISSION_MESSAGE),
-        action = DisconnectAction.OPEN_SETTINGS,
-        autoReconnectAllowed = false,
-    )
+        signals.permissionState == BlePermissionState.PERMANENTLY_DENIED ||
+            signals.permissionState == BlePermissionState.DENIED ||
+            signals.adapterState == BleAdapterState.UNAUTHORIZED ->
+            DisconnectInfo(
+                reason = DisconnectReason.PERMISSION_LOST,
+                title = UiMessage(StringKey.DISCONNECT_PERMISSION_TITLE),
+                message = UiMessage(StringKey.DISCONNECT_PERMISSION_MESSAGE),
+                action = DisconnectAction.OPEN_SETTINGS,
+                autoReconnectAllowed = false,
+            )
 
-    signals.adapterState == BleAdapterState.POWERED_OFF -> DisconnectInfo(
-        reason = DisconnectReason.BLUETOOTH_OFF,
-        title = UiMessage(StringKey.DISCONNECT_BLUETOOTH_OFF_TITLE),
-        message = UiMessage(StringKey.DISCONNECT_BLUETOOTH_OFF_MESSAGE),
-        action = DisconnectAction.ENABLE_BLUETOOTH,
-        autoReconnectAllowed = true,
-    )
+        signals.adapterState == BleAdapterState.POWERED_OFF ->
+            DisconnectInfo(
+                reason = DisconnectReason.BLUETOOTH_OFF,
+                title = UiMessage(StringKey.DISCONNECT_BLUETOOTH_OFF_TITLE),
+                message = UiMessage(StringKey.DISCONNECT_BLUETOOTH_OFF_MESSAGE),
+                action = DisconnectAction.ENABLE_BLUETOOTH,
+                autoReconnectAllowed = true,
+            )
 
-    signals.adapterState == BleAdapterState.RESETTING -> DisconnectInfo(
-        reason = DisconnectReason.BLUETOOTH_OFF,
-        title = UiMessage(StringKey.DISCONNECT_RESETTING_TITLE),
-        message = UiMessage(StringKey.DISCONNECT_RESETTING_MESSAGE),
-        action = DisconnectAction.RECONNECT,
-        autoReconnectAllowed = true,
-    )
+        signals.adapterState == BleAdapterState.RESETTING ->
+            DisconnectInfo(
+                reason = DisconnectReason.BLUETOOTH_OFF,
+                title = UiMessage(StringKey.DISCONNECT_RESETTING_TITLE),
+                message = UiMessage(StringKey.DISCONNECT_RESETTING_MESSAGE),
+                action = DisconnectAction.RECONNECT,
+                autoReconnectAllowed = true,
+            )
 
-    signals.timeout -> DisconnectInfo(
-        reason = DisconnectReason.TIMEOUT,
-        title = UiMessage(StringKey.DISCONNECT_TIMEOUT_TITLE),
-        message = UiMessage(StringKey.DISCONNECT_TIMEOUT_MESSAGE),
-        action = DisconnectAction.RECONNECT,
-        autoReconnectAllowed = true,
-    )
+        signals.timeout ->
+            DisconnectInfo(
+                reason = DisconnectReason.TIMEOUT,
+                title = UiMessage(StringKey.DISCONNECT_TIMEOUT_TITLE),
+                message = UiMessage(StringKey.DISCONNECT_TIMEOUT_MESSAGE),
+                action = DisconnectAction.RECONNECT,
+                autoReconnectAllowed = true,
+            )
 
-    signals.peerTerminated -> DisconnectInfo(
-        reason = DisconnectReason.DEVICE_SIDE,
-        title = UiMessage(StringKey.DISCONNECT_DEVICE_TITLE),
-        message = UiMessage(StringKey.DISCONNECT_DEVICE_MESSAGE),
-        action = DisconnectAction.RECONNECT,
-        autoReconnectAllowed = true,
-    )
+        signals.peerTerminated ->
+            DisconnectInfo(
+                reason = DisconnectReason.DEVICE_SIDE,
+                title = UiMessage(StringKey.DISCONNECT_DEVICE_TITLE),
+                message = UiMessage(StringKey.DISCONNECT_DEVICE_MESSAGE),
+                action = DisconnectAction.RECONNECT,
+                autoReconnectAllowed = true,
+            )
 
-    signals.transportError -> DisconnectInfo(
-        reason = DisconnectReason.CONNECT_FAILED,
-        title = UiMessage(StringKey.DISCONNECT_CONNECT_FAILED_TITLE),
-        message = UiMessage(StringKey.DISCONNECT_CONNECT_FAILED_MESSAGE),
-        action = DisconnectAction.RECONNECT,
-        autoReconnectAllowed = true,
-    )
+        signals.transportError ->
+            DisconnectInfo(
+                reason = DisconnectReason.CONNECT_FAILED,
+                title = UiMessage(StringKey.DISCONNECT_CONNECT_FAILED_TITLE),
+                message = UiMessage(StringKey.DISCONNECT_CONNECT_FAILED_MESSAGE),
+                action = DisconnectAction.RECONNECT,
+                autoReconnectAllowed = true,
+            )
 
-    else -> DisconnectInfo(
-        reason = DisconnectReason.UNKNOWN,
-        title = UiMessage(StringKey.DISCONNECT_UNKNOWN_TITLE),
-        message = UiMessage(StringKey.DISCONNECT_UNKNOWN_MESSAGE),
-        action = DisconnectAction.RECONNECT,
-        autoReconnectAllowed = true,
-    )
-}
+        else ->
+            DisconnectInfo(
+                reason = DisconnectReason.UNKNOWN,
+                title = UiMessage(StringKey.DISCONNECT_UNKNOWN_TITLE),
+                message = UiMessage(StringKey.DISCONNECT_UNKNOWN_MESSAGE),
+                action = DisconnectAction.RECONNECT,
+                autoReconnectAllowed = true,
+            )
+    }

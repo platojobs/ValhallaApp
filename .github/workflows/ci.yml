@@ -41,6 +41,59 @@ jobs:
             build/reports/problems/**
           if-no-files-found: ignore
 
+  static-analysis:
+    name: 静态分析（detekt + ktlint）
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: detekt + ktlint（发现问题即失败）
+        run: ./gradlew detekt ktlintCheck --stacktrace 2>&1 | tee static-analysis.log
+      - name: 上传日志与报告（失败时）
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-static-analysis
+          path: |
+            static-analysis.log
+            **/build/reports/detekt/**
+          if-no-files-found: ignore
+
+  coverage:
+    name: 覆盖率（Kover）
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: 生成报告并校验阈值（core≥75 / data≥55 / feature≥60）
+        run: |
+          ./gradlew \
+            :core:koverXmlReportJvm :core:koverHtmlReportJvm :core:koverVerifyJvm \
+            :data:koverXmlReportJvm :data:koverHtmlReportJvm :data:koverVerifyJvm \
+            :feature:koverXmlReportJvm :feature:koverHtmlReportJvm :feature:koverVerifyJvm \
+            --stacktrace 2>&1 | tee kover.log
+      - name: 上传覆盖率报告（始终）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kover-reports
+          path: |
+            core/build/reports/kover/**
+            data/build/reports/kover/**
+            feature/build/reports/kover/**
+            kover.log
+          if-no-files-found: error
+
   jvm-tests:
     name: JVM 测试（${{ matrix.module }}）
     runs-on: ubuntu-latest

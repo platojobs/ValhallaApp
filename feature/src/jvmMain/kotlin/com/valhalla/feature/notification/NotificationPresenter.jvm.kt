@@ -16,9 +16,17 @@ actual fun rememberNotificationPresenter(): NotificationPresenter =
             override val state: StateFlow<BlePermissionState> =
                 MutableStateFlow(BlePermissionState.NOT_REQUESTED).asStateFlow()
             override val canNotify: Boolean = false
+
             override fun requestPermission() = Unit
+
             override fun openAppSettings() = Unit
+
             override fun refresh() = Unit
-            override fun show(title: String, body: String, target: NotificationTarget) = Unit
+
+            override fun show(
+                title: String,
+                body: String,
+                target: NotificationTarget,
+            ) = Unit
         }
     }

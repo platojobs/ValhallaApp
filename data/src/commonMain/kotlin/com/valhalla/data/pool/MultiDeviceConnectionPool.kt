@@ -33,7 +33,6 @@ class MultiDeviceConnectionPool(
     val connectTimeoutMillis: Long = 15_000L,
     private val sessionFactory: (String) -> ConnectionSession,
 ) {
-
     init {
         require(maxConcurrentConnections > 0) { "maxConcurrentConnections 必须大于 0" }
         require(connectTimeoutMillis > 0) { "connectTimeoutMillis 必须大于 0" }
@@ -74,87 +73,93 @@ class MultiDeviceConnectionPool(
      *   避免半建立链路泄漏；
      * - 调用方取消时状态回落到 `DISCONNECTED`，不会永久停留在 `CONNECTING`。
      */
-    suspend fun connect(deviceId: String): ConnectResult = deviceMutexOf(deviceId).withLock {
-        when (mutableStates.value[deviceId]) {
-            DeviceState.CONNECTING -> return@withLock ConnectResult.InProgress
-            DeviceState.CONNECTED, DeviceState.AUTHENTICATING, DeviceState.READY ->
-                return@withLock ConnectResult.AlreadyConnected
-            else -> Unit
-        }
+    suspend fun connect(deviceId: String): ConnectResult =
+        deviceMutexOf(deviceId).withLock {
+            when (mutableStates.value[deviceId]) {
+                DeviceState.CONNECTING -> return@withLock ConnectResult.InProgress
+                DeviceState.CONNECTED, DeviceState.AUTHENTICATING, DeviceState.READY ->
+                    return@withLock ConnectResult.AlreadyConnected
+                else -> Unit
+            }
 
-        publish(PoolEvent.ConnectionStarted(deviceId))
-        setState(deviceId, DeviceState.CONNECTING)
+            publish(PoolEvent.ConnectionStarted(deviceId))
+            setState(deviceId, DeviceState.CONNECTING)
 
-        var failure: PoolFailure? = null
-        var createdSession: ConnectionSession? = null
-        var registered = false
+            var failure: PoolFailure? = null
+            var createdSession: ConnectionSession? = null
+            var registered = false
 
-        val connected = try {
-            withTimeoutOrNull(connectTimeoutMillis) {
-                capacity.withPermit {
-                    try {
-                        val session = sessionFactory(deviceId)
-                        createdSession = session
-                        session.connect()
-                        stateMutex.withLock {
-                            sessions[deviceId] = session
-                            mutableActiveIds.value = mutableActiveIds.value + deviceId
+            val connected =
+                try {
+                    withTimeoutOrNull(connectTimeoutMillis) {
+                        capacity.withPermit {
+                            try {
+                                val session = sessionFactory(deviceId)
+                                createdSession = session
+                                session.connect()
+                                stateMutex.withLock {
+                                    sessions[deviceId] = session
+                                    mutableActiveIds.value = mutableActiveIds.value + deviceId
+                                }
+                                registered = true
+                                true
+                            } catch (cancellation: CancellationException) {
+                                throw cancellation
+                            } catch (error: Throwable) {
+                                failure =
+                                    PoolFailure.Transport(
+                                        error.message ?: error::class.simpleName ?: "未知错误",
+                                    )
+                                false
+                            }
                         }
-                        registered = true
-                        true
-                    } catch (cancellation: CancellationException) {
-                        throw cancellation
-                    } catch (error: Throwable) {
-                        failure = PoolFailure.Transport(
-                            error.message ?: error::class.simpleName ?: "未知错误",
-                        )
-                        false
                     }
+                } catch (cancellation: CancellationException) {
+                    closeOrphan(createdSession, registered)
+                    withContext(NonCancellable) {
+                        setState(deviceId, DeviceState.DISCONNECTED)
+                        publish(PoolEvent.ConnectionFailed(deviceId, PoolFailure.Transport("连接已取消")))
+                    }
+                    throw cancellation
+                }
+
+            // 失败或超时时关闭可能已部分建立的会话，避免底层资源泄漏。
+            if (!registered) closeOrphan(createdSession, registered)
+
+            when {
+                connected == true -> {
+                    setState(deviceId, DeviceState.CONNECTED)
+                    publish(PoolEvent.ConnectionEstablished(deviceId))
+                    ConnectResult.Connected
+                }
+
+                connected == false -> {
+                    val reason = failure ?: PoolFailure.Transport("未提供失败原因")
+                    setState(deviceId, DeviceState.DISCONNECTED)
+                    publish(PoolEvent.ConnectionFailed(deviceId, reason))
+                    ConnectResult.Failed(reason)
+                }
+
+                else -> {
+                    // 极窄竞态：建链在超时边界完成并被注册，但 withTimeoutOrNull 已返回 null。
+                    // 这里主动摘除并关闭，避免出现「池内仍有会话、状态却为 DISCONNECTED」的泄漏。
+                    if (registered) {
+                        removeSession(deviceId)?.let { stale ->
+                            withContext(NonCancellable) { runCatching { stale.disconnect() } }
+                        }
+                    }
+                    setState(deviceId, DeviceState.DISCONNECTED)
+                    publish(PoolEvent.ConnectionFailed(deviceId, PoolFailure.Timeout))
+                    ConnectResult.Failed(PoolFailure.Timeout)
                 }
             }
-        } catch (cancellation: CancellationException) {
-            closeOrphan(createdSession, registered)
-            withContext(NonCancellable) {
-                setState(deviceId, DeviceState.DISCONNECTED)
-                publish(PoolEvent.ConnectionFailed(deviceId, PoolFailure.Transport("连接已取消")))
-            }
-            throw cancellation
         }
-
-        // 失败或超时时关闭可能已部分建立的会话，避免底层资源泄漏。
-        if (!registered) closeOrphan(createdSession, registered)
-
-        when {
-            connected == true -> {
-                setState(deviceId, DeviceState.CONNECTED)
-                publish(PoolEvent.ConnectionEstablished(deviceId))
-                ConnectResult.Connected
-            }
-
-            connected == false -> {
-                val reason = failure ?: PoolFailure.Transport("未提供失败原因")
-                setState(deviceId, DeviceState.DISCONNECTED)
-                publish(PoolEvent.ConnectionFailed(deviceId, reason))
-                ConnectResult.Failed(reason)
-            }
-
-            else -> {
-                // 极窄竞态：建链在超时边界完成并被注册，但 withTimeoutOrNull 已返回 null。
-                // 这里主动摘除并关闭，避免出现「池内仍有会话、状态却为 DISCONNECTED」的泄漏。
-                if (registered) {
-                    removeSession(deviceId)?.let { stale ->
-                        withContext(NonCancellable) { runCatching { stale.disconnect() } }
-                    }
-                }
-                setState(deviceId, DeviceState.DISCONNECTED)
-                publish(PoolEvent.ConnectionFailed(deviceId, PoolFailure.Timeout))
-                ConnectResult.Failed(PoolFailure.Timeout)
-            }
-        }
-    }
 
     /** 关闭尚未注册进池的会话；已注册的会话由 [disconnect] 负责释放。 */
-    private suspend fun closeOrphan(session: ConnectionSession?, registered: Boolean) {
+    private suspend fun closeOrphan(
+        session: ConnectionSession?,
+        registered: Boolean,
+    ) {
         if (session == null || registered) return
         withContext(NonCancellable) {
             runCatching { session.disconnect() }
@@ -162,35 +167,41 @@ class MultiDeviceConnectionPool(
     }
 
     /** 断开指定设备。未连接时为空操作。 */
-    suspend fun disconnect(deviceId: String) = deviceMutexOf(deviceId).withLock {
-        val session = removeSession(deviceId)
-        if (session == null && mutableStates.value[deviceId] == null) {
-            return@withLock
+    suspend fun disconnect(deviceId: String) =
+        deviceMutexOf(deviceId).withLock {
+            val session = removeSession(deviceId)
+            if (session == null && mutableStates.value[deviceId] == null) {
+                return@withLock
+            }
+            session?.let { runCatching { it.disconnect() } }
+            setState(deviceId, DeviceState.DISCONNECTED)
+            publish(PoolEvent.Disconnected(deviceId))
         }
-        session?.let { runCatching { it.disconnect() } }
-        setState(deviceId, DeviceState.DISCONNECTED)
-        publish(PoolEvent.Disconnected(deviceId))
-    }
 
     /** 在同一把锁内摘除会话并同步活跃集合。 */
-    private suspend fun removeSession(deviceId: String): ConnectionSession? = stateMutex.withLock {
-        val removed = sessions.remove(deviceId)
-        if (removed != null) {
-            mutableActiveIds.value = mutableActiveIds.value - deviceId
+    private suspend fun removeSession(deviceId: String): ConnectionSession? =
+        stateMutex.withLock {
+            val removed = sessions.remove(deviceId)
+            if (removed != null) {
+                mutableActiveIds.value = mutableActiveIds.value - deviceId
+            }
+            removed
         }
-        removed
-    }
 
     /** 断开池内全部设备，常用于登出或应用退到后台。 */
     suspend fun disconnectAll() {
         activeSessions().forEach { disconnect(it) }
     }
 
-    private suspend fun deviceMutexOf(deviceId: String): Mutex = stateMutex.withLock {
-        deviceMutexes.getOrPut(deviceId) { Mutex() }
-    }
+    private suspend fun deviceMutexOf(deviceId: String): Mutex =
+        stateMutex.withLock {
+            deviceMutexes.getOrPut(deviceId) { Mutex() }
+        }
 
-    private suspend fun setState(deviceId: String, state: DeviceState) {
+    private suspend fun setState(
+        deviceId: String,
+        state: DeviceState,
+    ) {
         stateMutex.withLock {
             mutableStates.value = mutableStates.value + (deviceId to state)
         }

@@ -40,7 +40,6 @@ data class DeviceEvent(
     val detail: String? = null,
     val errorCode: String? = null,
 ) {
-
     init {
         require(deviceId.isNotBlank()) { "设备 id 不能为空" }
         require(timestampMillis >= 0) { "事件时间不能为负" }
@@ -50,23 +49,26 @@ data class DeviceEvent(
 
 /** 按设备分开存储事件；平台实现只负责字符串读写。 */
 interface DeviceEventStore {
-
     fun loadRaw(deviceId: String): String?
 
-    fun saveRaw(deviceId: String, raw: String)
+    fun saveRaw(
+        deviceId: String,
+        raw: String,
+    )
 
     fun clear(deviceId: String)
 }
 
 /** 内存实现：JVM 测试与测试宿主使用。 */
-class InMemoryDeviceEventStore :
-    DeviceEventStore {
-
+class InMemoryDeviceEventStore : DeviceEventStore {
     private val values = mutableMapOf<String, String>()
 
     override fun loadRaw(deviceId: String): String? = values[deviceId]
 
-    override fun saveRaw(deviceId: String, raw: String) {
+    override fun saveRaw(
+        deviceId: String,
+        raw: String,
+    ) {
         values[deviceId] = raw
     }
 
@@ -86,35 +88,35 @@ class InMemoryDeviceEventStore :
  * 字段百分号转义；空字符串表示 null。任何结构损坏都跳过该行，读取不抛异常。
  */
 object DeviceEventCodec {
-
     private const val VERSION = "v1"
     private const val EVENT = "E"
     private const val SEPARATOR = '|'
     private const val PARTS = 8
     private const val HEX_DIGITS = "0123456789ABCDEF"
 
-    fun encode(events: List<DeviceEvent>): String = buildString {
-        append(VERSION)
-        append('\n')
-        events.sortedBy { it.id }.forEach { event ->
-            append(EVENT)
-            append(SEPARATOR)
-            append(event.id)
-            append(SEPARATOR)
-            append(event.type.name)
-            append(SEPARATOR)
-            append(event.timestampMillis)
-            append(SEPARATOR)
-            append(event.result.name)
-            append(SEPARATOR)
-            append(escape(redactInline(event.summary)))
-            append(SEPARATOR)
-            append(escape(event.detail?.let(::redactInline)))
-            append(SEPARATOR)
-            append(escape(event.errorCode?.let(::redactInline)))
+    fun encode(events: List<DeviceEvent>): String =
+        buildString {
+            append(VERSION)
             append('\n')
+            events.sortedBy { it.id }.forEach { event ->
+                append(EVENT)
+                append(SEPARATOR)
+                append(event.id)
+                append(SEPARATOR)
+                append(event.type.name)
+                append(SEPARATOR)
+                append(event.timestampMillis)
+                append(SEPARATOR)
+                append(event.result.name)
+                append(SEPARATOR)
+                append(escape(redactInline(event.summary)))
+                append(SEPARATOR)
+                append(escape(event.detail?.let(::redactInline)))
+                append(SEPARATOR)
+                append(escape(event.errorCode?.let(::redactInline)))
+                append('\n')
+            }
         }
-    }
 
     fun decode(raw: String?): List<DeviceEvent> {
         if (raw.isNullOrBlank()) return emptyList()
@@ -134,8 +136,9 @@ object DeviceEventCodec {
         val id = parts[1].toLongOrNull() ?: return null
         val type = DeviceEventType.entries.firstOrNull { it.name == parts[2] } ?: return null
         val timestamp = parts[3].toLongOrNull() ?: return null
-        val result = DeviceEventResult.entries.firstOrNull { it.name == parts[4] }
-            ?: DeviceEventResult.INFO
+        val result =
+            DeviceEventResult.entries.firstOrNull { it.name == parts[4] }
+                ?: DeviceEventResult.INFO
         val summary = unescape(parts[5]) ?: return null
         return runCatching {
             DeviceEvent(
@@ -216,7 +219,6 @@ class DeviceEventTimeline(
     private val maxPerDevice: Int = DEFAULT_MAX_PER_DEVICE,
     private val clockMillis: () -> Long = { Clock.System.now().toEpochMilliseconds() },
 ) {
-
     init {
         require(maxPerDevice > 0) { "maxPerDevice 必须大于 0" }
     }
@@ -230,29 +232,36 @@ class DeviceEventTimeline(
         detail: String? = null,
         errorCode: String? = null,
         timestampMillis: Long = clockMillis(),
-    ): Boolean = runCatching {
-        val existing = load(deviceId)
-        val nextId = (existing.maxOfOrNull { it.id } ?: 0L) + 1
-        val event = DeviceEvent(
-            id = nextId,
-            deviceId = deviceId,
-            type = type,
-            timestampMillis = timestampMillis,
-            summary = summary,
-            result = result,
-            detail = detail,
-            errorCode = errorCode,
-        )
-        val appended = existing + event
-        val trimmed = appended.sortedByDescending { it.timestampMillis }
-            .take(maxPerDevice)
-            .sortedBy { it.id }
-        store.saveRaw(deviceId, DeviceEventCodec.encode(trimmed))
-        true
-    }.getOrDefault(false)
+    ): Boolean =
+        runCatching {
+            val existing = load(deviceId)
+            val nextId = (existing.maxOfOrNull { it.id } ?: 0L) + 1
+            val event =
+                DeviceEvent(
+                    id = nextId,
+                    deviceId = deviceId,
+                    type = type,
+                    timestampMillis = timestampMillis,
+                    summary = summary,
+                    result = result,
+                    detail = detail,
+                    errorCode = errorCode,
+                )
+            val appended = existing + event
+            val trimmed =
+                appended
+                    .sortedByDescending { it.timestampMillis }
+                    .take(maxPerDevice)
+                    .sortedBy { it.id }
+            store.saveRaw(deviceId, DeviceEventCodec.encode(trimmed))
+            true
+        }.getOrDefault(false)
 
     /** 按时间倒序返回事件；[type] 非空时只返回该类别。 */
-    fun list(deviceId: String, type: DeviceEventType? = null): List<DeviceEvent> {
+    fun list(
+        deviceId: String,
+        type: DeviceEventType? = null,
+    ): List<DeviceEvent> {
         val events = load(deviceId)
         val filtered = if (type == null) events else events.filter { it.type == type }
         return filtered.sortedWith(
@@ -266,9 +275,10 @@ class DeviceEventTimeline(
         runCatching { store.clear(deviceId) }
     }
 
-    private fun load(deviceId: String): List<DeviceEvent> = runCatching {
-        DeviceEventCodec.decode(store.loadRaw(deviceId)).map { it.copy(deviceId = deviceId) }
-    }.getOrDefault(emptyList())
+    private fun load(deviceId: String): List<DeviceEvent> =
+        runCatching {
+            DeviceEventCodec.decode(store.loadRaw(deviceId)).map { it.copy(deviceId = deviceId) }
+        }.getOrDefault(emptyList())
 
     companion object {
         const val DEFAULT_MAX_PER_DEVICE = 100

@@ -3,7 +3,9 @@ package com.valhalla.core.protocol.message
 import com.valhalla.core.protocol.CommandType
 
 /** 中止 OTA 的原因码。 */
-enum class OtaAbortReason(val code: Int) {
+enum class OtaAbortReason(
+    val code: Int,
+) {
     USER_CANCELLED(0x00),
     TIMEOUT(0x01),
     VERIFY_FAILED(0x02),
@@ -17,7 +19,9 @@ enum class OtaAbortReason(val code: Int) {
 }
 
 /** OTA 阶段，用于进度通知。 */
-enum class OtaStage(val code: Int) {
+enum class OtaStage(
+    val code: Int,
+) {
     PREPARING(0x00),
     TRANSFERRING(0x01),
     VERIFYING(0x02),
@@ -51,7 +55,6 @@ class StartOtaRequest(
     val resumeOffset: Long = 0,
     val payloadCrc32: Long = 0,
 ) : DeviceRequest() {
-
     init {
         require(totalBytes in 1..0xFFFFFFFFL) { "totalBytes 超出范围: $totalBytes" }
         require(crc16 in 0..0xFFFF) { "crc16 超出范围: $crc16" }
@@ -137,7 +140,6 @@ class StartOtaResponse(
     val chunkSize: Int,
     val acceptedOffset: Long = 0,
 ) : DeviceResponse() {
-
     init {
         require(sessionId in 0..0xFFFFFFFFL) { "sessionId 超出范围: $sessionId" }
         require(chunkSize in 1..0xFFFF) { "chunkSize 超出范围: $chunkSize" }
@@ -156,14 +158,18 @@ class StartOtaResponse(
 
     companion object {
         /** 解析基础字段，并按尾部长度决定是否读取设备确认偏移。 */
-        fun decode(status: DeviceStatus, reader: PayloadReader): StartOtaResponse {
+        fun decode(
+            status: DeviceStatus,
+            reader: PayloadReader,
+        ): StartOtaResponse {
             val sessionId = reader.u32()
             val chunkSize = reader.u16()
-            val acceptedOffset = when (reader.remaining) {
-                0 -> 0L
-                4 -> reader.u32()
-                else -> throw MessageDecodeException("START_OTA 应答尾部长度非法: ${reader.remaining}")
-            }
+            val acceptedOffset =
+                when (reader.remaining) {
+                    0 -> 0L
+                    4 -> reader.u32()
+                    else -> throw MessageDecodeException("START_OTA 应答尾部长度非法: ${reader.remaining}")
+                }
             return StartOtaResponse(status, sessionId, chunkSize, acceptedOffset)
         }
     }
@@ -179,7 +185,6 @@ class OtaDataRequest(
     val offset: Long,
     val data: ByteArray,
 ) : DeviceRequest() {
-
     init {
         require(offset in 0..0xFFFFFFFFL) { "offset 超出范围: $offset" }
         require(data.isNotEmpty()) { "OTA 分片不能为空" }
@@ -199,7 +204,6 @@ class OtaDataResponse(
     status: DeviceStatus,
     val receivedBytes: Long,
 ) : DeviceResponse() {
-
     init {
         require(receivedBytes in 0..0xFFFFFFFFL) { "receivedBytes 超出范围: $receivedBytes" }
     }
@@ -218,7 +222,6 @@ class FinishOtaRequest(
     val totalBytes: Long,
     val crc16: Int,
 ) : DeviceRequest() {
-
     init {
         require(totalBytes in 1..0xFFFFFFFFL) { "totalBytes 超出范围: $totalBytes" }
         require(crc16 in 0..0xFFFF) { "crc16 超出范围: $crc16" }
@@ -237,7 +240,6 @@ class FinishOtaResponse(
     status: DeviceStatus,
     val rebootRequired: Boolean,
 ) : DeviceResponse() {
-
     override val command: CommandType = CommandType.FINISH_OTA
 
     override val status: DeviceStatus = status
@@ -248,8 +250,9 @@ class FinishOtaResponse(
 }
 
 /** 中止 OTA：`reason:u8`。 */
-class AbortOtaRequest(val reason: OtaAbortReason) : DeviceRequest() {
-
+class AbortOtaRequest(
+    val reason: OtaAbortReason,
+) : DeviceRequest() {
     override val command: CommandType = CommandType.ABORT_OTA
 
     override fun encodeBody(writer: PayloadWriter) {
@@ -258,8 +261,9 @@ class AbortOtaRequest(val reason: OtaAbortReason) : DeviceRequest() {
 }
 
 /** 中止 OTA 应答，payload 只有状态码。 */
-class AbortOtaResponse(status: DeviceStatus) : DeviceResponse() {
-
+class AbortOtaResponse(
+    status: DeviceStatus,
+) : DeviceResponse() {
     override val command: CommandType = CommandType.ABORT_OTA
 
     override val status: DeviceStatus = status
@@ -278,7 +282,6 @@ class OtaProgressNotification(
     val totalBytes: Long,
     val stage: OtaStage,
 ) : DeviceNotification() {
-
     init {
         require(sessionId in 0..0xFFFFFFFFL) { "sessionId 超出范围: $sessionId" }
         require(receivedBytes in 0..0xFFFFFFFFL) { "receivedBytes 超出范围: $receivedBytes" }

@@ -25,8 +25,8 @@ import platform.CoreBluetooth.CBCentralManager
 import platform.CoreBluetooth.CBCentralManagerDelegateProtocol
 import platform.CoreBluetooth.CBCharacteristic
 import platform.CoreBluetooth.CBCharacteristicWriteType
-import platform.CoreBluetooth.CBCharacteristicWriteWithoutResponse
 import platform.CoreBluetooth.CBCharacteristicWriteWithResponse
+import platform.CoreBluetooth.CBCharacteristicWriteWithoutResponse
 import platform.CoreBluetooth.CBManagerState
 import platform.CoreBluetooth.CBManagerStatePoweredOff
 import platform.CoreBluetooth.CBManagerStatePoweredOn
@@ -55,7 +55,6 @@ import platform.darwin.NSObject
  * - 需要在 Info.plist 声明 `NSBluetoothAlwaysUsageDescription`。
  */
 class IosBleClient : BleClient {
-
     private val mutableAdapterState = MutableStateFlow(BleAdapterState.UNKNOWN)
     override val adapterState = mutableAdapterState.asStateFlow()
 
@@ -67,65 +66,75 @@ class IosBleClient : BleClient {
     private val central: CBCentralManager
 
     init {
-        centralDelegate = CentralDelegate(
-            onStateChanged = { state -> mutableAdapterState.value = state.toBleAdapterState() },
-            onDiscovered = { peripheral, advertisementData, rssi ->
-                handleDiscovered(peripheral, advertisementData, rssi)
-            },
-            onFailedToConnect = { peripheral, error ->
-                connections.remove(peripheral.identifier.UUIDString)
-                    ?.markDisconnected(error?.localizedDescription)
-            },
-            onDisconnected = { peripheral, error ->
-                connections.remove(peripheral.identifier.UUIDString)
-                    ?.markDisconnected(error?.localizedDescription)
-            },
-        )
+        centralDelegate =
+            CentralDelegate(
+                onStateChanged = { state -> mutableAdapterState.value = state.toBleAdapterState() },
+                onDiscovered = { peripheral, advertisementData, rssi ->
+                    handleDiscovered(peripheral, advertisementData, rssi)
+                },
+                onFailedToConnect = { peripheral, error ->
+                    connections
+                        .remove(peripheral.identifier.UUIDString)
+                        ?.markDisconnected(error?.localizedDescription)
+                },
+                onDisconnected = { peripheral, error ->
+                    connections
+                        .remove(peripheral.identifier.UUIDString)
+                        ?.markDisconnected(error?.localizedDescription)
+                },
+            )
         central = CBCentralManager(delegate = centralDelegate, queue = null, options = null)
     }
 
-    override fun scan(filter: ScanFilter): Flow<BleDevice> = callbackFlow {
-        if (central.state != CBManagerStatePoweredOn) {
-            close(BleException("蓝牙未开启或未授权"))
-            return@callbackFlow
-        }
+    override fun scan(filter: ScanFilter): Flow<BleDevice> =
+        callbackFlow {
+            if (central.state != CBManagerStatePoweredOn) {
+                close(BleException("蓝牙未开启或未授权"))
+                return@callbackFlow
+            }
 
-        val job = launch {
-            try {
-                scanSink.collect { device ->
-                    if (filter.matchesName(device.name) && filter.matchesService(device.serviceUuids)) {
-                        trySend(device)
+            val job =
+                launch {
+                    try {
+                        scanSink.collect { device ->
+                            if (filter.matchesName(device.name) && filter.matchesService(device.serviceUuids)) {
+                                trySend(device)
+                            }
+                        }
+                    } catch (cancellation: CancellationException) {
+                        throw cancellation
+                    } catch (error: Throwable) {
+                        close(error)
                     }
                 }
-            } catch (cancellation: CancellationException) {
-                throw cancellation
-            } catch (error: Throwable) {
-                close(error)
+
+            val services = filter.serviceUuid?.let { uuid -> listOf(CBUUID.UUIDWithString(uuid)) }
+            central.scanForPeripheralsWithServices(services, options = null)
+
+            awaitClose {
+                job.cancel()
+                central.stopScan()
             }
         }
 
-        val services = filter.serviceUuid?.let { uuid -> listOf(CBUUID.UUIDWithString(uuid)) }
-        central.scanForPeripheralsWithServices(services, options = null)
-
-        awaitClose {
-            job.cancel()
-            central.stopScan()
-        }
-    }
-
-    override suspend fun connect(deviceId: String, timeoutMillis: Long): BleConnection {
+    override suspend fun connect(
+        deviceId: String,
+        timeoutMillis: Long,
+    ): BleConnection {
         if (central.state != CBManagerStatePoweredOn) throw BleException("蓝牙未开启或未授权")
 
-        val peripheral = findPeripheral(deviceId)
-            ?: throw BleException("未找到设备 $deviceId，请先扫描")
+        val peripheral =
+            findPeripheral(deviceId)
+                ?: throw BleException("未找到设备 $deviceId，请先扫描")
 
         val connection = IosBleConnection(deviceId, central, peripheral)
         connections[deviceId] = connection
 
-        val ready = withTimeoutOrNull(timeoutMillis) {
-            connection.start()
-            true
-        }
+        val ready =
+            withTimeoutOrNull(timeoutMillis) {
+                connection.start()
+                true
+            }
 
         if (ready == null) {
             connections.remove(deviceId)
@@ -155,10 +164,11 @@ class IosBleClient : BleClient {
         val deviceId = peripheral.identifier.UUIDString
         discovered[deviceId] = peripheral
 
-        val serviceUuids = (advertisementData[CBAdvertisementDataServiceUUIDsKey] as? List<*>)
-            ?.filterIsInstance<CBUUID>()
-            ?.map { it.UUIDString }
-            ?: emptyList()
+        val serviceUuids =
+            (advertisementData[CBAdvertisementDataServiceUUIDsKey] as? List<*>)
+                ?.filterIsInstance<CBUUID>()
+                ?.map { it.UUIDString }
+                ?: emptyList()
 
         val connectable = (advertisementData[CBAdvertisementDataIsConnectable] as? NSNumber)?.boolValue ?: true
 
@@ -187,8 +197,8 @@ private class CentralDelegate(
     private val onDiscovered: (CBPeripheral, Map<Any?, *>, NSNumber) -> Unit,
     private val onFailedToConnect: (CBPeripheral, NSError?) -> Unit,
     private val onDisconnected: (CBPeripheral, NSError?) -> Unit,
-) : NSObject(), CBCentralManagerDelegateProtocol {
-
+) : NSObject(),
+    CBCentralManagerDelegateProtocol {
     override fun centralManagerDidUpdateState(central: CBCentralManager) {
         onStateChanged(central.state)
     }
@@ -236,7 +246,6 @@ internal class IosBleConnection(
     private val central: CBCentralManager,
     private val peripheral: CBPeripheral,
 ) : BleConnection {
-
     private val operationMutex = Mutex()
     private val mutableConnected = MutableStateFlow(false)
     override val connected = mutableConnected.asStateFlow()
@@ -253,13 +262,14 @@ internal class IosBleConnection(
     private var pendingServiceCount = 0
 
     init {
-        delegate = PeripheralDelegate(
-            onDiscoverServices = { peripheral, error -> handleDiscoverServices(peripheral, error) },
-            onDiscoverCharacteristics = { service, error -> handleDiscoverCharacteristics(service, error) },
-            onWriteValue = { characteristic, error -> handleWriteValue(characteristic, error) },
-            onUpdateValue = { characteristic, error -> handleUpdateValue(characteristic, error) },
-            onReadRssi = { rssi, error -> handleReadRssi(rssi, error) },
-        )
+        delegate =
+            PeripheralDelegate(
+                onDiscoverServices = { peripheral, error -> handleDiscoverServices(peripheral, error) },
+                onDiscoverCharacteristics = { service, error -> handleDiscoverCharacteristics(service, error) },
+                onWriteValue = { characteristic, error -> handleWriteValue(characteristic, error) },
+                onUpdateValue = { characteristic, error -> handleUpdateValue(characteristic, error) },
+                onReadRssi = { rssi, error -> handleReadRssi(rssi, error) },
+            )
     }
 
     /** 发起连接并等待服务/特征发现完成。由 [IosBleClient.connect] 包裹超时。 */
@@ -297,7 +307,10 @@ internal class IosBleConnection(
         }
     }
 
-    override suspend fun read(serviceUuid: String, characteristicUuid: String): ByteArray =
+    override suspend fun read(
+        serviceUuid: String,
+        characteristicUuid: String,
+    ): ByteArray =
         operationMutex.withLock {
             val characteristic = requireCharacteristic(serviceUuid, characteristicUuid)
             val deferred = CompletableDeferred<ByteArray>()
@@ -312,39 +325,44 @@ internal class IosBleConnection(
             }
         }
 
-    override suspend fun readRssi(): Int? = operationMutex.withLock {
-        if (!mutableConnected.value) return@withLock null
-        val deferred = CompletableDeferred<Int>()
-        pendingRssi = deferred
-        peripheral.readRSSI()
-        try {
-            withTimeoutOrNull(OPERATION_TIMEOUT_MILLIS) { deferred.await() }
-        } catch (cancellation: CancellationException) {
-            throw cancellation
-        } catch (_: Throwable) {
-            null
-        } finally {
-            pendingRssi = null
+    override suspend fun readRssi(): Int? =
+        operationMutex.withLock {
+            if (!mutableConnected.value) return@withLock null
+            val deferred = CompletableDeferred<Int>()
+            pendingRssi = deferred
+            peripheral.readRSSI()
+            try {
+                withTimeoutOrNull(OPERATION_TIMEOUT_MILLIS) { deferred.await() }
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (_: Throwable) {
+                null
+            } finally {
+                pendingRssi = null
+            }
         }
-    }
 
-    override fun observe(serviceUuid: String, characteristicUuid: String): Flow<ByteArray> =
+    override fun observe(
+        serviceUuid: String,
+        characteristicUuid: String,
+    ): Flow<ByteArray> =
         callbackFlow {
             val characteristic = requireCharacteristic(serviceUuid, characteristicUuid)
             peripheral.setNotifyValue(true, forCharacteristic = characteristic)
 
-            val job = launch {
-                try {
-                    notifications
-                        .filter { it.first.equals(characteristicUuid, ignoreCase = true) }
-                        .map { it.second }
-                        .collect { trySend(it) }
-                } catch (cancellation: CancellationException) {
-                    throw cancellation
-                } catch (error: Throwable) {
-                    close(error)
+            val job =
+                launch {
+                    try {
+                        notifications
+                            .filter { it.first.equals(characteristicUuid, ignoreCase = true) }
+                            .map { it.second }
+                            .collect { trySend(it) }
+                    } catch (cancellation: CancellationException) {
+                        throw cancellation
+                    } catch (error: Throwable) {
+                        close(error)
+                    }
                 }
-            }
 
             awaitClose {
                 job.cancel()
@@ -374,7 +392,10 @@ internal class IosBleConnection(
         pendingRssi = null
     }
 
-    private fun handleDiscoverServices(peripheral: CBPeripheral, error: NSError?) {
+    private fun handleDiscoverServices(
+        peripheral: CBPeripheral,
+        error: NSError?,
+    ) {
         if (error != null) {
             failStart(error.localizedDescription)
             return
@@ -391,7 +412,10 @@ internal class IosBleConnection(
         }
     }
 
-    private fun handleDiscoverCharacteristics(service: CBService, error: NSError?) {
+    private fun handleDiscoverCharacteristics(
+        service: CBService,
+        error: NSError?,
+    ) {
         if (error != null) {
             failStart(error.localizedDescription)
             return
@@ -402,7 +426,10 @@ internal class IosBleConnection(
         }
     }
 
-    private fun handleWriteValue(characteristic: CBCharacteristic, error: NSError?) {
+    private fun handleWriteValue(
+        characteristic: CBCharacteristic,
+        error: NSError?,
+    ) {
         val deferred = pendingWrite ?: return
         if (error == null) {
             deferred.complete(Unit)
@@ -411,7 +438,10 @@ internal class IosBleConnection(
         }
     }
 
-    private fun handleUpdateValue(characteristic: CBCharacteristic, error: NSError?) {
+    private fun handleUpdateValue(
+        characteristic: CBCharacteristic,
+        error: NSError?,
+    ) {
         if (error != null) {
             pendingRead?.completeExceptionally(BleException(error.localizedDescription))
             return
@@ -428,7 +458,10 @@ internal class IosBleConnection(
         }
     }
 
-    private fun handleReadRssi(rssi: NSNumber, error: NSError?) {
+    private fun handleReadRssi(
+        rssi: NSNumber,
+        error: NSError?,
+    ) {
         val deferred = pendingRssi ?: return
         if (error == null) {
             deferred.complete(rssi.intValue)
@@ -445,13 +478,18 @@ internal class IosBleConnection(
         startDeferred?.completeExceptionally(BleException(reason))
     }
 
-    private fun requireCharacteristic(serviceUuid: String, characteristicUuid: String): CBCharacteristic {
+    private fun requireCharacteristic(
+        serviceUuid: String,
+        characteristicUuid: String,
+    ): CBCharacteristic {
         val services = peripheral.services?.filterIsInstance<CBService>() ?: emptyList()
-        val service = services.firstOrNull { it.UUID.UUIDString.equals(serviceUuid, ignoreCase = true) }
-            ?: throw BleException("未找到服务 $serviceUuid")
+        val service =
+            services.firstOrNull { it.UUID.UUIDString.equals(serviceUuid, ignoreCase = true) }
+                ?: throw BleException("未找到服务 $serviceUuid")
 
-        val characteristics = service.characteristics?.filterIsInstance<CBCharacteristic>()
-            ?: emptyList()
+        val characteristics =
+            service.characteristics?.filterIsInstance<CBCharacteristic>()
+                ?: emptyList()
         return characteristics.firstOrNull { it.UUID.UUIDString.equals(characteristicUuid, ignoreCase = true) }
             ?: throw BleException("服务 $serviceUuid 下未找到特征 $characteristicUuid")
     }
@@ -468,9 +506,12 @@ private class PeripheralDelegate(
     private val onWriteValue: (CBCharacteristic, NSError?) -> Unit,
     private val onUpdateValue: (CBCharacteristic, NSError?) -> Unit,
     private val onReadRssi: (NSNumber, NSError?) -> Unit,
-) : NSObject(), CBPeripheralDelegateProtocol {
-
-    override fun peripheral(peripheral: CBPeripheral, didDiscoverServices: NSError?) {
+) : NSObject(),
+    CBPeripheralDelegateProtocol {
+    override fun peripheral(
+        peripheral: CBPeripheral,
+        didDiscoverServices: NSError?,
+    ) {
         onDiscoverServices(peripheral, didDiscoverServices)
     }
 
@@ -510,14 +551,15 @@ private class PeripheralDelegate(
     }
 }
 
-private fun CBManagerState.toBleAdapterState(): BleAdapterState = when (this) {
-    CBManagerStatePoweredOn -> BleAdapterState.POWERED_ON
-    CBManagerStatePoweredOff -> BleAdapterState.POWERED_OFF
-    CBManagerStateUnauthorized -> BleAdapterState.UNAUTHORIZED
-    CBManagerStateUnsupported -> BleAdapterState.UNSUPPORTED
-    CBManagerStateResetting -> BleAdapterState.RESETTING
-    else -> BleAdapterState.UNKNOWN
-}
+private fun CBManagerState.toBleAdapterState(): BleAdapterState =
+    when (this) {
+        CBManagerStatePoweredOn -> BleAdapterState.POWERED_ON
+        CBManagerStatePoweredOff -> BleAdapterState.POWERED_OFF
+        CBManagerStateUnauthorized -> BleAdapterState.UNAUTHORIZED
+        CBManagerStateUnsupported -> BleAdapterState.UNSUPPORTED
+        CBManagerStateResetting -> BleAdapterState.RESETTING
+        else -> BleAdapterState.UNKNOWN
+    }
 
 @OptIn(ExperimentalForeignApi::class)
 private fun ByteArray.toNSData(): NSData {

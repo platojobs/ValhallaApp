@@ -3,7 +3,9 @@ package com.valhalla.core.protocol.message
 import com.valhalla.core.protocol.FrameException
 
 /** payload 结构非法，例如字段截断、长度越界或尾部存在未解析字节。 */
-class MessageDecodeException(message: String) : FrameException(message)
+class MessageDecodeException(
+    message: String,
+) : FrameException(message)
 
 /**
  * 小端序 payload 写入器。
@@ -11,7 +13,6 @@ class MessageDecodeException(message: String) : FrameException(message)
  * 字符串统一按 UTF-8 编码，长度前缀由调用方选择 1 字节或 2 字节。
  */
 class PayloadWriter {
-
     private val values = mutableListOf<Byte>()
 
     fun byte(value: Int): PayloadWriter {
@@ -68,8 +69,9 @@ class PayloadWriter {
  * 小端序 payload 读取器。所有越界访问都会抛出 [MessageDecodeException]，
  * 便于调度层把「设备回了畸形 payload」与「超时」区分开。
  */
-class PayloadReader(private val data: ByteArray) {
-
+class PayloadReader(
+    private val data: ByteArray,
+) {
     private var index: Int = 0
 
     val remaining: Int get() = data.size - index
@@ -125,7 +127,10 @@ class PayloadReader(private val data: ByteArray) {
         }
     }
 
-    private fun ensureAvailable(count: Int, label: String) {
+    private fun ensureAvailable(
+        count: Int,
+        label: String,
+    ) {
         if (count > remaining) {
             throw MessageDecodeException("payload 截断：需要 $label，剩余 $remaining 字节")
         }

@@ -6,7 +6,6 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class StorageInventoryTest {
-
     @Test
     fun `每个平台都覆盖全部存储类别`() {
         StoragePlatform.entries.forEach { platform ->
@@ -26,29 +25,37 @@ class StorageInventoryTest {
 
     @Test
     fun `偏好键与偏好存储常量一致`() {
-        val android = StorageInventory.forPlatform(StoragePlatform.ANDROID)
-            .first { it.item == StorageItem.APP_SETTINGS }
+        val android =
+            StorageInventory
+                .forPlatform(StoragePlatform.ANDROID)
+                .first { it.item == StorageItem.APP_SETTINGS }
         assertEquals(SettingsKeys.ALL, android.keys)
 
-        val ios = StorageInventory.forPlatform(StoragePlatform.IOS)
-            .first { it.item == StorageItem.APP_SETTINGS }
+        val ios =
+            StorageInventory
+                .forPlatform(StoragePlatform.IOS)
+                .first { it.item == StorageItem.APP_SETTINGS }
         assertEquals(
             SettingsKeys.ALL.map { StorageKeys.IOS_SETTINGS_PREFIX + it },
             ios.keys,
         )
-        assertEquals(20, SettingsKeys.ALL.size)
+        assertEquals(21, SettingsKeys.ALL.size)
     }
 
     @Test
     fun `令牌条目声明了真实的加密存储键`() {
-        val androidToken = StorageInventory.forPlatform(StoragePlatform.ANDROID)
-            .first { it.item == StorageItem.AUTH_TOKEN }
+        val androidToken =
+            StorageInventory
+                .forPlatform(StoragePlatform.ANDROID)
+                .first { it.item == StorageItem.AUTH_TOKEN }
         assertTrue(androidToken.keys.contains(StorageKeys.ANDROID_TOKEN_KEY))
         assertTrue(androidToken.keys.contains(StorageKeys.ANDROID_TOKEN_KEYSTORE_ALIAS))
         assertTrue(androidToken.persistent)
 
-        val iosToken = StorageInventory.forPlatform(StoragePlatform.IOS)
-            .first { it.item == StorageItem.AUTH_TOKEN }
+        val iosToken =
+            StorageInventory
+                .forPlatform(StoragePlatform.IOS)
+                .first { it.item == StorageItem.AUTH_TOKEN }
         assertTrue(iosToken.keys.contains(StorageKeys.IOS_KEYCHAIN_SERVICE))
         assertTrue(iosToken.keys.contains(StorageKeys.IOS_KEYCHAIN_ACCOUNT))
         assertTrue(iosToken.persistent)
@@ -57,8 +64,10 @@ class StorageInventoryTest {
     @Test
     fun `日志在所有平台都只存在于内存`() {
         StoragePlatform.entries.forEach { platform ->
-            val log = StorageInventory.forPlatform(platform)
-                .first { it.item == StorageItem.PACKET_LOG }
+            val log =
+                StorageInventory
+                    .forPlatform(platform)
+                    .first { it.item == StorageItem.PACKET_LOG }
             assertFalse(log.persistent, "日志不应持久化：$platform")
             assertTrue(log.keys.isEmpty(), "日志不应有存储键：$platform")
         }

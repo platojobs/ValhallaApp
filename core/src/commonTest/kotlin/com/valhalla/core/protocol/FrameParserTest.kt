@@ -5,9 +5,10 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class FrameParserTest {
-
-    private fun frame(sequence: Int, payload: ByteArray = byteArrayOf(0x01, 0x02)): ByteArray =
-        FrameCodec.encode(Frame(type = CommandType.GET_DEVICE_INFO, sequence = sequence, payload = payload))
+    private fun frame(
+        sequence: Int,
+        payload: ByteArray = byteArrayOf(0x01, 0x02),
+    ): ByteArray = FrameCodec.encode(Frame(type = CommandType.GET_DEVICE_INFO, sequence = sequence, payload = payload))
 
     @Test
     fun `分块输入可以拼出完整帧`() {

@@ -13,7 +13,6 @@ import kotlinx.coroutines.flow.StateFlow
  * 提醒开关保持用户选择，但不会再产生通知。
  */
 interface NotificationPresenter {
-
     /** 平台是否支持本地通知（不支持的平台返回 false，开关仍可保存但不生效）。 */
     val supported: Boolean
 
@@ -33,7 +32,11 @@ interface NotificationPresenter {
      *
      * [target] 用于点击直达对应页面；调用方仍负责事件开关与去重。
      */
-    fun show(title: String, body: String, target: NotificationTarget)
+    fun show(
+        title: String,
+        body: String,
+        target: NotificationTarget,
+    )
 }
 
 @Composable
@@ -46,18 +49,13 @@ expect fun rememberNotificationPresenter(): NotificationPresenter
  * 并通过 [LowBatteryAlertTracker] 做迟滞，避免每次刷新重复提醒。
  */
 object NotificationPolicy {
+    fun shouldNotifyOta(settings: AppSettings): Boolean = settings.notifyMasterEnabled && settings.notifyOtaEnabled
 
-    fun shouldNotifyOta(settings: AppSettings): Boolean =
-        settings.notifyMasterEnabled && settings.notifyOtaEnabled
+    fun shouldNotifyDisconnect(settings: AppSettings): Boolean = settings.notifyMasterEnabled && settings.notifyDisconnectEnabled
 
-    fun shouldNotifyDisconnect(settings: AppSettings): Boolean =
-        settings.notifyMasterEnabled && settings.notifyDisconnectEnabled
+    fun shouldNotifyReconnectExhausted(settings: AppSettings): Boolean = settings.notifyMasterEnabled && settings.notifyReconnectEnabled
 
-    fun shouldNotifyReconnectExhausted(settings: AppSettings): Boolean =
-        settings.notifyMasterEnabled && settings.notifyReconnectEnabled
-
-    fun shouldNotifyHealthAbnormal(settings: AppSettings): Boolean =
-        settings.notifyMasterEnabled && settings.notifyHealthEnabled
+    fun shouldNotifyHealthAbnormal(settings: AppSettings): Boolean = settings.notifyMasterEnabled && settings.notifyHealthEnabled
 
     fun shouldNotifyLowBattery(
         settings: AppSettings,
@@ -81,7 +79,6 @@ class LowBatteryAlertTracker(
     private val threshold: Int,
     private val hysteresis: Int = DEFAULT_HYSTERESIS,
 ) {
-
     init {
         require(threshold in AppSettings.MIN_LOW_BATTERY_THRESHOLD..AppSettings.MAX_LOW_BATTERY_THRESHOLD) {
             "低电量阈值超出范围: $threshold"
@@ -92,7 +89,10 @@ class LowBatteryAlertTracker(
     private var latched = false
 
     /** 返回 true 表示本次应发出提醒。 */
-    fun update(percent: Int, charging: Boolean?): Boolean {
+    fun update(
+        percent: Int,
+        charging: Boolean?,
+    ): Boolean {
         val recovered = charging == true || percent > threshold + hysteresis
         if (recovered) latched = false
         if (charging != true && percent <= threshold && !latched) {

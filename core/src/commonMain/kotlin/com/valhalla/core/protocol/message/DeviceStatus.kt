@@ -6,7 +6,10 @@ package com.valhalla.core.protocol.message
  * 状态码取值由 Valhalla 设备协议字典定义；这里只覆盖当前固件已约定的范围，
  * 未知取值统一落到 [UNKNOWN_ERROR]，避免上层因新增错误码直接崩溃。
  */
-enum class DeviceStatus(val code: Int, val title: String) {
+enum class DeviceStatus(
+    val code: Int,
+    val title: String,
+) {
     OK(0x00, "成功"),
     UNKNOWN_COMMAND(0x01, "未知指令"),
     INVALID_PAYLOAD(0x02, "报文负载非法"),
@@ -36,7 +39,6 @@ enum class DeviceStatus(val code: Int, val title: String) {
     fun describe(): String = "0x${code.toString(16).uppercase().padStart(2, '0')} $title"
 
     companion object {
-        fun fromCode(code: Int): DeviceStatus =
-            entries.firstOrNull { it.code == code } ?: UNKNOWN_ERROR
+        fun fromCode(code: Int): DeviceStatus = entries.firstOrNull { it.code == code } ?: UNKNOWN_ERROR
     }
 }

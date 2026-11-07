@@ -65,13 +65,11 @@ data class ConnectionQualityStats(
     val recentFailures: List<QualityFailure>,
     val insufficientSample: Boolean,
 ) {
-
     val sampleCount: Int get() = requests
 }
 
 /** 连接质量统计器：纯函数，输入任意报文日志快照。 */
 object ConnectionQualityAnalyzer {
-
     /** 低于该样本量时不展示成功率与时延结论，只提示「样本不足（X 条）」。 */
     const val MIN_SAMPLES: Int = 20
 
@@ -82,12 +80,14 @@ object ConnectionQualityAnalyzer {
         recentFailureLimit: Int = 5,
         minSamples: Int = MIN_SAMPLES,
     ): ConnectionQualityStats {
-        val requests = entries.filter {
-            it.direction == FrameDirection.TX && !it.isNotification && !it.isResponse
-        }
-        val responses = entries.filter {
-            it.direction == FrameDirection.RX && it.isResponse
-        }
+        val requests =
+            entries.filter {
+                it.direction == FrameDirection.TX && !it.isNotification && !it.isResponse
+            }
+        val responses =
+            entries.filter {
+                it.direction == FrameDirection.RX && it.isResponse
+            }
 
         // 请求按 sequence 归组，保留首次出现顺序用于乱序判断。
         val requestGroups = LinkedHashMap<Int, MutableList<PacketLogEntry>>()
@@ -165,71 +165,74 @@ object ConnectionQualityAnalyzer {
                     ?: ErrorCodeCount(parsed.code, parsed.title, 1)
             }
 
-        val recent = failures
-            .sortedByDescending { it.first.timestampMillis }
-            .take(recentFailureLimit)
-            .map { (request, response) ->
-                if (response == null) {
-                    QualityFailure(
-                        command = request.command,
-                        timestampMillis = request.timestampMillis,
-                        detail = "无应答",
-                        noResponse = true,
-                    )
-                } else {
-                    QualityFailure(
-                        command = request.command,
-                        timestampMillis = response.timestampMillis,
-                        detail = response.error ?: "设备返回错误",
-                        noResponse = false,
-                    )
-                }
-            }
-
-        val commandStats = requestOrder
-            .groupBy { requestGroups.getValue(it).first().command }
-            .map { (command, sequences) ->
-                var commandSuccesses = 0
-                var commandErrors = 0
-                var commandNoResponses = 0
-                var commandRetransmissions = 0
-                var commandLatencySum = 0L
-                var commandLatencyCount = 0
-                var commandMaxLatency: Long? = null
-                sequences.forEach { sequence ->
-                    val group = requestGroups.getValue(sequence)
-                    commandRetransmissions += group.size - 1
-                    val response = responseBySequence[sequence]
-                    when {
-                        response == null -> commandNoResponses++
-                        response.error != null -> commandErrors++
-                        else -> commandSuccesses++
-                    }
-                    if (response != null) {
-                        val latency = (response.timestampMillis - group.last().timestampMillis)
-                            .coerceAtLeast(0L)
-                        commandLatencySum += latency
-                        commandLatencyCount++
-                        commandMaxLatency = commandMaxLatency?.let { maxOf(it, latency) } ?: latency
-                    }
-                }
-                CommandQuality(
-                    command = command,
-                    requests = sequences.size,
-                    responses = commandSuccesses + commandErrors,
-                    successes = commandSuccesses,
-                    deviceErrors = commandErrors,
-                    noResponses = commandNoResponses,
-                    retransmissions = commandRetransmissions,
-                    averageLatencyMillis = if (commandLatencyCount == 0) {
-                        null
+        val recent =
+            failures
+                .sortedByDescending { it.first.timestampMillis }
+                .take(recentFailureLimit)
+                .map { (request, response) ->
+                    if (response == null) {
+                        QualityFailure(
+                            command = request.command,
+                            timestampMillis = request.timestampMillis,
+                            detail = "无应答",
+                            noResponse = true,
+                        )
                     } else {
-                        commandLatencySum.toDouble() / commandLatencyCount
-                    },
-                    maxLatencyMillis = commandMaxLatency,
-                )
-            }
-            .sortedWith(compareByDescending<CommandQuality> { it.requests }.thenBy { it.command.name })
+                        QualityFailure(
+                            command = request.command,
+                            timestampMillis = response.timestampMillis,
+                            detail = response.error ?: "设备返回错误",
+                            noResponse = false,
+                        )
+                    }
+                }
+
+        val commandStats =
+            requestOrder
+                .groupBy { requestGroups.getValue(it).first().command }
+                .map { (command, sequences) ->
+                    var commandSuccesses = 0
+                    var commandErrors = 0
+                    var commandNoResponses = 0
+                    var commandRetransmissions = 0
+                    var commandLatencySum = 0L
+                    var commandLatencyCount = 0
+                    var commandMaxLatency: Long? = null
+                    sequences.forEach { sequence ->
+                        val group = requestGroups.getValue(sequence)
+                        commandRetransmissions += group.size - 1
+                        val response = responseBySequence[sequence]
+                        when {
+                            response == null -> commandNoResponses++
+                            response.error != null -> commandErrors++
+                            else -> commandSuccesses++
+                        }
+                        if (response != null) {
+                            val latency =
+                                (response.timestampMillis - group.last().timestampMillis)
+                                    .coerceAtLeast(0L)
+                            commandLatencySum += latency
+                            commandLatencyCount++
+                            commandMaxLatency = commandMaxLatency?.let { maxOf(it, latency) } ?: latency
+                        }
+                    }
+                    CommandQuality(
+                        command = command,
+                        requests = sequences.size,
+                        responses = commandSuccesses + commandErrors,
+                        successes = commandSuccesses,
+                        deviceErrors = commandErrors,
+                        noResponses = commandNoResponses,
+                        retransmissions = commandRetransmissions,
+                        averageLatencyMillis =
+                            if (commandLatencyCount == 0) {
+                                null
+                            } else {
+                                commandLatencySum.toDouble() / commandLatencyCount
+                            },
+                        maxLatencyMillis = commandMaxLatency,
+                    )
+                }.sortedWith(compareByDescending<CommandQuality> { it.requests }.thenBy { it.command.name })
 
         return ConnectionQualityStats(
             requests = requestOrder.size,
@@ -240,20 +243,23 @@ object ConnectionQualityAnalyzer {
             retransmissions = retransmissions,
             outOfOrderResponses = outOfOrder,
             unmatchedResponses = unmatchedResponses,
-            averageLatencyMillis = if (latencyCount == 0) {
-                null
-            } else {
-                latencySum.toDouble() / latencyCount
-            },
+            averageLatencyMillis =
+                if (latencyCount == 0) {
+                    null
+                } else {
+                    latencySum.toDouble() / latencyCount
+                },
             maxLatencyMillis = maxLatency,
-            successRate = if (requestOrder.isEmpty()) {
-                null
-            } else {
-                successes.toDouble() / requestOrder.size
-            },
-            errorCodes = errorCodeCounts.values.sortedWith(
-                compareByDescending<ErrorCodeCount> { it.count }.thenBy { it.code },
-            ),
+            successRate =
+                if (requestOrder.isEmpty()) {
+                    null
+                } else {
+                    successes.toDouble() / requestOrder.size
+                },
+            errorCodes =
+                errorCodeCounts.values.sortedWith(
+                    compareByDescending<ErrorCodeCount> { it.count }.thenBy { it.code },
+                ),
             commands = commandStats,
             recentFailures = recent,
             insufficientSample = requestOrder.size < minSamples,
@@ -266,10 +272,16 @@ object ConnectionQualityAnalyzer {
         if (match == null) {
             return ErrorCodeCount(code = error.trim(), title = "", count = 1)
         }
-        val normalized = "0x" + match.value.removePrefix("0x").removePrefix("0X").uppercase()
-        val status = DeviceStatus.fromCode(
-            normalized.removePrefix("0x").toIntOrNull(16) ?: DeviceStatus.UNKNOWN_ERROR.code,
-        )
+        val normalized =
+            "0x" +
+                match.value
+                    .removePrefix("0x")
+                    .removePrefix("0X")
+                    .uppercase()
+        val status =
+            DeviceStatus.fromCode(
+                normalized.removePrefix("0x").toIntOrNull(16) ?: DeviceStatus.UNKNOWN_ERROR.code,
+            )
         return ErrorCodeCount(code = normalized, title = status.title, count = 1)
     }
 }
