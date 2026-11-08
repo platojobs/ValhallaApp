@@ -4,6 +4,11 @@ import com.valhalla.core.logging.formatAbsoluteTime
 import com.valhalla.core.logging.formatRelativeTime
 import kotlin.math.roundToLong
 
+private const val BYTES_PER_KIB = 1024L
+private const val BYTES_PER_KIB_DOUBLE = 1024.0
+private const val ONE_DECIMAL_SCALE = 10.0
+private const val ONE_DECIMAL_BASE = 10
+
 /**
  * 按语言本地化的数字/时间格式。
  *
@@ -30,19 +35,19 @@ class LocaleFormat(
 
     /** 字节数：按 1024 进位，单位文案取自本地化表。 */
     fun bytes(value: Long): String {
-        if (value < 1024L) {
+        if (value < BYTES_PER_KIB) {
             return strings.t(StringKey.UNIT_BYTES, "value" to number(value))
         }
-        if (value < 1024L * 1024L) {
+        if (value < BYTES_PER_KIB * BYTES_PER_KIB) {
             return strings.t(
                 StringKey.UNIT_KIB,
-                "value" to oneDecimal(value / 1024.0),
+                "value" to oneDecimal(value / BYTES_PER_KIB_DOUBLE),
                 "bytes" to number(value),
             )
         }
         return strings.t(
             StringKey.UNIT_MIB,
-            "value" to oneDecimal(value / (1024.0 * 1024.0)),
+            "value" to oneDecimal(value / (BYTES_PER_KIB_DOUBLE * BYTES_PER_KIB_DOUBLE)),
             "bytes" to number(value),
         )
     }
@@ -67,8 +72,8 @@ class LocaleFormat(
     ): String = formatAbsoluteTime(epochMillis, zoneOffsetMinutes)
 
     private fun oneDecimal(value: Double): String {
-        val scaled = (value * 10.0).roundToLong()
-        return "${scaled / 10}.${(scaled % 10).let { if (it < 0) -it else it }}"
+        val scaled = (value * ONE_DECIMAL_SCALE).roundToLong()
+        return "${scaled / ONE_DECIMAL_BASE}.${(scaled % ONE_DECIMAL_BASE).let { if (it < 0) -it else it }}"
     }
 
     private fun groupDigits(raw: String): String {

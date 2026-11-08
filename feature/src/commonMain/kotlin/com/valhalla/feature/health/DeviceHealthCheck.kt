@@ -29,6 +29,8 @@ import kotlinx.coroutines.flow.update
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
 
+private const val MAX_UINT32 = 0xFFFFFFFFL
+
 /** 体检项；顺序即执行顺序。 */
 enum class HealthCheckItemType {
     DEVICE_INFO,
@@ -277,7 +279,7 @@ class DeviceHealthCheckController(
     }
 
     private suspend fun checkHeartbeat(batteryPercent: Int?): HealthCheckItem {
-        val uptimeSeconds = knownUptimeSeconds().coerceIn(0L, 0xFFFFFFFFL)
+        val uptimeSeconds = knownUptimeSeconds().coerceIn(0L, MAX_UINT32)
         val response =
             dispatcher.execute(
                 HeartbeatRequest(uptimeSeconds = uptimeSeconds),

@@ -5,6 +5,21 @@ import com.valhalla.core.storage.StorageKind
 import com.valhalla.core.storage.StorageMigrationStatus
 import com.valhalla.core.storage.StorageSchemaMigrator
 
+private const val U8_MASK = 0xFF
+private const val PROFILE_LAST_CONNECTED_INDEX = 5
+private const val PROFILE_BATTERY_INDEX = 7
+private const val PROFILE_FIRMWARE_INDEX = 6
+private const val OTA_SENT_BYTES_INDEX = 7
+private const val OTA_ERROR_CODE_INDEX = 5
+private const val OTA_DETAIL_INDEX = 6
+private const val ASCII_DIGIT_START = 0x30
+private const val ASCII_DIGIT_END = 0x39
+private const val ASCII_UPPER_START = 0x41
+private const val ASCII_UPPER_END = 0x5A
+private const val ASCII_LOWER_START = 0x61
+private const val ASCII_LOWER_END = 0x7A
+private const val ASCII_PRINTABLE_MAX = 0x7E
+
 /** OTA 一次执行的结果。 */
 enum class OtaOutcome {
     SUCCEEDED,
@@ -220,8 +235,8 @@ object DeviceProfileCodec {
     private fun parseProfile(parts: List<String>): DeviceProfile? {
         if (parts.size != PROFILE_PARTS) return null
         val deviceId = unescape(parts[1]) ?: return null
-        val lastConnectedAt = parts[5].toLongOrNull() ?: return null
-        val battery = if (parts[7].isEmpty()) null else parts[7].toIntOrNull() ?: return null
+        val lastConnectedAt = parts[PROFILE_LAST_CONNECTED_INDEX].toLongOrNull() ?: return null
+        val battery = if (parts[PROFILE_BATTERY_INDEX].isEmpty()) null else parts[PROFILE_BATTERY_INDEX].toIntOrNull() ?: return null
         val charging =
             when (parts[8]) {
                 "" -> null
@@ -236,7 +251,7 @@ object DeviceProfileCodec {
                 vendor = unescape(parts[3]),
                 model = unescape(parts[4]),
                 lastConnectedAtEpochMillis = lastConnectedAt,
-                lastKnownFirmwareVersion = unescape(parts[6]),
+                lastKnownFirmwareVersion = unescape(parts[PROFILE_FIRMWARE_INDEX]),
                 lastKnownBatteryPercent = battery,
                 lastKnownCharging = charging,
             )
@@ -249,7 +264,7 @@ object DeviceProfileCodec {
         val finishedAt = parts[2].toLongOrNull() ?: return null
         val duration = parts[3].toLongOrNull() ?: return null
         val outcome = OtaOutcome.entries.firstOrNull { it.name == parts[4] } ?: return null
-        val sent = parts[7].toIntOrNull() ?: return null
+        val sent = parts[OTA_SENT_BYTES_INDEX].toIntOrNull() ?: return null
         val total = parts[8].toIntOrNull() ?: return null
         return runCatching {
             OtaHistoryRecord(
@@ -257,8 +272,8 @@ object DeviceProfileCodec {
                 finishedAtEpochMillis = finishedAt,
                 durationMillis = duration,
                 outcome = outcome,
-                errorCode = unescape(parts[5]),
-                detail = unescape(parts[6]),
+                errorCode = unescape(parts[OTA_ERROR_CODE_INDEX]),
+                detail = unescape(parts[OTA_DETAIL_INDEX]),
                 sentBytes = sent,
                 totalBytes = total,
             )
@@ -269,7 +284,7 @@ object DeviceProfileCodec {
         if (value == null) return ""
         return buildString {
             value.encodeToByteArray().forEach { byte ->
-                val code = byte.toInt() and 0xFF
+                val code = byte.toInt() and U8_MASK
                 if (isAsciiSafe(code)) {
                     append(code.toChar())
                 } else {
@@ -282,9 +297,9 @@ object DeviceProfileCodec {
     }
 
     private fun isAsciiSafe(code: Int): Boolean =
-        code in 0x30..0x39 ||
-            code in 0x41..0x5A ||
-            code in 0x61..0x7A ||
+        code in ASCII_DIGIT_START..ASCII_DIGIT_END ||
+            code in ASCII_UPPER_START..ASCII_UPPER_END ||
+            code in ASCII_LOWER_START..ASCII_LOWER_END ||
             code == '.'.code ||
             code == '_'.code ||
             code == '~'.code ||
@@ -303,7 +318,7 @@ object DeviceProfileCodec {
                 bytes += ((high shl 4) or low).toByte()
                 index += 3
             } else {
-                if (char.code > 0x7E) return null
+                if (char.code > ASCII_PRINTABLE_MAX) return null
                 bytes += char.code.toByte()
                 index++
             }

@@ -3,6 +3,8 @@ package com.valhalla.core.logging
 import com.valhalla.core.protocol.CommandType
 import com.valhalla.core.protocol.Frame
 
+private const val U8_MASK = 0xFF
+
 /**
  * 报文日志脱敏规则（写入时执行，默认开启且没有关闭入口）。
  *
@@ -113,7 +115,7 @@ object PacketLogRedaction {
         cursor = skipString1(payload, cursor) ?: return payload
         cursor = skipString1(payload, cursor) ?: return payload
         val serialStart = cursor + 1
-        val serialLength = payload.getOrNull(cursor)?.toInt()?.and(0xFF) ?: return payload
+        val serialLength = payload.getOrNull(cursor)?.toInt()?.and(U8_MASK) ?: return payload
         val serialEnd = minOf(payload.size, serialStart + serialLength)
         if (serialLength <= DEVICE_ID_PREFIX_BYTES) return payload
         return payload.copyOf().also {
@@ -126,7 +128,7 @@ object PacketLogRedaction {
         payload: ByteArray,
         cursor: Int,
     ): Int? {
-        val length = payload.getOrNull(cursor)?.toInt()?.and(0xFF) ?: return null
+        val length = payload.getOrNull(cursor)?.toInt()?.and(U8_MASK) ?: return null
         val next = cursor + 1 + length
         return if (next <= payload.size) next else null
     }
@@ -149,7 +151,7 @@ object PacketLogRedaction {
     private fun readU16(
         bytes: ByteArray,
         offset: Int,
-    ): Int = ((bytes[offset + 1].toInt() and 0xFF) shl 8) or (bytes[offset].toInt() and 0xFF)
+    ): Int = ((bytes[offset + 1].toInt() and U8_MASK) shl 8) or (bytes[offset].toInt() and U8_MASK)
 
     private fun mask(
         bytes: ByteArray,
@@ -185,7 +187,7 @@ object PacketLogRedaction {
     fun hashDeviceId(deviceId: String): String {
         var hash = 0x811C9DC5u
         deviceId.encodeToByteArray().forEach { byte ->
-            hash = hash xor (byte.toInt().and(0xFF).toUInt())
+            hash = hash xor (byte.toInt().and(U8_MASK).toUInt())
             hash *= 0x01000193u
         }
         return "dev#" + hash.toString(16).padStart(8, '0')

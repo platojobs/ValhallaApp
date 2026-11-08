@@ -2,6 +2,12 @@ package com.valhalla.core.protocol.message
 
 import com.valhalla.core.protocol.CommandType
 
+private const val UINT8_MAX = 0xFF
+private const val UINT16_MAX = 0xFFFF
+private const val UINT32_MAX = 0xFFFFFFFFL
+private const val TIMEZONE_OFFSET_MIN_MINUTES = -720
+private const val TIMEZONE_OFFSET_MAX_MINUTES = 840
+
 /** 固件版本。channel 为发布通道，例如 `stable` / `beta`。 */
 data class FirmwareVersion(
     val major: Int,
@@ -11,10 +17,10 @@ data class FirmwareVersion(
     val channel: String,
 ) {
     init {
-        require(major in 0..0xFF) { "major 超出范围: $major" }
-        require(minor in 0..0xFF) { "minor 超出范围: $minor" }
-        require(patch in 0..0xFF) { "patch 超出范围: $patch" }
-        require(build in 0..0xFFFF) { "build 超出范围: $build" }
+        require(major in 0..UINT8_MAX) { "major 超出范围: $major" }
+        require(minor in 0..UINT8_MAX) { "minor 超出范围: $minor" }
+        require(patch in 0..UINT8_MAX) { "patch 超出范围: $patch" }
+        require(build in 0..UINT16_MAX) { "build 超出范围: $build" }
     }
 
     fun encodeTo(writer: PayloadWriter) {
@@ -100,7 +106,7 @@ class BatteryResponse(
 ) : DeviceResponse() {
     init {
         require(percent in 0..100) { "电量百分比超出范围: $percent" }
-        require(voltageMillivolts in 0..0xFFFF) { "电压毫伏值超出范围: $voltageMillivolts" }
+        require(voltageMillivolts in 0..UINT16_MAX) { "电压毫伏值超出范围: $voltageMillivolts" }
     }
 
     override val command: CommandType = CommandType.GET_BATTERY
@@ -145,8 +151,10 @@ class SetTimeRequest(
     val timezoneOffsetMinutes: Int,
 ) : DeviceRequest() {
     init {
-        require(epochSeconds in 0..0xFFFFFFFFL) { "epochSeconds 超出范围: $epochSeconds" }
-        require(timezoneOffsetMinutes in -720..840) { "时区偏移超出范围: $timezoneOffsetMinutes" }
+        require(epochSeconds in 0..UINT32_MAX) { "epochSeconds 超出范围: $epochSeconds" }
+        require(
+            timezoneOffsetMinutes in TIMEZONE_OFFSET_MIN_MINUTES..TIMEZONE_OFFSET_MAX_MINUTES,
+        ) { "时区偏移超出范围: $timezoneOffsetMinutes" }
     }
 
     override val command: CommandType = CommandType.SET_TIME

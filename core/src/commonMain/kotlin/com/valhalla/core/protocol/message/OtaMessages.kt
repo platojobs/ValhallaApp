@@ -2,6 +2,10 @@ package com.valhalla.core.protocol.message
 
 import com.valhalla.core.protocol.CommandType
 
+private const val UINT8_MAX = 0xFF
+private const val UINT16_MAX = 0xFFFF
+private const val UINT32_MAX = 0xFFFFFFFFL
+
 /** 中止 OTA 的原因码。 */
 enum class OtaAbortReason(
     val code: Int,
@@ -56,12 +60,12 @@ class StartOtaRequest(
     val payloadCrc32: Long = 0,
 ) : DeviceRequest() {
     init {
-        require(totalBytes in 1..0xFFFFFFFFL) { "totalBytes 超出范围: $totalBytes" }
-        require(crc16 in 0..0xFFFF) { "crc16 超出范围: $crc16" }
-        require(chunkSize in 1..0xFFFF) { "chunkSize 超出范围: $chunkSize" }
-        require(resumeSessionId in 0..0xFFFFFFFFL) { "resumeSessionId 超出范围: $resumeSessionId" }
-        require(resumeOffset in 0..0xFFFFFFFFL) { "resumeOffset 超出范围: $resumeOffset" }
-        require(payloadCrc32 in 0..0xFFFFFFFFL) { "payloadCrc32 超出范围: $payloadCrc32" }
+        require(totalBytes in 1..UINT32_MAX) { "totalBytes 超出范围: $totalBytes" }
+        require(crc16 in 0..UINT16_MAX) { "crc16 超出范围: $crc16" }
+        require(chunkSize in 1..UINT16_MAX) { "chunkSize 超出范围: $chunkSize" }
+        require(resumeSessionId in 0..UINT32_MAX) { "resumeSessionId 超出范围: $resumeSessionId" }
+        require(resumeOffset in 0..UINT32_MAX) { "resumeOffset 超出范围: $resumeOffset" }
+        require(payloadCrc32 in 0..UINT32_MAX) { "payloadCrc32 超出范围: $payloadCrc32" }
         require(resumeOffset < totalBytes) { "resumeOffset 必须小于 totalBytes: $resumeOffset >= $totalBytes" }
     }
 
@@ -106,7 +110,7 @@ class StartOtaRequest(
                     if ((flags and FLAG_RESUME) == 0) {
                         throw MessageDecodeException("OTA 续传扩展缺少续传标志")
                     }
-                    if ((flags and FLAG_RESUME.inv() and 0xFF) != 0) {
+                    if ((flags and FLAG_RESUME.inv() and UINT8_MAX) != 0) {
                         throw MessageDecodeException("OTA 续传扩展包含未知标志位: 0x${flags.toString(16)}")
                     }
                     StartOtaRequest(
@@ -141,9 +145,9 @@ class StartOtaResponse(
     val acceptedOffset: Long = 0,
 ) : DeviceResponse() {
     init {
-        require(sessionId in 0..0xFFFFFFFFL) { "sessionId 超出范围: $sessionId" }
-        require(chunkSize in 1..0xFFFF) { "chunkSize 超出范围: $chunkSize" }
-        require(acceptedOffset in 0..0xFFFFFFFFL) { "acceptedOffset 超出范围: $acceptedOffset" }
+        require(sessionId in 0..UINT32_MAX) { "sessionId 超出范围: $sessionId" }
+        require(chunkSize in 1..UINT16_MAX) { "chunkSize 超出范围: $chunkSize" }
+        require(acceptedOffset in 0..UINT32_MAX) { "acceptedOffset 超出范围: $acceptedOffset" }
     }
 
     override val command: CommandType = CommandType.START_OTA
@@ -186,7 +190,7 @@ class OtaDataRequest(
     val data: ByteArray,
 ) : DeviceRequest() {
     init {
-        require(offset in 0..0xFFFFFFFFL) { "offset 超出范围: $offset" }
+        require(offset in 0..UINT32_MAX) { "offset 超出范围: $offset" }
         require(data.isNotEmpty()) { "OTA 分片不能为空" }
     }
 
@@ -205,7 +209,7 @@ class OtaDataResponse(
     val receivedBytes: Long,
 ) : DeviceResponse() {
     init {
-        require(receivedBytes in 0..0xFFFFFFFFL) { "receivedBytes 超出范围: $receivedBytes" }
+        require(receivedBytes in 0..UINT32_MAX) { "receivedBytes 超出范围: $receivedBytes" }
     }
 
     override val command: CommandType = CommandType.OTA_DATA
@@ -223,8 +227,8 @@ class FinishOtaRequest(
     val crc16: Int,
 ) : DeviceRequest() {
     init {
-        require(totalBytes in 1..0xFFFFFFFFL) { "totalBytes 超出范围: $totalBytes" }
-        require(crc16 in 0..0xFFFF) { "crc16 超出范围: $crc16" }
+        require(totalBytes in 1..UINT32_MAX) { "totalBytes 超出范围: $totalBytes" }
+        require(crc16 in 0..UINT16_MAX) { "crc16 超出范围: $crc16" }
     }
 
     override val command: CommandType = CommandType.FINISH_OTA
@@ -283,9 +287,9 @@ class OtaProgressNotification(
     val stage: OtaStage,
 ) : DeviceNotification() {
     init {
-        require(sessionId in 0..0xFFFFFFFFL) { "sessionId 超出范围: $sessionId" }
-        require(receivedBytes in 0..0xFFFFFFFFL) { "receivedBytes 超出范围: $receivedBytes" }
-        require(totalBytes in 1..0xFFFFFFFFL) { "totalBytes 超出范围: $totalBytes" }
+        require(sessionId in 0..UINT32_MAX) { "sessionId 超出范围: $sessionId" }
+        require(receivedBytes in 0..UINT32_MAX) { "receivedBytes 超出范围: $receivedBytes" }
+        require(totalBytes in 1..UINT32_MAX) { "totalBytes 超出范围: $totalBytes" }
     }
 
     override val command: CommandType = CommandType.OTA_PROGRESS_NOTIFY

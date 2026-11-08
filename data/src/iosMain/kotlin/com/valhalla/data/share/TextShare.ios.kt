@@ -17,10 +17,12 @@ import platform.UIKit.UIPopoverPresentationController
 import platform.UIKit.UIViewController
 import platform.UIKit.popoverPresentationController
 
+private const val SECONDS_PER_MINUTE = 60
+
 actual fun createTextSharer(): TextSharer = IosTextSharer()
 
 @Suppress("UNUSED_PARAMETER")
-actual fun currentTimeZoneOffsetMinutes(epochMillis: Long): Int = NSTimeZone.localTimeZone.secondsFromGMTForDate(NSDate()).toInt() / 60
+actual fun currentTimeZoneOffsetMinutes(epochMillis: Long): Int = NSTimeZone.localTimeZone.secondsFromGMTForDate(NSDate()).toInt() / SECONDS_PER_MINUTE
 
 /**
  * 先写入临时目录，再把文件 URL 交给 `UIActivityViewController`。

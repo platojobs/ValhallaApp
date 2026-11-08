@@ -15,6 +15,12 @@ import kotlinx.coroutines.yield
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
 
+private const val PROGRESS_HEALTH_REPORT = 0.15f
+private const val PROGRESS_CONNECTION_QUALITY = 0.3f
+private const val PROGRESS_DEVICE_PROFILE = 0.45f
+private const val PROGRESS_DEVICE_METRICS = 0.6f
+private const val PROGRESS_PACKET_LOG = 0.75f
+
 /** 诊断包内固定条目；顺序即写入顺序。 */
 enum class DiagnosticEntryKind(
     val fileName: String,
@@ -124,27 +130,27 @@ object DiagnosticPackageBuilder {
         yield()
         currentCoroutineContext().ensureActive()
 
-        onProgress(DiagnosticPackageProgress(0.15f, DiagnosticEntryKind.HEALTH_REPORT))
+        onProgress(DiagnosticPackageProgress(PROGRESS_HEALTH_REPORT, DiagnosticEntryKind.HEALTH_REPORT))
         val health = redacted(input.healthReport ?: "暂无数据 / no data")
         yield()
         currentCoroutineContext().ensureActive()
 
-        onProgress(DiagnosticPackageProgress(0.3f, DiagnosticEntryKind.CONNECTION_QUALITY))
+        onProgress(DiagnosticPackageProgress(PROGRESS_CONNECTION_QUALITY, DiagnosticEntryKind.CONNECTION_QUALITY))
         val quality = redacted(input.connectionQuality)
         yield()
         currentCoroutineContext().ensureActive()
 
-        onProgress(DiagnosticPackageProgress(0.45f, DiagnosticEntryKind.DEVICE_PROFILE))
+        onProgress(DiagnosticPackageProgress(PROGRESS_DEVICE_PROFILE, DiagnosticEntryKind.DEVICE_PROFILE))
         val profile = redacted(input.deviceProfileSummary)
         yield()
         currentCoroutineContext().ensureActive()
 
-        onProgress(DiagnosticPackageProgress(0.6f, DiagnosticEntryKind.DEVICE_METRICS))
+        onProgress(DiagnosticPackageProgress(PROGRESS_DEVICE_METRICS, DiagnosticEntryKind.DEVICE_METRICS))
         val metrics = redacted(renderMetrics(input.metricSamples))
         yield()
         currentCoroutineContext().ensureActive()
 
-        onProgress(DiagnosticPackageProgress(0.75f, DiagnosticEntryKind.PACKET_LOG))
+        onProgress(DiagnosticPackageProgress(PROGRESS_PACKET_LOG, DiagnosticEntryKind.PACKET_LOG))
         val packetLog =
             PacketLogExporter.build(
                 entries = input.packetLogEntries,

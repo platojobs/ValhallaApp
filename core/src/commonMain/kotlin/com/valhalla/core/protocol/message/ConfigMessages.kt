@@ -2,6 +2,8 @@ package com.valhalla.core.protocol.message
 
 import com.valhalla.core.protocol.CommandType
 
+private const val UINT16_MAX = 0xFFFF
+
 /**
  * 写配置项。
  *
@@ -71,7 +73,7 @@ class SetParamRequest(
     val value: ByteArray,
 ) : DeviceRequest() {
     init {
-        require(paramId in 0..0xFFFF) { "paramId 超出范围: $paramId" }
+        require(paramId in 0..UINT16_MAX) { "paramId 超出范围: $paramId" }
     }
 
     override val command: CommandType = CommandType.SET_PARAM
@@ -99,7 +101,7 @@ class GetParamRequest(
     val paramId: Int,
 ) : DeviceRequest() {
     init {
-        require(paramId in 0..0xFFFF) { "paramId 超出范围: $paramId" }
+        require(paramId in 0..UINT16_MAX) { "paramId 超出范围: $paramId" }
     }
 
     override val command: CommandType = CommandType.GET_PARAM

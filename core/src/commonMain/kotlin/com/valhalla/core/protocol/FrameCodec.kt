@@ -1,5 +1,9 @@
 package com.valhalla.core.protocol
 
+private const val UINT8_MAX = 0xFF
+private const val SEQUENCE_OFFSET = 5
+private const val LENGTH_OFFSET = 7
+
 /**
  * 报文编解码器。
  *
@@ -31,14 +35,14 @@ object FrameCodec {
         offset: Int,
         value: Int,
     ) {
-        target[offset] = (value and 0xFF).toByte()
-        target[offset + 1] = ((value shr 8) and 0xFF).toByte()
+        target[offset] = (value and UINT8_MAX).toByte()
+        target[offset + 1] = ((value shr 8) and UINT8_MAX).toByte()
     }
 
     internal fun readUInt16(
         source: ByteArray,
         offset: Int,
-    ): Int = (source[offset].toInt() and 0xFF) or ((source[offset + 1].toInt() and 0xFF) shl 8)
+    ): Int = (source[offset].toInt() and UINT8_MAX) or ((source[offset + 1].toInt() and UINT8_MAX) shl 8)
 
     fun encode(frame: Frame): ByteArray {
         val payload = frame.payload
@@ -56,8 +60,8 @@ object FrameCodec {
         if (frame.isResponse) flags = flags or FLAG_RESPONSE
         if (frame.isNotification) flags = flags or FLAG_NOTIFICATION
         output[4] = flags.toByte()
-        writeUInt16(output, 5, frame.sequence)
-        writeUInt16(output, 7, payload.size)
+        writeUInt16(output, SEQUENCE_OFFSET, frame.sequence)
+        writeUInt16(output, LENGTH_OFFSET, payload.size)
         payload.copyInto(output, destinationOffset = HEADER_SIZE)
 
         val crc = Crc16.ccittFalse(output, startIndex = 2, endIndex = HEADER_SIZE + payload.size)
@@ -79,12 +83,12 @@ object FrameCodec {
         }
 
         val type = CommandType.fromCode(bytes[3])
-        val flags = bytes[4].toInt() and 0xFF
+        val flags = bytes[4].toInt() and UINT8_MAX
         if (flags and FLAG_RESPONSE != 0 && flags and FLAG_NOTIFICATION != 0) {
             throw FrameDecodeException("flags 同时标记应答与通知: 0x${flags.toString(16)}")
         }
-        val sequence = readUInt16(bytes, 5)
-        val payloadLength = readUInt16(bytes, 7)
+        val sequence = readUInt16(bytes, SEQUENCE_OFFSET)
+        val payloadLength = readUInt16(bytes, LENGTH_OFFSET)
 
         if (payloadLength > MAX_PAYLOAD_SIZE) {
             throw FrameDecodeException("payload 长度非法: $payloadLength > $MAX_PAYLOAD_SIZE")

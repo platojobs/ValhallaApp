@@ -32,6 +32,12 @@ import kotlinx.coroutines.flow.updateAndGet
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
 
+private const val MILLIS_PER_DAY = 86_400_000L
+private const val MILLIS_PER_HOUR = 3_600_000L
+private const val MILLIS_PER_MINUTE = 60_000L
+private const val MINUTES_PER_HOUR = 60
+private const val SECONDS_PER_MINUTE = 60
+
 enum class FrameDirection {
     TX,
     RX,
@@ -331,10 +337,10 @@ object PacketLogFormatter {
 }
 
 private fun formatTimestamp(timestampMillis: Long): String {
-    val millisOfDay = timestampMillis % 86_400_000L
-    val hours = millisOfDay / 3_600_000L
-    val minutes = (millisOfDay / 60_000L) % 60
-    val seconds = (millisOfDay / 1_000L) % 60
+    val millisOfDay = timestampMillis % MILLIS_PER_DAY
+    val hours = millisOfDay / MILLIS_PER_HOUR
+    val minutes = (millisOfDay / MILLIS_PER_MINUTE) % MINUTES_PER_HOUR
+    val seconds = (millisOfDay / 1_000L) % SECONDS_PER_MINUTE
     val millis = millisOfDay % 1_000L
     return buildString {
         append(hours.toString().padStart(2, '0'))

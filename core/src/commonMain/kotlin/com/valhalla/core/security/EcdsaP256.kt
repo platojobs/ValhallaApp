@@ -3,6 +3,15 @@ package com.valhalla.core.security
 import kotlin.io.encoding.Base64
 import kotlin.io.encoding.ExperimentalEncodingApi
 
+private const val BYTE_MASK = 0xFF
+private const val DER_TAG_SEQUENCE = 0x30
+private const val DER_TAG_INTEGER = 0x02
+private const val DER_LENGTH_LONG_FORM = 0x80
+private const val DER_LENGTH_COUNT_MASK = 0x7F
+private const val DER_LENGTH_ONE_BYTE_MAX = 0x100
+private const val ASN1_SIGN_BIT = 0x80
+private const val SHA256_DIGEST_BYTES = 32
+
 /**
  * ECDSA-P256 验签失败分类。
  *
@@ -91,15 +100,12 @@ object EcdsaSignatureCodec {
         val sDer = encodeInteger(s)
         val content = rDer + sDer
         return encodeLength(content.size).let { lengthBytes ->
-            byteArrayOf(SEQUENCE_TAG.toByte()) + lengthBytes + content
+            byteArrayOf(DER_TAG_SEQUENCE.toByte()) + lengthBytes + content
         }
     }
 
-    private const val SEQUENCE_TAG = 0x30
-    private const val INTEGER_TAG = 0x02
-
     private fun parseDer(signature: ByteArray): Pair<ByteArray, ByteArray> {
-        if (signature.size < 2 || signature[0].toInt() != SEQUENCE_TAG) {
+        if (signature.size < 2 || signature[0].toInt() != DER_TAG_SEQUENCE) {
             throw EcdsaSignatureFormatException("缺少 DER SEQUENCE 头")
         }
         val lengthInfo = readLength(signature, 1)
@@ -124,14 +130,14 @@ object EcdsaSignatureCodec {
         offset: Int,
     ): Pair<Int, Int> {
         if (offset >= bytes.size) throw EcdsaSignatureFormatException("长度字段缺失")
-        val first = bytes[offset].toInt() and 0xFF
-        if (first < 0x80) return first to (offset + 1)
-        val count = first and 0x7F
+        val first = bytes[offset].toInt() and BYTE_MASK
+        if (first < DER_LENGTH_LONG_FORM) return first to (offset + 1)
+        val count = first and DER_LENGTH_COUNT_MASK
         if (count == 0 || count > 4) throw EcdsaSignatureFormatException("不支持的长度编码")
         if (offset + 1 + count > bytes.size) throw EcdsaSignatureFormatException("长度字段被截断")
         var value = 0
         for (index in 0 until count) {
-            value = (value shl 8) or (bytes[offset + 1 + index].toInt() and 0xFF)
+            value = (value shl 8) or (bytes[offset + 1 + index].toInt() and BYTE_MASK)
         }
         return value to (offset + 1 + count)
     }
@@ -143,10 +149,10 @@ object EcdsaSignatureCodec {
         limit: Int,
     ): Pair<ByteArray, Int> {
         if (offset + 2 > limit) throw EcdsaSignatureFormatException("INTEGER 头不完整")
-        if (bytes[offset].toInt() != INTEGER_TAG) {
+        if (bytes[offset].toInt() != DER_TAG_INTEGER) {
             throw EcdsaSignatureFormatException("预期 INTEGER，实际 0x${bytes[offset].toString(16)}")
         }
-        val length = bytes[offset + 1].toInt() and 0xFF
+        val length = bytes[offset + 1].toInt() and BYTE_MASK
         if (length == 0) throw EcdsaSignatureFormatException("INTEGER 长度为 0")
         val start = offset + 2
         val end = start + length
@@ -161,13 +167,13 @@ object EcdsaSignatureCodec {
                     if (content.size == 1) {
                         throw EcdsaSignatureFormatException("INTEGER 为零")
                     }
-                    if (content[1].toInt() and 0x80 == 0) {
+                    if (content[1].toInt() and ASN1_SIGN_BIT == 0) {
                         throw EcdsaSignatureFormatException("INTEGER 存在非最小前导零")
                     }
                     content.copyOfRange(1, content.size)
                 }
 
-                content[0].toInt() and 0x80 != 0 -> throw EcdsaSignatureFormatException("INTEGER 为负")
+                content[0].toInt() and ASN1_SIGN_BIT != 0 -> throw EcdsaSignatureFormatException("INTEGER 为负")
                 else -> content
             }
         if (coordinate.size > COORDINATE_BYTES) {
@@ -180,16 +186,16 @@ object EcdsaSignatureCodec {
         var start = 0
         while (start < coordinate.size - 1 && coordinate[start].toInt() == 0) start++
         val trimmed = coordinate.copyOfRange(start, coordinate.size)
-        val needsPad = trimmed[0].toInt() and 0x80 != 0
+        val needsPad = trimmed[0].toInt() and ASN1_SIGN_BIT != 0
         val content = if (needsPad) byteArrayOf(0) + trimmed else trimmed
-        return byteArrayOf(INTEGER_TAG.toByte()) + encodeLength(content.size) + content
+        return byteArrayOf(DER_TAG_INTEGER.toByte()) + encodeLength(content.size) + content
     }
 
     private fun encodeLength(length: Int): ByteArray =
         when {
-            length < 0x80 -> byteArrayOf(length.toByte())
-            length < 0x100 -> byteArrayOf(0x81.toByte(), length.toByte())
-            else -> byteArrayOf(0x82.toByte(), (length shr 8).toByte(), (length and 0xFF).toByte())
+            length < DER_LENGTH_LONG_FORM -> byteArrayOf(length.toByte())
+            length < DER_LENGTH_ONE_BYTE_MAX -> byteArrayOf(0x81.toByte(), length.toByte())
+            else -> byteArrayOf(0x82.toByte(), (length shr 8).toByte(), (length and BYTE_MASK).toByte())
         }
 }
 
@@ -227,7 +233,7 @@ object EcdsaPublicKeyEncoding {
         offset: Int,
         limit: Int,
     ): Triple<Int, Int, Int>? {
-        if (offset >= limit || bytes[offset].toInt() != 0x30) return null
+        if (offset >= limit || bytes[offset].toInt() != DER_TAG_SEQUENCE) return null
         val lengthInfo = readLength(bytes, offset + 1, limit) ?: return null
         val start = lengthInfo.second
         val end = start + lengthInfo.first
@@ -241,13 +247,13 @@ object EcdsaPublicKeyEncoding {
         limit: Int,
     ): Pair<Int, Int>? {
         if (offset >= limit) return null
-        val first = bytes[offset].toInt() and 0xFF
-        if (first < 0x80) return first to (offset + 1)
-        val count = first and 0x7F
+        val first = bytes[offset].toInt() and BYTE_MASK
+        if (first < DER_LENGTH_LONG_FORM) return first to (offset + 1)
+        val count = first and DER_LENGTH_COUNT_MASK
         if (count == 0 || count > 4 || offset + 1 + count > limit) return null
         var value = 0
         for (index in 0 until count) {
-            value = (value shl 8) or (bytes[offset + 1 + index].toInt() and 0xFF)
+            value = (value shl 8) or (bytes[offset + 1 + index].toInt() and BYTE_MASK)
         }
         return value to (offset + 1 + count)
     }
@@ -296,7 +302,7 @@ class EcdsaP256Verifier private constructor(
         digest: ByteArray,
         signatureDer: ByteArray,
     ): EcdsaVerificationResult {
-        if (digest.size != 32) {
+        if (digest.size != SHA256_DIGEST_BYTES) {
             return EcdsaVerificationResult.Invalid(
                 EcdsaFailureCode.DIGEST_LENGTH,
                 "P-256 需要 32 字节 SHA-256 摘要，实际 ${digest.size}",

@@ -2,6 +2,28 @@
 
 本文件记录 ValhallaApp 的版本演进，按「阶段完成即提交 + 打 annotated tag」的节奏维护。
 
+## v3.1.0 - 细节收口
+
+### 质量门禁与界面细节
+
+- **detekt 基线瘦身**：391 条降至 95 条（core 266→30 / data 10→5 / feature 115→60），净减 296 条；
+  MagicNumber 260、MaxLineLength 18、ComplexCondition 6、UnusedParameter 3、MatchingDeclarationName 2、
+  CyclomaticComplexMethod 2、LongParameterList 2、InstanceOfCheckForException 1、LongMethod 1、
+  SwallowedException 1。未新增 `@Suppress`、规则例外或目录排除；剩余每条附具体理由。
+- **UI 逻辑下沉**：把 Compose 中的文案映射、排序过滤、按钮启停、字段状态与可执行动作抽到
+  `feature/uilogic/UiLogic.kt` 并新增 29 项测试；覆盖率排除由整包 UI 收窄为
+  `annotatedBy("androidx.compose.runtime.Composable")`。feature 行覆盖由 89.46%（整包排除 UI）
+  变为 84.81%（只排除渲染函数），差值来自新计入的 424 行非 Composable UI 代码。
+- **界面四态**：新增 `EmptyStatePanel` / `LoadingStatePanel` / `ErrorStatePanel` / `DisabledStatePanel`，
+  逐屏核对 16 个界面的空/加载/错误/禁用态；新增 11 个 `StringKey` 中英同步；
+  实现位置与不适用原因见 [docs/ui-state-matrix.md](docs/ui-state-matrix.md)。
+- **无障碍与排版**：进度组件补 `progressBarRangeInfo`，错误与结果补 `liveRegion`，
+  可点击元素补语义与 `contentDescription`，弹窗可返回；新增源码扫描测试约束 RTL、截断与进度语义；
+  状态色对比度沿用既有覆盖。
+- **阈值收紧**：覆盖率门禁 core ≥ 90 / data ≥ 80 / feature ≥ 80；JVM 测试 688 → 722 项
+  （core 385 / data 24 / feature 313），既有断言未削弱。
+- 版本 `3.1.0`（`versionCode 31`），`verifyVersionConsistency` 通过。
+
 ## v3.0.0 - 工程收口与真实资源
 
 ### 工程与质量门禁

@@ -4,6 +4,12 @@ import com.valhalla.core.logging.LogLevel
 import com.valhalla.core.protocol.CommandType
 import com.valhalla.core.state.DeviceState
 
+private const val UINT8_MAX = 0xFF
+private const val UINT16_MAX = 0xFFFF
+private const val UINT32_MAX = 0xFFFFFFFFL
+private const val DEVICE_STATE_DISCONNECTING = 0x05
+private const val DEVICE_STATE_FAULT = 0x06
+
 /** 恢复出厂设置，payload：`confirmToken:str1`（可为空串）。 */
 class FactoryResetRequest(
     val confirmToken: String = "",
@@ -32,8 +38,8 @@ class RebootRequest(
     val reason: Int = 0,
 ) : DeviceRequest() {
     init {
-        require(delayMillis in 0..0xFFFF) { "delayMillis 超出范围: $delayMillis" }
-        require(reason in 0..0xFF) { "reason 超出范围: $reason" }
+        require(delayMillis in 0..UINT16_MAX) { "delayMillis 超出范围: $delayMillis" }
+        require(reason in 0..UINT8_MAX) { "reason 超出范围: $reason" }
     }
 
     override val command: CommandType = CommandType.REBOOT
@@ -61,8 +67,8 @@ class LogDumpRequest(
     val maxEntries: Int = 64,
 ) : DeviceRequest() {
     init {
-        require(sinceSequence in 0..0xFFFFFFFFL) { "sinceSequence 超出范围: $sinceSequence" }
-        require(maxEntries in 1..0xFFFF) { "maxEntries 超出范围: $maxEntries" }
+        require(sinceSequence in 0..UINT32_MAX) { "sinceSequence 超出范围: $sinceSequence" }
+        require(maxEntries in 1..UINT16_MAX) { "maxEntries 超出范围: $maxEntries" }
     }
 
     override val command: CommandType = CommandType.LOG_DUMP
@@ -104,7 +110,7 @@ class HeartbeatRequest(
     val uptimeSeconds: Long,
 ) : DeviceRequest() {
     init {
-        require(uptimeSeconds in 0..0xFFFFFFFFL) { "uptimeSeconds 超出范围: $uptimeSeconds" }
+        require(uptimeSeconds in 0..UINT32_MAX) { "uptimeSeconds 超出范围: $uptimeSeconds" }
     }
 
     override val command: CommandType = CommandType.HEARTBEAT
@@ -141,7 +147,7 @@ class HeartbeatReplyNotification(
 ) : DeviceNotification() {
     init {
         require(batteryPercent in 0..100) { "电池百分比超出范围: $batteryPercent" }
-        require(uptimeSeconds in 0..0xFFFFFFFFL) { "uptimeSeconds 超出范围: $uptimeSeconds" }
+        require(uptimeSeconds in 0..UINT32_MAX) { "uptimeSeconds 超出范围: $uptimeSeconds" }
     }
 
     override val command: CommandType = CommandType.HEARTBEAT_REPLY
@@ -160,7 +166,7 @@ class DeviceStatusNotification(
 ) : DeviceNotification() {
     init {
         require(batteryPercent in 0..100) { "电池百分比超出范围: $batteryPercent" }
-        require(faultCode in 0..0xFFFF) { "faultCode 超出范围: $faultCode" }
+        require(faultCode in 0..UINT16_MAX) { "faultCode 超出范围: $faultCode" }
     }
 
     override val command: CommandType = CommandType.DEVICE_STATUS_NOTIFY
@@ -179,8 +185,8 @@ class DeviceStatusNotification(
                 DeviceState.CONNECTED -> 0x02
                 DeviceState.AUTHENTICATING -> 0x03
                 DeviceState.READY -> 0x04
-                DeviceState.DISCONNECTING -> 0x05
-                DeviceState.FAULT -> 0x06
+                DeviceState.DISCONNECTING -> DEVICE_STATE_DISCONNECTING
+                DeviceState.FAULT -> DEVICE_STATE_FAULT
             }
 
         fun deviceStateFromCode(code: Int): DeviceState? =
@@ -190,8 +196,8 @@ class DeviceStatusNotification(
                 0x02 -> DeviceState.CONNECTED
                 0x03 -> DeviceState.AUTHENTICATING
                 0x04 -> DeviceState.READY
-                0x05 -> DeviceState.DISCONNECTING
-                0x06 -> DeviceState.FAULT
+                DEVICE_STATE_DISCONNECTING -> DeviceState.DISCONNECTING
+                DEVICE_STATE_FAULT -> DeviceState.FAULT
                 else -> null
             }
     }

@@ -2,15 +2,10 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
-    <ID>MagicNumber:TextShare.android.kt$60_000</ID>
-    <ID>MagicNumber:TextShare.ios.kt$60</ID>
-    <ID>MagicNumber:TextShare.jvm.kt$60_000</ID>
     <ID>TooGenericExceptionCaught:AndroidBleConnection.kt$AndroidBleConnection$error: Throwable</ID>
     <ID>TooGenericExceptionCaught:IosBleClient.kt$IosBleClient$error: Throwable</ID>
     <ID>TooGenericExceptionCaught:IosBleClient.kt$IosBleConnection$error: Throwable</ID>
     <ID>TooGenericExceptionCaught:MultiDeviceConnectionPool.kt$MultiDeviceConnectionPool$error: Throwable</ID>
     <ID>TooGenericExceptionCaught:TextShare.android.kt$AndroidTextSharer$error: Throwable</ID>
-    <ID>UnusedParameter:IosBleClient.kt$IosBleConnection$characteristic: CBCharacteristic</ID>
-    <ID>UnusedParameter:IosBleClient.kt$IosBleConnection$service: CBService</ID>
   </CurrentIssues>
 </SmellBaseline>

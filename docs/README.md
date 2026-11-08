@@ -8,6 +8,7 @@ ValhallaApp 的文档按「先看怎么交付、再看怎么实现」的顺序�
 | 文档 | 说明 |
 | --- | --- |
 | [delivery.md](delivery.md) | 交付物清单、模块说明、构建命令、产物路径、CI 入口、可交付 vs 未完成对照 |
+| [release-notes/v3.1.0.md](release-notes/v3.1.0.md) | v3.1.0 detekt 基线瘦身、UI 逻辑下沉、四态一致性与无障碍收口 |
 | [release-notes/v3.0.0.md](release-notes/v3.0.0.md) | v3.0.0 静态分析、覆盖率、存储迁移、真实资源与进程恢复 |
 | [release-notes/v2.9.0.md](release-notes/v2.9.0.md) | v2.9.0 批量操作、本地固件库与 OTA 队列 |
 | [release-notes/v2.8.0.md](release-notes/v2.8.0.md) | v2.8.0 实时信号、本地通知与诊断包 |
@@ -17,8 +18,9 @@ ValhallaApp 的文档按「先看怎么交付、再看怎么实现」的顺序�
 | [release-notes/v2.3.0.md](release-notes/v2.3.0.md) | v2.3.0 多设备管理、扫描增强、快捷操作与 OTA 历史 |
 | [release-notes/v2.0.0.md](release-notes/v2.0.0.md) | v2.0.0 版本要点、能力边界、已知限制、安装前提、真机验收清单 |
 | [environment-report.md](environment-report.md) | 本机工具链版本与实际构建/测试记录 |
-| [static-analysis-baseline.md](static-analysis-baseline.md) | detekt 基线逐条清单与保留原因 |
-| [../CHANGELOG.md](../CHANGELOG.md) | v0.0.1 → v3.0.0 全量版本演进 |
+| [static-analysis-baseline.md](static-analysis-baseline.md) | detekt 基线逐条清单、实修分类与保留原因 |
+| [ui-state-matrix.md](ui-state-matrix.md) | 16 个界面的空/加载/错误/禁用四态实现位置与不适用原因 |
+| [../CHANGELOG.md](../CHANGELOG.md) | v0.0.1 → v3.1.0 全量版本演进 |
 
 ## 架构与协议
 

@@ -2,6 +2,8 @@ package com.valhalla.core.config
 
 import com.valhalla.core.protocol.message.FirmwareVersion
 
+private const val UINT8_MAX = 0xFF
+
 /** 配置项的基础类型；协议层 value 仍是裸字节，由命令表约定解释方式。 */
 enum class ConfigValueType {
     STRING,
@@ -217,7 +219,7 @@ object ConfigCatalog {
         when (spec.type) {
             ConfigValueType.STRING -> raw.decodeToString()
             ConfigValueType.BOOLEAN ->
-                when (raw.firstOrNull()?.toInt()?.and(0xFF)) {
+                when (raw.firstOrNull()?.toInt()?.and(UINT8_MAX)) {
                     1, '1'.code, 't'.code, 'T'.code -> "true"
                     0, '0'.code, 'f'.code, 'F'.code -> "false"
                     else -> raw.decodeToString()
@@ -228,7 +230,7 @@ object ConfigCatalog {
                     raw
                         .firstOrNull()
                         ?.toInt()
-                        ?.and(0xFF)
+                        ?.and(UINT8_MAX)
                         ?.toString() ?: ""
                 }
         }

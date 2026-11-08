@@ -1,5 +1,7 @@
 package com.valhalla.core.logging
 
+private const val MAC_MASKED_SEGMENT_COUNT = 5
+
 /**
  * 面向自由文本（设备日志、固件回传、错误消息）的字段级脱敏规则。
  *
@@ -68,7 +70,7 @@ object SensitiveTextRedaction {
             }
         value =
             MAC_ADDRESS.replace(value) { match ->
-                match.value.take(2) + ":" + List(5) { "**" }.joinToString(":")
+                match.value.take(2) + ":" + List(MAC_MASKED_SEGMENT_COUNT) { "**" }.joinToString(":")
             }
         value = UUID.replace(value) { match -> PacketLogRedaction.hashDeviceId(match.value) }
         value = LONG_HEX.replace(value, "[REDACTED KEY]")

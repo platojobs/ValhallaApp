@@ -1,5 +1,8 @@
 package com.valhalla.core.security
 
+private const val U16_MAX = 0xFFFF
+private const val BYTE_MASK = 0xFF
+
 /** AUTH 挑战应答签名器。 */
 interface AuthSigner {
     /** 算法标识，用于日志与协议协商（当前仅有 HMAC-SHA256）。 */
@@ -65,9 +68,9 @@ object AuthSignatureMessage {
         offset: Int,
         value: Int,
     ): Int {
-        require(value in 0..0xFFFF) { "长度字段超出 u16 范围: $value" }
-        target[offset] = (value and 0xFF).toByte()
-        target[offset + 1] = ((value shr 8) and 0xFF).toByte()
+        require(value in 0..U16_MAX) { "长度字段超出 u16 范围: $value" }
+        target[offset] = (value and BYTE_MASK).toByte()
+        target[offset + 1] = ((value shr 8) and BYTE_MASK).toByte()
         return offset + 2
     }
 }

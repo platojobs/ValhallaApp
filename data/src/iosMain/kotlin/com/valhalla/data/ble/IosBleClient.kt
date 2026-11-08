@@ -265,8 +265,8 @@ internal class IosBleConnection(
         delegate =
             PeripheralDelegate(
                 onDiscoverServices = { peripheral, error -> handleDiscoverServices(peripheral, error) },
-                onDiscoverCharacteristics = { service, error -> handleDiscoverCharacteristics(service, error) },
-                onWriteValue = { characteristic, error -> handleWriteValue(characteristic, error) },
+                onDiscoverCharacteristics = { _, error -> handleDiscoverCharacteristics(error) },
+                onWriteValue = { _, error -> handleWriteValue(error) },
                 onUpdateValue = { characteristic, error -> handleUpdateValue(characteristic, error) },
                 onReadRssi = { rssi, error -> handleReadRssi(rssi, error) },
             )
@@ -412,10 +412,7 @@ internal class IosBleConnection(
         }
     }
 
-    private fun handleDiscoverCharacteristics(
-        service: CBService,
-        error: NSError?,
-    ) {
+    private fun handleDiscoverCharacteristics(error: NSError?) {
         if (error != null) {
             failStart(error.localizedDescription)
             return
@@ -426,10 +423,7 @@ internal class IosBleConnection(
         }
     }
 
-    private fun handleWriteValue(
-        characteristic: CBCharacteristic,
-        error: NSError?,
-    ) {
+    private fun handleWriteValue(error: NSError?) {
         val deferred = pendingWrite ?: return
         if (error == null) {
             deferred.complete(Unit)

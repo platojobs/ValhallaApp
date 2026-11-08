@@ -50,8 +50,8 @@ class FirmwareHeader(
             require(isModelValid(model)) { "目标型号格式非法: $model" }
         }
         require(targetModels.distinctBy { it.lowercase() }.size == targetModels.size) { "目标型号存在重复项: $targetModels" }
-        require(payloadLength in 1..0xFFFFFFFFL) { "payloadLength 超出 u32 范围: $payloadLength" }
-        require(payloadCrc32 in 0..0xFFFFFFFFL) { "payloadCrc32 超出 u32 范围: $payloadCrc32" }
+        require(payloadLength in 1..U32_MAX) { "payloadLength 超出 u32 范围: $payloadLength" }
+        require(payloadCrc32 in 0..U32_MAX) { "payloadCrc32 超出 u32 范围: $payloadCrc32" }
     }
 
     /** 是否使用 `*` 通配所有型号。 */
@@ -66,28 +66,28 @@ class FirmwareHeader(
     /** 编码为 104 字节固定头，自动填充头部 CRC。 */
     fun encode(): ByteArray {
         val bytes = ByteArray(SIZE)
-        bytes[0] = MAGIC_0
-        bytes[1] = MAGIC_1
-        bytes[2] = FORMAT_VERSION.toByte()
-        bytes[3] = if (hasSignature) SIGNATURE_FLAG.toByte() else 0
-        writeU16(bytes, 4, firmwareVersion.major)
-        writeU16(bytes, 6, firmwareVersion.minor)
-        writeU16(bytes, 8, firmwareVersion.patch)
-        writeU16(bytes, 10, firmwareVersion.build)
+        bytes[OFFSET_MAGIC_0] = MAGIC_0
+        bytes[OFFSET_MAGIC_1] = MAGIC_1
+        bytes[OFFSET_FORMAT_VERSION] = FORMAT_VERSION.toByte()
+        bytes[OFFSET_FLAGS] = if (hasSignature) SIGNATURE_FLAG.toByte() else 0
+        writeU16(bytes, OFFSET_VERSION_MAJOR, firmwareVersion.major)
+        writeU16(bytes, OFFSET_VERSION_MINOR, firmwareVersion.minor)
+        writeU16(bytes, OFFSET_VERSION_PATCH, firmwareVersion.patch)
+        writeU16(bytes, OFFSET_VERSION_BUILD, firmwareVersion.build)
 
         val channel = firmwareVersion.channel.encodeToByteArray()
-        bytes[12] = channel.size.toByte()
-        channel.copyInto(bytes, destinationOffset = 13)
+        bytes[OFFSET_CHANNEL_LENGTH] = channel.size.toByte()
+        channel.copyInto(bytes, destinationOffset = OFFSET_CHANNEL)
 
-        bytes[29] = targetModels.size.toByte()
+        bytes[OFFSET_MODEL_COUNT] = targetModels.size.toByte()
         targetModels.forEachIndexed { index, model ->
             val encoded = model.encodeToByteArray()
-            encoded.copyInto(bytes, destinationOffset = 30 + index * MODEL_FIELD_SIZE)
+            encoded.copyInto(bytes, destinationOffset = OFFSET_MODELS + index * MODEL_FIELD_SIZE)
         }
 
-        writeU32(bytes, 94, payloadLength)
-        writeU32(bytes, 98, payloadCrc32)
-        writeU16(bytes, 102, Crc16.ccittFalse(bytes, 0, 102))
+        writeU32(bytes, OFFSET_PAYLOAD_LENGTH, payloadLength)
+        writeU32(bytes, OFFSET_PAYLOAD_CRC32, payloadCrc32)
+        writeU16(bytes, OFFSET_HEADER_CRC, Crc16.ccittFalse(bytes, 0, OFFSET_HEADER_CRC))
         return bytes
     }
 
@@ -109,56 +109,77 @@ class FirmwareHeader(
         private const val MAGIC_0: Byte = 0x56
         private const val MAGIC_1: Byte = 0x46
 
+        private const val OFFSET_MAGIC_0 = 0
+        private const val OFFSET_MAGIC_1 = 1
+        private const val OFFSET_FORMAT_VERSION = 2
+        private const val OFFSET_FLAGS = 3
+        private const val OFFSET_VERSION_MAJOR = 4
+        private const val OFFSET_VERSION_MINOR = 6
+        private const val OFFSET_VERSION_PATCH = 8
+        private const val OFFSET_VERSION_BUILD = 10
+        private const val OFFSET_CHANNEL_LENGTH = 12
+        private const val OFFSET_CHANNEL = 13
+        private const val OFFSET_MODEL_COUNT = 29
+        private const val OFFSET_MODELS = 30
+        private const val OFFSET_PAYLOAD_LENGTH = 94
+        private const val OFFSET_PAYLOAD_CRC32 = 98
+        private const val OFFSET_HEADER_CRC = 102
+        private const val BYTE_MASK = 0xFF
+        private const val BYTE_MASK_LONG: Long = 0xFFL
+        private const val U16_MAX = 0xFFFF
+        private const val U32_MAX = 0xFFFFFFFFL
+        private const val SHIFT_24_BITS = 24
+
         /** 解析 104 字节文件头；字段非法、魔数不符、CRC 失败等都会抛出 [FirmwareException]。 */
         fun decode(bytes: ByteArray): FirmwareHeader {
             if (bytes.size < SIZE) throw FirmwareException.Truncated(SIZE.toLong(), bytes.size.toLong())
 
-            if (bytes[0] != MAGIC_0 || bytes[1] != MAGIC_1) {
+            if (bytes[OFFSET_MAGIC_0] != MAGIC_0 || bytes[OFFSET_MAGIC_1] != MAGIC_1) {
                 throw FirmwareException.InvalidMagic(
-                    "0x${hex(bytes[0])} 0x${hex(bytes[1])}",
+                    "0x${hex(bytes[OFFSET_MAGIC_0])} 0x${hex(bytes[OFFSET_MAGIC_1])}",
                 )
             }
 
-            val formatVersion = bytes[2].toInt() and 0xFF
+            val formatVersion = bytes[OFFSET_FORMAT_VERSION].toInt() and BYTE_MASK
             if (formatVersion != FORMAT_VERSION) throw FirmwareException.UnsupportedFormat(formatVersion)
 
-            val flags = bytes[3].toInt() and 0xFF
-            if ((flags and SIGNATURE_FLAG.inv() and 0xFF) != 0) throw FirmwareException.UnsupportedFlags(flags)
+            val flags = bytes[OFFSET_FLAGS].toInt() and BYTE_MASK
+            if ((flags and SIGNATURE_FLAG.inv() and BYTE_MASK) != 0) throw FirmwareException.UnsupportedFlags(flags)
             val hasSignature = (flags and SIGNATURE_FLAG) != 0
 
-            val expectedHeaderCrc = readU16(bytes, 102)
-            val actualHeaderCrc = Crc16.ccittFalse(bytes, 0, 102)
+            val expectedHeaderCrc = readU16(bytes, OFFSET_HEADER_CRC)
+            val actualHeaderCrc = Crc16.ccittFalse(bytes, 0, OFFSET_HEADER_CRC)
             if (expectedHeaderCrc != actualHeaderCrc) {
                 throw FirmwareException.HeaderChecksumMismatch(expectedHeaderCrc, actualHeaderCrc)
             }
 
-            val major = readU16(bytes, 4)
-            val minor = readU16(bytes, 6)
-            val patch = readU16(bytes, 8)
-            val build = readU16(bytes, 10)
-            if (major > 0xFF) throw FirmwareException.InvalidHeaderField("major", "超出 0..255: $major")
-            if (minor > 0xFF) throw FirmwareException.InvalidHeaderField("minor", "超出 0..255: $minor")
-            if (patch > 0xFF) throw FirmwareException.InvalidHeaderField("patch", "超出 0..255: $patch")
+            val major = readU16(bytes, OFFSET_VERSION_MAJOR)
+            val minor = readU16(bytes, OFFSET_VERSION_MINOR)
+            val patch = readU16(bytes, OFFSET_VERSION_PATCH)
+            val build = readU16(bytes, OFFSET_VERSION_BUILD)
+            if (major > BYTE_MASK) throw FirmwareException.InvalidHeaderField("major", "超出 0..255: $major")
+            if (minor > BYTE_MASK) throw FirmwareException.InvalidHeaderField("minor", "超出 0..255: $minor")
+            if (patch > BYTE_MASK) throw FirmwareException.InvalidHeaderField("patch", "超出 0..255: $patch")
 
-            val channelLength = bytes[12].toInt() and 0xFF
+            val channelLength = bytes[OFFSET_CHANNEL_LENGTH].toInt() and BYTE_MASK
             if (channelLength > CHANNEL_FIELD_SIZE) {
                 throw FirmwareException.InvalidHeaderField("channelLength", "超出 0..$CHANNEL_FIELD_SIZE: $channelLength")
             }
             val channel =
-                readFixedString(bytes, 13, CHANNEL_FIELD_SIZE, channelLength) { char ->
+                readFixedString(bytes, OFFSET_CHANNEL, CHANNEL_FIELD_SIZE, channelLength) { char ->
                     isSafeChar(char, allowWildcard = false)
                 }
-            if (hasNonZeroTail(bytes, 13 + channelLength, 13 + CHANNEL_FIELD_SIZE)) {
+            if (hasNonZeroTail(bytes, OFFSET_CHANNEL + channelLength, OFFSET_CHANNEL + CHANNEL_FIELD_SIZE)) {
                 throw FirmwareException.InvalidHeaderField("channel", "长度之外的填充字节非零")
             }
 
-            val modelCount = bytes[29].toInt() and 0xFF
+            val modelCount = bytes[OFFSET_MODEL_COUNT].toInt() and BYTE_MASK
             if (modelCount !in 1..MAX_MODELS) {
                 throw FirmwareException.InvalidHeaderField("modelCount", "超出 1..$MAX_MODELS: $modelCount")
             }
             val models = mutableListOf<String>()
             repeat(MAX_MODELS) { index ->
-                val fieldStart = 30 + index * MODEL_FIELD_SIZE
+                val fieldStart = OFFSET_MODELS + index * MODEL_FIELD_SIZE
                 if (index < modelCount) {
                     val length =
                         firstZeroIndex(bytes, fieldStart, fieldStart + MODEL_FIELD_SIZE)
@@ -179,11 +200,11 @@ class FirmwareHeader(
                 }
             }
 
-            val payloadLength = readU32(bytes, 94)
+            val payloadLength = readU32(bytes, OFFSET_PAYLOAD_LENGTH)
             if (payloadLength == 0L) {
                 throw FirmwareException.InvalidHeaderField("payloadLength", "必须大于 0")
             }
-            val payloadCrc32 = readU32(bytes, 98)
+            val payloadCrc32 = readU32(bytes, OFFSET_PAYLOAD_CRC32)
 
             return FirmwareHeader(
                 firmwareVersion = FirmwareVersion(major, minor, patch, build, channel),
@@ -204,7 +225,7 @@ class FirmwareHeader(
             val end = start + length
             val builder = StringBuilder(length)
             for (index in start until end) {
-                val value = bytes[index].toInt() and 0xFF
+                val value = bytes[index].toInt() and BYTE_MASK
                 if (value == 0) throw FirmwareException.InvalidHeaderField("string", "字段内出现提前的 0 字节")
                 val char = value.toChar()
                 if (!isValid(char)) throw FirmwareException.InvalidHeaderField("string", "包含非法字符: '$char'")
@@ -262,9 +283,9 @@ class FirmwareHeader(
             offset: Int,
             value: Int,
         ) {
-            require(value in 0..0xFFFF) { "u16 超出范围: $value" }
-            bytes[offset] = (value and 0xFF).toByte()
-            bytes[offset + 1] = ((value shr 8) and 0xFF).toByte()
+            require(value in 0..U16_MAX) { "u16 超出范围: $value" }
+            bytes[offset] = (value and BYTE_MASK).toByte()
+            bytes[offset + 1] = ((value shr 8) and BYTE_MASK).toByte()
         }
 
         private fun writeU32(
@@ -272,17 +293,17 @@ class FirmwareHeader(
             offset: Int,
             value: Long,
         ) {
-            require(value in 0..0xFFFFFFFFL) { "u32 超出范围: $value" }
-            bytes[offset] = (value and 0xFF).toByte()
-            bytes[offset + 1] = ((value shr 8) and 0xFF).toByte()
-            bytes[offset + 2] = ((value shr 16) and 0xFF).toByte()
-            bytes[offset + 3] = ((value shr 24) and 0xFF).toByte()
+            require(value in 0..U32_MAX) { "u32 超出范围: $value" }
+            bytes[offset] = (value and BYTE_MASK_LONG).toByte()
+            bytes[offset + 1] = ((value shr 8) and BYTE_MASK_LONG).toByte()
+            bytes[offset + 2] = ((value shr 16) and BYTE_MASK_LONG).toByte()
+            bytes[offset + 3] = ((value shr SHIFT_24_BITS) and BYTE_MASK_LONG).toByte()
         }
 
         private fun readU16(
             bytes: ByteArray,
             offset: Int,
-        ): Int = (bytes[offset].toInt() and 0xFF) or ((bytes[offset + 1].toInt() and 0xFF) shl 8)
+        ): Int = (bytes[offset].toInt() and BYTE_MASK) or ((bytes[offset + 1].toInt() and BYTE_MASK) shl 8)
 
         private fun readU32(
             bytes: ByteArray,
@@ -293,6 +314,6 @@ class FirmwareHeader(
             return low or (high shl 16)
         }
 
-        private fun hex(value: Byte): String = (value.toInt() and 0xFF).toString(16).padStart(2, '0')
+        private fun hex(value: Byte): String = (value.toInt() and BYTE_MASK).toString(16).padStart(2, '0')
     }
 }

@@ -1,5 +1,7 @@
 package com.valhalla.core.protocol
 
+private const val PAYLOAD_LENGTH_OFFSET = 7
+
 /**
  * 增量帧解析器，适配 BLE 通知分包/粘包场景。
  *
@@ -40,7 +42,7 @@ class FrameParser(
             }
             if (buffer.size < FrameCodec.HEADER_SIZE) break
 
-            val payloadLength = FrameCodec.readUInt16(buffer, 7)
+            val payloadLength = FrameCodec.readUInt16(buffer, PAYLOAD_LENGTH_OFFSET)
             if (payloadLength > maxPayloadSize) {
                 // 长度字段不可信，丢弃当前 SOF 后重新同步
                 buffer = buffer.copyOfRange(1, buffer.size)

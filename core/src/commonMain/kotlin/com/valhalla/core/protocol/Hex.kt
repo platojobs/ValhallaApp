@@ -1,5 +1,7 @@
 package com.valhalla.core.protocol
 
+private const val UINT8_MAX = 0xFF
+
 /** 十六进制编解码工具，用于日志与报文调试。 */
 object Hex {
     private const val HEX_DIGITS = "0123456789ABCDEF"
@@ -14,7 +16,7 @@ object Hex {
         return buildString(bytes.size * 3) {
             bytes.forEachIndexed { index, byte ->
                 if (index > 0 && separator.isNotEmpty()) append(separator)
-                val value = byte.toInt() and 0xFF
+                val value = byte.toInt() and UINT8_MAX
                 append(digits[value shr 4])
                 append(digits[value and 0x0F])
             }

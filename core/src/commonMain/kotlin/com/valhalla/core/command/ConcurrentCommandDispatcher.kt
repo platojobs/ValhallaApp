@@ -94,7 +94,8 @@ class ConcurrentCommandDispatcher(
             try {
                 MessageCodec.decodeResponse(request, frame)
             } catch (error: MessageDecodeException) {
-                throw CommandFailure.InvalidResponse(error.message ?: "payload 解析失败")
+                val reason = error.message ?: "payload 解析失败"
+                throw CommandFailure.InvalidResponse(reason, error)
             }
         if (!response.isSuccess) {
             throw CommandFailure.DeviceRejected(

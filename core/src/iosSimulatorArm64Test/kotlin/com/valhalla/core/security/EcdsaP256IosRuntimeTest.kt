@@ -7,6 +7,8 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
+private const val DER_SIGNATURE_BYTES = 64
+
 /**
  * iOS 模拟器运行时（Kotlin/Native）验签测试。
  *
@@ -70,7 +72,7 @@ class EcdsaP256IosRuntimeTest {
         val verifier = EcdsaP256Verifier.fromPem(EcdsaTestVectors.PUBLIC_KEY_PEM)
         val vector = EcdsaTestVectors.VECTOR_1
         val raw = EcdsaSignatureCodec.derToRaw(vector.signature())
-        assertEquals(64, raw.size)
+        assertEquals(DER_SIGNATURE_BYTES, raw.size)
         val restored = EcdsaSignatureCodec.rawToDer(raw)
         assertTrue(verifier.verify(vector.digest(), restored))
         assertContentEquals(raw, EcdsaSignatureCodec.derToRaw(restored))

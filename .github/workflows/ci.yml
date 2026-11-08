@@ -75,7 +75,7 @@ jobs:
           distribution: temurin
           java-version: "21"
       - uses: gradle/actions/setup-gradle@v4
-      - name: 生成报告并校验阈值（core≥75 / data≥55 / feature≥60）
+      - name: 生成报告并校验阈值（core≥90 / data≥80 / feature≥80）
         run: |
           ./gradlew \
             :core:koverXmlReportJvm :core:koverHtmlReportJvm :core:koverVerifyJvm \

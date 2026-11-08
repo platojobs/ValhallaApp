@@ -1,411 +1,169 @@
-# 静态分析基线说明（v3.0.0）
+# 静态分析基线说明（v3.1.0）
 
 本文件由各模块 `detekt-baseline.xml` 生成，逐条列明当前保留的 detekt 问题与保留原因。
-基线只用于**存量**问题：新增代码命中同一规则会直接失败，不做全局关闭或全量 `@Suppress`。
+基线只用于**存量**问题：新增代码命中同一规则会直接失败，不做全局关闭、全量 `@Suppress` 或目录排除。
 
-首次全量分析共 406 条；本轮实修 15 条（异常抛法规范化、返回数收敛、长行拆分等）；
-基线剩余 391 条：core 266、data 10、feature 115、composeApp 0。
+## 总量变化
 
-## core（266 条）
+| 模块 | v3.0.0 | v3.1.0 | 变化 |
+|---|---|---|---|
+| core | 266 | 30 | -236 |
+| data | 10 | 5 | -5 |
+| feature | 115 | 60 | -55 |
+| composeApp | 0 | 0 | 0 |
+| **合计** | **391** | **95** | **-296** |
 
-- `ComplexCondition` — `UsageStatistics.kt$UsageStatisticsCalculator$ended <= nowMillis && (start == null || started >= start) && ended >= started` — 复杂布尔条件直接对应业务判定，抽中间变量会掩盖原始语义。
-- `CyclomaticComplexMethod` — `ConnectionQualityStats.kt$ConnectionQualityAnalyzer$fun analyze( entries: List<PacketLogEntry>, recentFailureLimit: Int = 5, minSamples: Int = MIN_SAMPLES, ): ConnectionQualityStats` — 分支密集的解析/状态判定函数；拆分需引入额外中间类型，暂列入后续重构。
-- `CyclomaticComplexMethod` — `DeviceStateMachine.kt$DeviceStateMachine$private fun resolve( current: DeviceState, event: DeviceEvent, ): DeviceState?` — 分支密集的解析/状态判定函数；拆分需引入额外中间类型，暂列入后续重构。
-- `CyclomaticComplexMethod` — `FirmwareHeader.kt$FirmwareHeader.Companion$fun decode(bytes: ByteArray): FirmwareHeader` — 分支密集的解析/状态判定函数；拆分需引入额外中间类型，暂列入后续重构。
-- `CyclomaticComplexMethod` — `MessageCodec.kt$MessageCodec$fun decodeRequest( command: CommandType, payload: ByteArray, ): DeviceRequest` — 分支密集的解析/状态判定函数；拆分需引入额外中间类型，暂列入后续重构。
-- `CyclomaticComplexMethod` — `MessageCodec.kt$MessageCodec$fun decodeResponse( command: CommandType, payload: ByteArray, ): DeviceResponse` — 分支密集的解析/状态判定函数；拆分需引入额外中间类型，暂列入后续重构。
-- `CyclomaticComplexMethod` — `PacketLogExport.kt$PacketLogExporter$private suspend fun compute( entries: List<PacketLogEntry>, filter: PacketLogFilter, nowMillis: Long, zoneOffsetMinutes: Int, format: PacketLogExportFormat, options: PacketLogExportOptions, onProgress: (PacketLogExportProgress) -> Unit, assembleOutput: Boolean, ): Computed` — 分支密集的解析/状态判定函数；拆分需引入额外中间类型，暂列入后续重构。
-- `CyclomaticComplexMethod` — `PacketLogExport.kt$fun parseLocalDateTimeMillis( input: String, zoneOffsetMinutes: Int, ): Long?` — 分支密集的解析/状态判定函数；拆分需引入额外中间类型，暂列入后续重构。
-- `ExplicitGarbageCollectionCall` — `PacketLogExportBenchmark.kt$gc()` — 性能基准中显式触发 GC，保证多次测量起点一致。
-- `LongMethod` — `ConnectionQualityStats.kt$ConnectionQualityAnalyzer$fun analyze( entries: List<PacketLogEntry>, recentFailureLimit: Int = 5, minSamples: Int = MIN_SAMPLES, ): ConnectionQualityStats` — 长流程/大函数按步骤顺序表达；拆分需引入中间状态对象，暂列入后续重构。
-- `LoopWithTooManyJumpStatements` — `FrameParser.kt$FrameParser$while` — 帧解析/索引循环需要提前退出与跳过分支，改写为状态机会更晦涩。
-- `LoopWithTooManyJumpStatements` — `PacketLogIndex.kt$PacketLogIndex$for` — 帧解析/索引循环需要提前退出与跳过分支，改写为状态机会更晦涩。
-- `MagicNumber` — `AuthSigner.kt$AuthSignatureMessage$0xFF` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `AuthSigner.kt$AuthSignatureMessage$0xFFFF` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `AutomationRule.kt$AutomationRuleCodec$0x30` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `AutomationRule.kt$AutomationRuleCodec$0x39` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `AutomationRule.kt$AutomationRuleCodec$0x41` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `AutomationRule.kt$AutomationRuleCodec$0x5A` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `AutomationRule.kt$AutomationRuleCodec$0x61` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `AutomationRule.kt$AutomationRuleCodec$0x7A` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `AutomationRule.kt$AutomationRuleCodec$0x7E` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `AutomationRule.kt$AutomationRuleCodec$0xFF` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `AutomationRule.kt$AutomationRuleCodec$5` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `AutomationRule.kt$AutomationRuleCodec$6` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `CommandType.kt$CommandType.ABORT_OTA$0x13` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `CommandType.kt$CommandType.DEVICE_STATUS_NOTIFY$0x42` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `CommandType.kt$CommandType.FACTORY_RESET$0x0B` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `CommandType.kt$CommandType.FINISH_OTA$0x12` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `CommandType.kt$CommandType.GET_BATTERY$0x05` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `CommandType.kt$CommandType.GET_FIRMWARE_VERSION$0x06` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `CommandType.kt$CommandType.GET_PARAM$0x0A` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `CommandType.kt$CommandType.HEARTBEAT$0x40` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `CommandType.kt$CommandType.HEARTBEAT_REPLY$0x41` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `CommandType.kt$CommandType.LOG_DUMP$0x30` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `CommandType.kt$CommandType.OTA_DATA$0x11` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `CommandType.kt$CommandType.OTA_PROGRESS_NOTIFY$0x43` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `CommandType.kt$CommandType.REBOOT$0x20` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `CommandType.kt$CommandType.SET_PARAM$0x09` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `CommandType.kt$CommandType.SET_TIME$0x07` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `CommandType.kt$CommandType.UNKNOWN$0x7F` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `ConfigCatalog.kt$ConfigCatalog$0xFF` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `ConfigMessages.kt$GetParamRequest$0xFFFF` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `ConfigMessages.kt$SetParamRequest$0xFFFF` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `ConfigPreset.kt$ConfigPresetCodec$0x30` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `ConfigPreset.kt$ConfigPresetCodec$0x39` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `ConfigPreset.kt$ConfigPresetCodec$0x41` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `ConfigPreset.kt$ConfigPresetCodec$0x5A` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `ConfigPreset.kt$ConfigPresetCodec$0x61` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `ConfigPreset.kt$ConfigPresetCodec$0x7A` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `ConfigPreset.kt$ConfigPresetCodec$0x7E` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `ConfigPreset.kt$ConfigPresetCodec$0xFF` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `Crc16.kt$Crc16$0x8000` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `Crc16.kt$Crc16$0xFF` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `Crc16.kt$Crc16$0xFFFF` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `Crc32.kt$Crc32$0xFF` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `Crc32.kt$Crc32$0xFFFFFFFFL` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `DeviceEventTimeline.kt$DeviceEventCodec$0x30` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `DeviceEventTimeline.kt$DeviceEventCodec$0x39` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `DeviceEventTimeline.kt$DeviceEventCodec$0x41` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `DeviceEventTimeline.kt$DeviceEventCodec$0x5A` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `DeviceEventTimeline.kt$DeviceEventCodec$0x61` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `DeviceEventTimeline.kt$DeviceEventCodec$0x7A` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `DeviceEventTimeline.kt$DeviceEventCodec$0x7E` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `DeviceEventTimeline.kt$DeviceEventCodec$0xFF` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `DeviceEventTimeline.kt$DeviceEventCodec$5` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `DeviceEventTimeline.kt$DeviceEventCodec$6` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `DeviceEventTimeline.kt$DeviceEventCodec$7` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `DeviceInfoMessages.kt$BatteryResponse$0xFFFF` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `DeviceInfoMessages.kt$FirmwareVersion$0xFF` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `DeviceInfoMessages.kt$FirmwareVersion$0xFFFF` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `DeviceInfoMessages.kt$SetTimeRequest$0xFFFFFFFFL` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `DeviceInfoMessages.kt$SetTimeRequest$720` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `DeviceInfoMessages.kt$SetTimeRequest$840` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `DeviceMetricSamples.kt$DeviceMetricSample$127` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `DeviceMetricSamples.kt$DeviceMetricSample$20` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `DeviceProfile.kt$DeviceProfileCodec$0x30` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `DeviceProfile.kt$DeviceProfileCodec$0x39` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `DeviceProfile.kt$DeviceProfileCodec$0x41` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `DeviceProfile.kt$DeviceProfileCodec$0x5A` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `DeviceProfile.kt$DeviceProfileCodec$0x61` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `DeviceProfile.kt$DeviceProfileCodec$0x7A` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `DeviceProfile.kt$DeviceProfileCodec$0x7E` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `DeviceProfile.kt$DeviceProfileCodec$0xFF` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `DeviceProfile.kt$DeviceProfileCodec$5` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `DeviceProfile.kt$DeviceProfileCodec$6` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `DeviceProfile.kt$DeviceProfileCodec$7` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `DeviceStatus.kt$DeviceStatus.AUTH_FAILED$0x05` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `DeviceStatus.kt$DeviceStatus.BUSY$0x07` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `DeviceStatus.kt$DeviceStatus.CHALLENGE_EXPIRED$0x06` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `DeviceStatus.kt$DeviceStatus.CRC_MISMATCH$0x0E` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `DeviceStatus.kt$DeviceStatus.NOT_READY$0x09` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `DeviceStatus.kt$DeviceStatus.OTA_FIRMWARE_MISMATCH$0x13` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `DeviceStatus.kt$DeviceStatus.OTA_RESUME_CONTEXT_INVALID$0x12` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `DeviceStatus.kt$DeviceStatus.OTA_RESUME_OFFSET_INVALID$0x11` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `DeviceStatus.kt$DeviceStatus.OTA_VERIFY_FAILED$0x0C` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `DeviceStatus.kt$DeviceStatus.OUT_OF_RANGE$0x0A` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `DeviceStatus.kt$DeviceStatus.STORAGE_FULL$0x0B` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `DeviceStatus.kt$DeviceStatus.UNKNOWN_ERROR$0x7F` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `EcdsaP256.android.kt$256` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `EcdsaP256.jvm.kt$256` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `EcdsaP256.kt$EcdsaP256Verifier$32` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `EcdsaP256.kt$EcdsaPublicKeyEncoding$0x30` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `EcdsaP256.kt$EcdsaPublicKeyEncoding$0x7F` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `EcdsaP256.kt$EcdsaPublicKeyEncoding$0x80` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `EcdsaP256.kt$EcdsaPublicKeyEncoding$0xFF` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `EcdsaP256.kt$EcdsaSignatureCodec$0x100` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `EcdsaP256.kt$EcdsaSignatureCodec$0x7F` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `EcdsaP256.kt$EcdsaSignatureCodec$0x80` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `EcdsaP256.kt$EcdsaSignatureCodec$0xFF` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `EcdsaP256IosRuntimeTest.kt$EcdsaP256IosRuntimeTest$64` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `FirmwareApplicability.kt$FirmwareApplicabilityEvaluator$5` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `FirmwareHeader.kt$FirmwareHeader$0xFFFFFFFFL` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `FirmwareHeader.kt$FirmwareHeader$10` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `FirmwareHeader.kt$FirmwareHeader$102` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `FirmwareHeader.kt$FirmwareHeader$12` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `FirmwareHeader.kt$FirmwareHeader$29` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `FirmwareHeader.kt$FirmwareHeader$6` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `FirmwareHeader.kt$FirmwareHeader$94` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `FirmwareHeader.kt$FirmwareHeader$98` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `FirmwareHeader.kt$FirmwareHeader.Companion$0xFF` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `FirmwareHeader.kt$FirmwareHeader.Companion$0xFFFF` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `FirmwareHeader.kt$FirmwareHeader.Companion$0xFFFFFFFFL` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `FirmwareHeader.kt$FirmwareHeader.Companion$10` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `FirmwareHeader.kt$FirmwareHeader.Companion$102` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `FirmwareHeader.kt$FirmwareHeader.Companion$12` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `FirmwareHeader.kt$FirmwareHeader.Companion$13` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `FirmwareHeader.kt$FirmwareHeader.Companion$24` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `FirmwareHeader.kt$FirmwareHeader.Companion$29` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `FirmwareHeader.kt$FirmwareHeader.Companion$30` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `FirmwareHeader.kt$FirmwareHeader.Companion$6` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `FirmwareHeader.kt$FirmwareHeader.Companion$94` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `FirmwareHeader.kt$FirmwareHeader.Companion$98` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `FirmwareLibrary.kt$FirmwareLibraryCodec$0x30` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `FirmwareLibrary.kt$FirmwareLibraryCodec$0x39` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `FirmwareLibrary.kt$FirmwareLibraryCodec$0x41` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `FirmwareLibrary.kt$FirmwareLibraryCodec$0x5A` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `FirmwareLibrary.kt$FirmwareLibraryCodec$0x61` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `FirmwareLibrary.kt$FirmwareLibraryCodec$0x7A` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `FirmwareLibrary.kt$FirmwareLibraryCodec$0x7E` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `FirmwareLibrary.kt$FirmwareLibraryCodec$0xFF` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `FirmwareLibrary.kt$FirmwareLibraryCodec$10` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `FirmwareLibrary.kt$FirmwareLibraryCodec$11` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `FirmwareLibrary.kt$FirmwareLibraryCodec$12` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `FirmwareLibrary.kt$FirmwareLibraryCodec$13` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `FirmwareLibrary.kt$FirmwareLibraryCodec$14` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `FirmwareLibrary.kt$FirmwareLibraryCodec$5` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `FirmwareLibrary.kt$FirmwareLibraryCodec$6` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `FirmwareLibrary.kt$FirmwareLibraryCodec$7` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `FirmwareLibrary.kt$FirmwareLibraryCodec$9` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `FirmwareLibrary.kt$FirmwareLibraryRecord$0xFFFFFFFFL` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `FirmwareSignature.kt$FirmwareSignature$0xFF` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `FirmwareSignature.kt$FirmwareSignature$0xFFFF` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `FirmwareSignature.kt$FirmwareSignature.Companion$0xFF` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `FrameCodec.kt$FrameCodec$0xFF` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `FrameCodec.kt$FrameCodec$5` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `FrameCodec.kt$FrameCodec$7` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `FrameParser.kt$FrameParser$7` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `Hex.kt$Hex$0xFF` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `OtaMessages.kt$FinishOtaRequest$0xFFFF` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `OtaMessages.kt$FinishOtaRequest$0xFFFFFFFFL` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `OtaMessages.kt$OtaDataRequest$0xFFFFFFFFL` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `OtaMessages.kt$OtaDataResponse$0xFFFFFFFFL` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `OtaMessages.kt$OtaProgressNotification$0xFFFFFFFFL` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `OtaMessages.kt$StartOtaRequest$0xFFFF` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `OtaMessages.kt$StartOtaRequest$0xFFFFFFFFL` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `OtaMessages.kt$StartOtaRequest.Companion$0xFF` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `OtaMessages.kt$StartOtaResponse$0xFFFF` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `OtaMessages.kt$StartOtaResponse$0xFFFFFFFFL` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `OtaResumePoint.kt$OtaResumePoint$0xFFFF` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `OtaResumePoint.kt$OtaResumePoint$0xFFFFFFFFL` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `OtaResumePoint.kt$OtaResumePointCodec$5` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `OtaResumePoint.kt$OtaResumePointCodec$6` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `OtaResumePoint.kt$OtaResumePointCodec$7` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `PacketLog.kt$3_600_000L` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `PacketLog.kt$60` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `PacketLog.kt$60_000L` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `PacketLog.kt$86_400_000L` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `PacketLogExport.kt$0x20` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `PacketLogExport.kt$1024` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `PacketLogExport.kt$10L` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `PacketLogExport.kt$12` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `PacketLogExport.kt$146_096L` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `PacketLogExport.kt$146_097L` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `PacketLogExport.kt$153L` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `PacketLogExport.kt$1_000L` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `PacketLogExport.kt$1_460L` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `PacketLogExport.kt$23` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `PacketLogExport.kt$31` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `PacketLogExport.kt$365L` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `PacketLogExport.kt$36_524L` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `PacketLogExport.kt$399` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `PacketLogExport.kt$3_600` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `PacketLogExport.kt$3_600_000L` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `PacketLogExport.kt$400` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `PacketLogExport.kt$400L` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `PacketLogExport.kt$59` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `PacketLogExport.kt$5L` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `PacketLogExport.kt$60` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `PacketLogExport.kt$60_000L` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `PacketLogExport.kt$719_468L` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `PacketLogExport.kt$9` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `PacketLogExport.kt$9L` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `PacketLogExport.kt$PacketLogExportOptions$1024` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `PacketLogExport.kt$PacketLogExportOptions$512` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `PacketLogExport.kt$PacketLogExporter$64` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `PacketLogRedaction.kt$PacketLogRedaction$0xFF` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `ParamCatalog.kt$ParamCatalog$0xFF` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `ParamCatalog.kt$ParamCatalog$24` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `ParamCatalog.kt$ParamSpec$0xFFFF` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `PayloadCodec.kt$PayloadReader$0x1_0000` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `PayloadCodec.kt$PayloadReader$0x8000` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `PayloadCodec.kt$PayloadReader$0xFF` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `PayloadCodec.kt$PayloadWriter$0x7FFF` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `PayloadCodec.kt$PayloadWriter$0xFF` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `PayloadCodec.kt$PayloadWriter$0xFFFF` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `PayloadCodec.kt$PayloadWriter$0xFFFFFFFFL` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `SensitiveTextRedaction.kt$SensitiveTextRedaction$5` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `Sha256.kt$Sha256Digest$0xFF` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `Sha256.kt$Sha256Digest$10` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `Sha256.kt$Sha256Digest$11` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `Sha256.kt$Sha256Digest$120L` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `Sha256.kt$Sha256Digest$13` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `Sha256.kt$Sha256Digest$15` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `Sha256.kt$Sha256Digest$17` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `Sha256.kt$Sha256Digest$18` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `Sha256.kt$Sha256Digest$19` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `Sha256.kt$Sha256Digest$22` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `Sha256.kt$Sha256Digest$24` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `Sha256.kt$Sha256Digest$25` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `Sha256.kt$Sha256Digest$32` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `Sha256.kt$Sha256Digest$5` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `Sha256.kt$Sha256Digest$56L` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `Sha256.kt$Sha256Digest$6` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `Sha256.kt$Sha256Digest$64` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `Sha256.kt$Sha256Digest$7` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `SystemMessages.kt$DeviceStatusNotification$0xFFFF` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `SystemMessages.kt$DeviceStatusNotification.Companion$0x05` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `SystemMessages.kt$DeviceStatusNotification.Companion$0x06` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `SystemMessages.kt$HeartbeatReplyNotification$0xFFFFFFFFL` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `SystemMessages.kt$HeartbeatRequest$0xFFFFFFFFL` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `SystemMessages.kt$LogDumpRequest$0xFFFF` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `SystemMessages.kt$LogDumpRequest$0xFFFFFFFFL` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `SystemMessages.kt$RebootRequest$0xFF` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `SystemMessages.kt$RebootRequest$0xFFFF` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `UsageStatistics.kt$UsageRange$30` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `UsageStatistics.kt$UsageRange$7` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `ReturnCount` — `EcdsaP256.kt$EcdsaPublicKeyEncoding$fun extractP256PointFromSpki(spki: ByteArray): ByteArray?` — 解码函数对每种非法输入提前返回并给出精确原因。
-- `ReturnCount` — `FirmwareLibrary.kt$FirmwareLibraryCodec$private fun parse( parts: List<String>, legacy: Boolean, ): FirmwareLibraryRecord?` — 解码函数对每种非法输入提前返回并给出精确原因。
-- `ReturnCount` — `PacketLogExport.kt$fun parseLocalDateTimeMillis( input: String, zoneOffsetMinutes: Int, ): Long?` — 解码函数对每种非法输入提前返回并给出精确原因。
-- `SwallowedException` — `ConcurrentCommandDispatcher.kt$ConcurrentCommandDispatcher$error: MessageDecodeException` — 迁移/清理路径有意忽略异常，并通过迁移状态或提示向上暴露结果。
-- `ThrowsCount` — `EcdsaP256.kt$EcdsaP256Verifier.Companion$fun fromPem(pem: String): EcdsaP256Verifier` — 解析函数对各类非法输入抛出不同错误码，便于定位。
-- `ThrowsCount` — `EcdsaP256.kt$EcdsaSignatureCodec$private fun parseDer(signature: ByteArray): Pair<ByteArray, ByteArray>` — 解析函数对各类非法输入抛出不同错误码，便于定位。
-- `ThrowsCount` — `EcdsaP256.kt$EcdsaSignatureCodec$private fun readInteger( bytes: ByteArray, offset: Int, limit: Int, ): Pair<ByteArray, Int>` — 解析函数对各类非法输入抛出不同错误码，便于定位。
-- `ThrowsCount` — `EcdsaP256.kt$EcdsaSignatureCodec$private fun readLength( bytes: ByteArray, offset: Int, ): Pair<Int, Int>` — 解析函数对各类非法输入抛出不同错误码，便于定位。
-- `ThrowsCount` — `FirmwareHeader.kt$FirmwareHeader.Companion$fun decode(bytes: ByteArray): FirmwareHeader` — 解析函数对各类非法输入抛出不同错误码，便于定位。
-- `ThrowsCount` — `FirmwarePackage.kt$FirmwareParser$suspend fun parse( name: String, source: FirmwareSource, ): FirmwarePackage` — 解析函数对各类非法输入抛出不同错误码，便于定位。
-- `ThrowsCount` — `FirmwareSignature.kt$FirmwareSignature.Companion$fun decode( bytes: ByteArray, offset: Int, ): FirmwareSignature` — 解析函数对各类非法输入抛出不同错误码，便于定位。
-- `ThrowsCount` — `FrameCodec.kt$FrameCodec$fun decode(bytes: ByteArray): Frame` — 解析函数对各类非法输入抛出不同错误码，便于定位。
-- `ThrowsCount` — `MessageCodec.kt$MessageCodec$fun decodeNotification(frame: Frame): DeviceNotification` — 解析函数对各类非法输入抛出不同错误码，便于定位。
-- `ThrowsCount` — `MessageCodec.kt$MessageCodec$fun decodeRequest( command: CommandType, payload: ByteArray, ): DeviceRequest` — 解析函数对各类非法输入抛出不同错误码，便于定位。
-- `ThrowsCount` — `OtaMessages.kt$StartOtaRequest.Companion$fun decode(reader: PayloadReader): StartOtaRequest` — 解析函数对各类非法输入抛出不同错误码，便于定位。
-- `TooGenericExceptionCaught` — `CommandDispatcher.kt$CommandDispatcher$error: Throwable` — 平台边界（文件、JSON、蓝牙、键值存储）统一兜底并转为可见错误，避免崩溃。
-- `TooGenericExceptionCaught` — `ConcurrentCommandDispatcher.kt$ConcurrentCommandDispatcher$error: Throwable` — 平台边界（文件、JSON、蓝牙、键值存储）统一兜底并转为可见错误，避免崩溃。
-- `TooGenericExceptionCaught` — `EcdsaP256.kt$EcdsaP256Verifier$error: Throwable` — 平台边界（文件、JSON、蓝牙、键值存储）统一兜底并转为可见错误，避免崩溃。
-- `TooGenericExceptionCaught` — `EcdsaP256.kt$EcdsaP256Verifier.Companion$error: Throwable` — 平台边界（文件、JSON、蓝牙、键值存储）统一兜底并转为可见错误，避免崩溃。
-- `TooGenericExceptionCaught` — `PacketLog.kt$PacketLogFormatter$error: Throwable` — 平台边界（文件、JSON、蓝牙、键值存储）统一兜底并转为可见错误，避免崩溃。
+本轮全部为真实代码修改，未新增任何规则例外或排除项。按规则统计的修复量：
 
-## data（10 条）
+| 规则 | 修复条数 | 处理方式 |
+|---|---|---|
+| MagicNumber | 260 | 全部提取为具名常量（协议码、位掩码、偏移、时间单位、校验边界）；同值不同义不合并 |
+| MaxLineLength | 18 | `Strings.kt` 英文字符串按原渲染文本换行拼接 |
+| ComplexCondition | 6 | 抽出具名布尔中间量（窗口判定、忙碌状态、备份字段完整性等） |
+| SwallowedException | 1 | `ConcurrentCommandDispatcher` 将捕获异常挂到 `CommandFailure.InvalidResponse.cause` |
+| UnusedParameter | 3 | 删除未使用的 `LocaleFormat`、iOS `CBService`/`CBCharacteristic` 参数并更新调用点 |
+| MatchingDeclarationName | 2 | `BatchDeviceOption` 独立成文件；`FailureInfo` 更名为 `CommandFailureInfo` |
+| InstanceOfCheckForException | 1 | `ErrorReporter` 改为独立 `catch (UserCancelledException)` 分支 |
+| LongMethod | 1 | `DeviceDashboardCard` 拆出 `DeviceDashboardTrend` |
+| CyclomaticComplexMethod | 2 | 抽出具名判定与 `ConfigCapabilityNotice`，降低两处复杂度 |
+| LongParameterList | 2 | `DeviceDashboardCard`、自动化规则行改为参数 data class |
+| **合计修复** | **296** | |
 
-- `MagicNumber` — `TextShare.android.kt$60_000` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `TextShare.ios.kt$60` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `TextShare.jvm.kt$60_000` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `TooGenericExceptionCaught` — `AndroidBleConnection.kt$AndroidBleConnection$error: Throwable` — 平台边界（文件、JSON、蓝牙、键值存储）统一兜底并转为可见错误，避免崩溃。
-- `TooGenericExceptionCaught` — `IosBleClient.kt$IosBleClient$error: Throwable` — 平台边界（文件、JSON、蓝牙、键值存储）统一兜底并转为可见错误，避免崩溃。
-- `TooGenericExceptionCaught` — `IosBleClient.kt$IosBleConnection$error: Throwable` — 平台边界（文件、JSON、蓝牙、键值存储）统一兜底并转为可见错误，避免崩溃。
-- `TooGenericExceptionCaught` — `MultiDeviceConnectionPool.kt$MultiDeviceConnectionPool$error: Throwable` — 平台边界（文件、JSON、蓝牙、键值存储）统一兜底并转为可见错误，避免崩溃。
-- `TooGenericExceptionCaught` — `TextShare.android.kt$AndroidTextSharer$error: Throwable` — 平台边界（文件、JSON、蓝牙、键值存储）统一兜底并转为可见错误，避免崩溃。
-- `UnusedParameter` — `IosBleClient.kt$IosBleConnection$characteristic: CBCharacteristic` — 接口/回调实现为兼容统一签名而保留的参数。
-- `UnusedParameter` — `IosBleClient.kt$IosBleConnection$service: CBService` — 接口/回调实现为兼容统一签名而保留的参数。
+> 四态补齐过程中 `BackupScreen` 等 3 处曾因新增分支触发复杂度阈值，已同轮拆出
+> `BackupPreview`、`QuickActionResult` 等消除；该部分属于「新增即修复」，不计入上表净减。
+> 上表逐项之和与基线 391 → 95 的净减完全一致。
 
-## feature（115 条）
+---
 
-- `ComplexCondition` — `OtaController.kt$OtaController$current !is OtaState.Preparing && current !is OtaState.Transferring && current !is OtaState.Verifying && current !is OtaState.Paused` — 复杂布尔条件直接对应业务判定，抽中间变量会掩盖原始语义。
-- `ComplexCondition` — `PreferencesBackup.kt$PreferencesBackupParser$id.isNullOrBlank() || name.isNullOrBlank() || createdAt == null || lastUsed == null || valuesObject == null` — 复杂布尔条件直接对应业务判定，抽中间变量会掩盖原始语义。
-- `ComplexCondition` — `PreferencesBackup.kt$PreferencesBackupParser$id.isNullOrBlank() || trigger == null || action == null || enabled == null || order == null || order < 0` — 复杂布尔条件直接对应业务判定，抽中间变量会掩盖原始语义。
-- `ComplexCondition` — `ValhallaApp.kt$libraryBusyId != null || running || selectionState.picking || selectionState.prechecking` — 复杂布尔条件直接对应业务判定，抽中间变量会掩盖原始语义。
-- `ComplexCondition` — `ValhallaApp.kt$version != null && path != null && crc != null && firmware != null && selectionState.packageName != null` — 复杂布尔条件直接对应业务判定，抽中间变量会掩盖原始语义。
-- `CyclomaticComplexMethod` — `BatchQueueScreens.kt$@Composable internal fun BatchScreen( devices: List<BatchDeviceOption>, presets: List<ConfigPreset>, controller: BatchOperationController, onBack: () -> Unit, execute: suspend (BatchOperationKind, ConfigPreset?, BatchTarget, (String) -> Unit) -> BatchDeviceOutcome, )` — 分支密集的解析/状态判定函数；拆分需引入额外中间类型，暂列入后续重构。
-- `CyclomaticComplexMethod` — `BatchQueueScreens.kt$@Composable internal fun OtaQueueScreen( devices: List<BatchDeviceOption>, firmwareRecords: List<FirmwareLibraryRecord>, controller: OtaQueueController, onBack: () -> Unit, )` — 分支密集的解析/状态判定函数；拆分需引入额外中间类型，暂列入后续重构。
-- `CyclomaticComplexMethod` — `DeviceHealthCheck.kt$DeviceHealthCheckController$suspend fun run(): HealthCheckResult?` — 分支密集的解析/状态判定函数；拆分需引入额外中间类型，暂列入后续重构。
-- `CyclomaticComplexMethod` — `FeatureScreens.kt$@OptIn(ExperimentalTime::class) @Composable internal fun PresetSection( presets: ConfigPresetRepository, applier: ConfigPresetApplier, config: ConfigEditorController, deviceId: String, events: DeviceEventTimeline, writeLocked: Boolean = false, )` — 分支密集的解析/状态判定函数；拆分需引入额外中间类型，暂列入后续重构。
-- `CyclomaticComplexMethod` — `ValhallaApp.kt$@Composable private fun ConfigFieldRow( field: ConfigFieldState, savingAny: Boolean, onTextChange: (String) -> Unit, onSave: () -> Unit, )` — 分支密集的解析/状态判定函数；拆分需引入额外中间类型，暂列入后续重构。
-- `CyclomaticComplexMethod` — `ValhallaApp.kt$@Composable private fun DeviceDashboardCard( detail: DeviceDetailState, series: DeviceMetricSeries, rssi: Int?, rssiSource: RssiSource, degradedReason: RssiDegradedReason?, legacyMetricsIgnored: Boolean, observedAtMillis: Long, strings: StringResolver, format: LocaleFormat, zoneOffsetMinutes: Int, accent: androidx.compose.ui.graphics.Color, muted: androidx.compose.ui.graphics.Color, )` — 分支密集的解析/状态判定函数；拆分需引入额外中间类型，暂列入后续重构。
-- `CyclomaticComplexMethod` — `ValhallaApp.kt$@Composable private fun DisconnectBanner( info: DisconnectInfo, reconnectState: ReconnectState?, onRetryReconnect: () -> Unit, onCancelReconnect: () -> Unit, onBleAction: (BleGuidanceAction) -> Unit, onBack: () -> Unit, )` — 分支密集的解析/状态判定函数；拆分需引入额外中间类型，暂列入后续重构。
-- `CyclomaticComplexMethod` — `ValhallaApp.kt$@Composable private fun ParamFieldRow( field: ParamFieldState, stateBusy: Boolean, connected: Boolean, onTextChange: (String) -> Unit, onSave: () -> Unit, )` — 分支密集的解析/状态判定函数；拆分需引入额外中间类型，暂列入后续重构。
-- `CyclomaticComplexMethod` — `ValhallaApp.kt$@OptIn(ExperimentalFoundationApi::class) @Composable private fun DetailScreen( session: DeviceSession, settings: AppSettings, metrics: DeviceMetricRepository, presets: ConfigPresetRepository, notificationPresenter: NotificationPresenter, notificationCenter: NotificationCenter, onNotificationFallback: (NotificationEvent) -> Unit, connectedCount: Int, disconnectInfo: DisconnectInfo?, reconnectState: ReconnectState?, onConnectionLost: () -> Unit, onRetryReconnect: () -> Unit, onCancelReconnect: () -> Unit, onBleAction: (BleGuidanceAction) -> Unit, onOpenDevices: () -> Unit, onBack: () -> Unit, onOpenOta: () -> Unit, onOpenLogs: () -> Unit, onOpenDiagnostics: () -> Unit, writeLocked: Boolean, )` — 分支密集的解析/状态判定函数；拆分需引入额外中间类型，暂列入后续重构。
-- `CyclomaticComplexMethod` — `ValhallaApp.kt$@OptIn(ExperimentalTime::class) @Composable private fun DiagnosticScreen( session: DeviceSession, metrics: DeviceMetricRepository, onBack: () -> Unit, )` — 分支密集的解析/状态判定函数；拆分需引入额外中间类型，暂列入后续重构。
-- `CyclomaticComplexMethod` — `ValhallaApp.kt$@OptIn(ExperimentalTime::class) @Composable private fun OtaScreen( session: DeviceSession, library: FirmwareLibraryRepository, settings: AppSettings, notificationPresenter: NotificationPresenter, notificationCenter: NotificationCenter, onNotificationFallback: (NotificationEvent) -> Unit, onBack: () -> Unit, onOtaSucceeded: () -> Unit, writeLocked: Boolean, )` — 分支密集的解析/状态判定函数；拆分需引入额外中间类型，暂列入后续重构。
-- `CyclomaticComplexMethod` — `ValhallaApp.kt$@OptIn(ExperimentalTime::class) @Composable private fun PacketLogScreen( packetLog: InMemoryPacketLog, initialOptions: PacketLogExportOptions, onBack: () -> Unit, )` — 分支密集的解析/状态判定函数；拆分需引入额外中间类型，暂列入后续重构。
-- `CyclomaticComplexMethod` — `ValhallaApp.kt$@OptIn(ExperimentalTime::class) @Composable private fun ValhallaContent( preferences: com.valhalla.feature.theme.AppPreferences, settings: AppSettings, showOnboardingOnLaunch: Boolean, startRoute: String?, onboardingStore: com.valhalla.data.settings.AppSettingsStore, preferencesMigrationStatus: com.valhalla.core.storage.StorageMigrationStatus, onLanguageChange: (AppLanguageMode) -> Unit, onThemeChange: (ThemeMode) -> Unit, onSettingsChange: (AppSettings) -> Unit, onReloadPersisted: () -> Unit, )` — 分支密集的解析/状态判定函数；拆分需引入额外中间类型，暂列入后续重构。
-- `InstanceOfCheckForException` — `ErrorReporter.kt$cancelled is UserCancelledException` — 按异常子类型给出不同错误码，必须做类型判断。
-- `LargeClass` — `DeviceSimulatorE2ETest.kt$DeviceSimulatorE2ETest` — 覆盖完整功能域的仓储/分析类，拆分需跨层重构，当前保持聚合。
-- `LargeClass` — `OtaController.kt$OtaController` — 覆盖完整功能域的仓储/分析类，拆分需跨层重构，当前保持聚合。
-- `LargeClass` — `OtaControllerPackageTest.kt$OtaControllerPackageTest` — 覆盖完整功能域的仓储/分析类，拆分需跨层重构，当前保持聚合。
-- `LargeClass` — `Strings.kt$AppStrings` — 覆盖完整功能域的仓储/分析类，拆分需跨层重构，当前保持聚合。
-- `LongMethod` — `BatchQueueScreens.kt$@Composable internal fun BatchScreen( devices: List<BatchDeviceOption>, presets: List<ConfigPreset>, controller: BatchOperationController, onBack: () -> Unit, execute: suspend (BatchOperationKind, ConfigPreset?, BatchTarget, (String) -> Unit) -> BatchDeviceOutcome, )` — 长流程/大函数按步骤顺序表达；拆分需引入中间状态对象，暂列入后续重构。
-- `LongMethod` — `BatchQueueScreens.kt$@Composable internal fun OtaQueueScreen( devices: List<BatchDeviceOption>, firmwareRecords: List<FirmwareLibraryRecord>, controller: OtaQueueController, onBack: () -> Unit, )` — 长流程/大函数按步骤顺序表达；拆分需引入中间状态对象，暂列入后续重构。
-- `LongMethod` — `FeatureScreens.kt$@OptIn(ExperimentalTime::class) @Composable fun BackupScreen( store: AppSettingsStore, presets: ConfigPresetRepository, rules: AutomationRuleRepository, onReloadPersisted: () -> Unit, onBack: () -> Unit, )` — 长流程/大函数按步骤顺序表达；拆分需引入中间状态对象，暂列入后续重构。
-- `LongMethod` — `FeatureScreens.kt$@OptIn(ExperimentalTime::class) @Composable fun UsageStatsScreen( profileRepository: DeviceProfileRepository, onBack: () -> Unit, )` — 长流程/大函数按步骤顺序表达；拆分需引入中间状态对象，暂列入后续重构。
-- `LongMethod` — `FeatureScreens.kt$@OptIn(ExperimentalTime::class) @Composable internal fun PresetSection( presets: ConfigPresetRepository, applier: ConfigPresetApplier, config: ConfigEditorController, deviceId: String, events: DeviceEventTimeline, writeLocked: Boolean = false, )` — 长流程/大函数按步骤顺序表达；拆分需引入中间状态对象，暂列入后续重构。
-- `LongMethod` — `InfoScreens.kt$@Composable private fun SettingsValuesSection( settings: AppSettings, onSettingsChange: (AppSettings) -> Unit, )` — 长流程/大函数按步骤顺序表达；拆分需引入中间状态对象，暂列入后续重构。
-- `LongMethod` — `OtaController.kt$OtaController$private suspend fun runTransfer( totalBytes: Long, crc16: Int, crc32: Long, version: FirmwareVersion, resumeFrom: OtaResumePoint?, read: suspend (offset: Long, length: Int) -> ByteArray, ): OtaState` — 长流程/大函数按步骤顺序表达；拆分需引入中间状态对象，暂列入后续重构。
-- `LongMethod` — `ValhallaApp.kt$@Composable private fun DeviceDashboardCard( detail: DeviceDetailState, series: DeviceMetricSeries, rssi: Int?, rssiSource: RssiSource, degradedReason: RssiDegradedReason?, legacyMetricsIgnored: Boolean, observedAtMillis: Long, strings: StringResolver, format: LocaleFormat, zoneOffsetMinutes: Int, accent: androidx.compose.ui.graphics.Color, muted: androidx.compose.ui.graphics.Color, )` — 长流程/大函数按步骤顺序表达；拆分需引入中间状态对象，暂列入后续重构。
-- `LongMethod` — `ValhallaApp.kt$@Composable private fun ScanScreen( state: ScanUiState, availability: BleAvailability, connectingDeviceId: String?, errorMessage: UiMessage?, deviceCount: Int, profileLookup: (String) -> DeviceProfile?, onStart: () -> Unit, onStop: () -> Unit, onSortChange: (ScanSortMode) -> Unit, onOpenDevices: () -> Unit, onSelect: (BleDevice) -> Unit, onBleAction: (BleGuidanceAction) -> Unit, onOpenSettings: () -> Unit, )` — 长流程/大函数按步骤顺序表达；拆分需引入中间状态对象，暂列入后续重构。
-- `LongMethod` — `ValhallaApp.kt$@OptIn(ExperimentalFoundationApi::class) @Composable private fun DetailScreen( session: DeviceSession, settings: AppSettings, metrics: DeviceMetricRepository, presets: ConfigPresetRepository, notificationPresenter: NotificationPresenter, notificationCenter: NotificationCenter, onNotificationFallback: (NotificationEvent) -> Unit, connectedCount: Int, disconnectInfo: DisconnectInfo?, reconnectState: ReconnectState?, onConnectionLost: () -> Unit, onRetryReconnect: () -> Unit, onCancelReconnect: () -> Unit, onBleAction: (BleGuidanceAction) -> Unit, onOpenDevices: () -> Unit, onBack: () -> Unit, onOpenOta: () -> Unit, onOpenLogs: () -> Unit, onOpenDiagnostics: () -> Unit, writeLocked: Boolean, )` — 长流程/大函数按步骤顺序表达；拆分需引入中间状态对象，暂列入后续重构。
-- `LongMethod` — `ValhallaApp.kt$@OptIn(ExperimentalFoundationApi::class) @Composable private fun QuickActionSection( controller: DeviceDetailController, quickAction: QuickActionState, connected: Boolean, writeLocked: Boolean, )` — 长流程/大函数按步骤顺序表达；拆分需引入中间状态对象，暂列入后续重构。
-- `LongMethod` — `ValhallaApp.kt$@OptIn(ExperimentalTime::class) @Composable private fun DiagnosticScreen( session: DeviceSession, metrics: DeviceMetricRepository, onBack: () -> Unit, )` — 长流程/大函数按步骤顺序表达；拆分需引入中间状态对象，暂列入后续重构。
-- `LongMethod` — `ValhallaApp.kt$@OptIn(ExperimentalTime::class) @Composable private fun OtaScreen( session: DeviceSession, library: FirmwareLibraryRepository, settings: AppSettings, notificationPresenter: NotificationPresenter, notificationCenter: NotificationCenter, onNotificationFallback: (NotificationEvent) -> Unit, onBack: () -> Unit, onOtaSucceeded: () -> Unit, writeLocked: Boolean, )` — 长流程/大函数按步骤顺序表达；拆分需引入中间状态对象，暂列入后续重构。
-- `LongMethod` — `ValhallaApp.kt$@OptIn(ExperimentalTime::class) @Composable private fun PacketLogScreen( packetLog: InMemoryPacketLog, initialOptions: PacketLogExportOptions, onBack: () -> Unit, )` — 长流程/大函数按步骤顺序表达；拆分需引入中间状态对象，暂列入后续重构。
-- `LongMethod` — `ValhallaApp.kt$@OptIn(ExperimentalTime::class) @Composable private fun ValhallaContent( preferences: com.valhalla.feature.theme.AppPreferences, settings: AppSettings, showOnboardingOnLaunch: Boolean, startRoute: String?, onboardingStore: com.valhalla.data.settings.AppSettingsStore, preferencesMigrationStatus: com.valhalla.core.storage.StorageMigrationStatus, onLanguageChange: (AppLanguageMode) -> Unit, onThemeChange: (ThemeMode) -> Unit, onSettingsChange: (AppSettings) -> Unit, onReloadPersisted: () -> Unit, )` — 长流程/大函数按步骤顺序表达；拆分需引入中间状态对象，暂列入后续重构。
-- `LongMethod` — `ValhallaApp.kt$fun startExport(action: ExportAction)` — 长流程/大函数按步骤顺序表达；拆分需引入中间状态对象，暂列入后续重构。
-- `LongParameterList` — `FeatureScreens.kt$( rule: AutomationRule, actionLabel: String, triggerLabel: String, enabledLabel: String, canMoveUp: Boolean, canMoveDown: Boolean, upLabel: String, downLabel: String, deleteLabel: String, onToggle: () -> Unit, onMoveUp: () -> Unit, onMoveDown: () -> Unit, onDelete: () -> Unit, )` — 控制器/页面入口参数多，拆分涉及多模块调用方，暂保留。
-- `LongParameterList` — `InfoScreens.kt$( language: AppLanguageMode, theme: ThemeMode, settings: AppSettings, notificationPresenter: NotificationPresenter, onLanguageChange: (AppLanguageMode) -> Unit, onThemeChange: (ThemeMode) -> Unit, onSettingsChange: (AppSettings) -> Unit, onBack: () -> Unit, onAbout: () -> Unit, onHelp: () -> Unit, onPrivacy: () -> Unit, onOnboardingReview: () -> Unit, onOpenAutomation: () -> Unit, onOpenStats: () -> Unit, onOpenBackup: () -> Unit, )` — 控制器/页面入口参数多，拆分涉及多模块调用方，暂保留。
-- `LongParameterList` — `ValhallaApp.kt$( detail: DeviceDetailState, series: DeviceMetricSeries, rssi: Int?, rssiSource: RssiSource, degradedReason: RssiDegradedReason?, legacyMetricsIgnored: Boolean, observedAtMillis: Long, strings: StringResolver, format: LocaleFormat, zoneOffsetMinutes: Int, accent: androidx.compose.ui.graphics.Color, muted: androidx.compose.ui.graphics.Color, )` — 控制器/页面入口参数多，拆分涉及多模块调用方，暂保留。
-- `LongParameterList` — `ValhallaApp.kt$( preferences: com.valhalla.feature.theme.AppPreferences, settings: AppSettings, showOnboardingOnLaunch: Boolean, startRoute: String?, onboardingStore: com.valhalla.data.settings.AppSettingsStore, preferencesMigrationStatus: com.valhalla.core.storage.StorageMigrationStatus, onLanguageChange: (AppLanguageMode) -> Unit, onThemeChange: (ThemeMode) -> Unit, onSettingsChange: (AppSettings) -> Unit, onReloadPersisted: () -> Unit, )` — 控制器/页面入口参数多，拆分涉及多模块调用方，暂保留。
-- `LongParameterList` — `ValhallaApp.kt$( session: DeviceSession, settings: AppSettings, metrics: DeviceMetricRepository, presets: ConfigPresetRepository, notificationPresenter: NotificationPresenter, notificationCenter: NotificationCenter, onNotificationFallback: (NotificationEvent) -> Unit, connectedCount: Int, disconnectInfo: DisconnectInfo?, reconnectState: ReconnectState?, onConnectionLost: () -> Unit, onRetryReconnect: () -> Unit, onCancelReconnect: () -> Unit, onBleAction: (BleGuidanceAction) -> Unit, onOpenDevices: () -> Unit, onBack: () -> Unit, onOpenOta: () -> Unit, onOpenLogs: () -> Unit, onOpenDiagnostics: () -> Unit, writeLocked: Boolean, )` — 控制器/页面入口参数多，拆分涉及多模块调用方，暂保留。
-- `LongParameterList` — `ValhallaApp.kt$( state: ScanUiState, availability: BleAvailability, connectingDeviceId: String?, errorMessage: UiMessage?, deviceCount: Int, profileLookup: (String) -> DeviceProfile?, onStart: () -> Unit, onStop: () -> Unit, onSortChange: (ScanSortMode) -> Unit, onOpenDevices: () -> Unit, onSelect: (BleDevice) -> Unit, onBleAction: (BleGuidanceAction) -> Unit, onOpenSettings: () -> Unit, )` — 控制器/页面入口参数多，拆分涉及多模块调用方，暂保留。
-- `LoopWithTooManyJumpStatements` — `BatchOperationController.kt$BatchOperationController$for` — 帧解析/索引循环需要提前退出与跳过分支，改写为状态机会更晦涩。
-- `MagicNumber` — `AutomationRuleRunner.kt$AutomationRuleRunner$5` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `DesignTokens.kt$0.0722` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `DesignTokens.kt$0.2126` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `DesignTokens.kt$0.5` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `DesignTokens.kt$0.7152` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `DeviceHealthCheck.kt$DeviceHealthCheckController$0xFFFFFFFFL` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `DiagnosticPackage.kt$DiagnosticPackageBuilder$0.15f` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `DiagnosticPackage.kt$DiagnosticPackageBuilder$0.3f` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `DiagnosticPackage.kt$DiagnosticPackageBuilder$0.45f` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `DiagnosticPackage.kt$DiagnosticPackageBuilder$0.6f` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `DiagnosticPackage.kt$DiagnosticPackageBuilder$0.75f` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `LocaleFormat.kt$LocaleFormat$10` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `LocaleFormat.kt$LocaleFormat$10.0` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `LocaleFormat.kt$LocaleFormat$1024.0` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `LocaleFormat.kt$LocaleFormat$1024L` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `MiniJson.kt$MiniJson$0x20` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `OtaController.kt$OtaController$0xFFFF` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `OtaController.kt$OtaController$1024` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `OtaWizard.kt$OtaWizardStep.RESULT$5` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `ValhallaApp.kt$10` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `ValhallaApp.kt$3_600` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `ValhallaApp.kt$60` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MagicNumber` — `ValhallaApp.kt$SessionOtaQueueExecutor$0.99f` — 协议命令码、位掩码、CRC 多项式与固件常量用十六进制字面量更贴近协议文档。
-- `MatchingDeclarationName` — `BatchQueueScreens.kt$BatchDeviceOption` — 同一文件包含强相关的多个声明（模型与编解码器）。
-- `MatchingDeclarationName` — `CommandFailureInfo.kt$FailureInfo` — 同一文件包含强相关的多个声明（模型与编解码器）。
-- `MaxLineLength` — `Strings.kt$AppStrings$"Clear the app's data in system settings or uninstall the app to remove the local data above. Packet logs clear when the app exits; OTA checkpoints can be cleared on the update page."` — 既有长签名/长表达式，拆行会改变公开 API 或降低可读性。
-- `MaxLineLength` — `Strings.kt$AppStrings$"Confirm the device is powered on, advertising, close to the phone, and Bluetooth is on. On timeout or device-side disconnect the app retries with backoff (up to 5 attempts); you can cancel and retry manually. Retries pause while Bluetooth is off and resume afterwards."` — 既有长签名/长表达式，拆行会改变公开 API 或降低可读性。
-- `MaxLineLength` — `Strings.kt$AppStrings$"Everything comes from on-device packet logs: success rate, average/max latency, retransmissions, out-of-order responses, and error-code distribution. Under 20 requests only \"not enough samples\" is shown."` — 既有长签名/长表达式，拆行会改变公开 API 或降低可读性。
-- `MaxLineLength` — `Strings.kt$AppStrings$"Firmware library: file name, version, channel, CRC-32, and the original file reference; firmware binaries are not cached and missing files must be re-selected."` — 既有长签名/长表达式，拆行会改变公开 API 或降低可读性。
-- `MaxLineLength` — `Strings.kt$AppStrings$"Make sure the device is powered on and advertising. Scanning needs Bluetooth permission: Android 12+ uses Nearby devices, older versions use location; iOS uses Bluetooth authorization."` — 既有长签名/长表达式，拆行会改变公开 API 或降低可读性。
-- `MaxLineLength` — `Strings.kt$AppStrings$"Only metadata (file name, version, channel, CRC-32) and the original file reference are stored; firmware binaries are never cached. Missing files must be re-selected."` — 既有长签名/长表达式，拆行会改变公开 API 或降低可读性。
-- `MaxLineLength` — `Strings.kt$AppStrings$"Packet logs live in memory only (500 entries by default, oldest evicted) and are never written to disk or uploaded automatically. Open Packet logs from device details, filter by command, error, time range, and keyword, then save a file or share it. In-memory logs are cleared when the app exits, so export them before leaving."` — 既有长签名/长表达式，拆行会改变公开 API 或降低可读性。
-- `MaxLineLength` — `Strings.kt$AppStrings$"Pick a device to connect. Pre-shared-key mode asks for the key; signed mode uses a device challenge. After authentication you can read info, configuration, and parameters."` — 既有长签名/长表达式，拆行会改变公开 API 或降低可读性。
-- `MaxLineLength` — `Strings.kt$AppStrings$"Read the failure reason first. On a CRC mismatch or model mismatch, select the correct firmware and re-run the precheck. If the link dropped, reconnect and use \"Resume last update\" to continue from the checkpoint. Checkpoints stay on this device and are removed after success or when cleared. Keep the device nearby and leave Bluetooth on during the update."` — 既有长签名/长表达式，拆行会改变公开 API 或降低可读性。
-- `MaxLineLength` — `Strings.kt$AppStrings$"Reboot and factory reset require confirmation, and factory reset cannot be undone; heartbeat only reads uptime and battery. Confirm-token semantics must be confirmed with the firmware."` — 既有长签名/长表达式，拆行会改变公开 API 或降低可读性。
-- `MaxLineLength` — `Strings.kt$AppStrings$"Scanning needs Bluetooth permission. On Android 12+ grant Nearby devices; on Android 11 and below grant location. On iOS allow Bluetooth access. If you denied it, enable it in system settings for this app, come back, and retry."` — 既有长签名/长表达式，拆行会改变公开 API 或降低可读性。
-- `MaxLineLength` — `Strings.kt$AppStrings$"Scanning needs Bluetooth permission: Nearby devices on Android 12+, location on Android 11 and below, and Bluetooth access on iOS. Turn Bluetooth on in system settings if it is off. This step only explains; the system prompt appears only after you tap the button."` — 既有长签名/长表达式，拆行会改变公开 API 或降低可读性。
-- `MaxLineLength` — `Strings.kt$AppStrings$"The panel reads and writes parameters through GET_PARAM / SET_PARAM, validating type, range, and byte length locally before sending. The table comes from protocol conventions and is not yet confirmed with the firmware, so it is labelled \"Needs firmware confirmation\"; rejections show the device error code."` — 既有长签名/长表达式，拆行会改变公开 API 或降低可读性。
-- `MaxLineLength` — `Strings.kt$AppStrings$"The parameter table comes from protocol conventions and is not yet confirmed with the firmware. Results are whatever the device returns, and rejections show the error code."` — 既有长签名/长表达式，拆行会改变公开 API 或降低可读性。
-- `MaxLineLength` — `Strings.kt$AppStrings$"The three-step guide can be skipped and its completion is stored locally; you can reopen it from Settings. It never triggers the system permission prompt automatically; only a tap runs the existing permission state machine."` — 既有长签名/长表达式，拆行会改变公开 API 或降低可读性。
-- `MaxLineLength` — `Strings.kt$AppStrings$"This app uses Kotlin, Kotlinx Coroutines, Compose Multiplatform (Apache License 2.0), and platform Bluetooth frameworks. See each dependency's LICENSE file for full terms."` — 既有长签名/长表达式，拆行会改变公开 API 或降低可读性。
-- `MaxLineLength` — `Strings.kt$AppStrings$"This version has no network upload: the app requests no internet permission, and profiles, checkpoints, tokens, and logs never leave this device."` — 既有长签名/长表达式，拆行会改变公开 API 或降低可读性。
-- `MaxLineLength` — `Strings.kt$AppStrings$"Up to 4 devices can be connected at once. At the limit you must disconnect one first; switching only changes which device details, configuration, and OTA apply to."` — 既有长签名/长表达式，拆行会改变公开 API 或降低可读性。
-- `RethrowCaughtException` — `ValhallaApp.kt$throw cancellation` — 捕获后补充上下文再抛出，属于有意保留原异常。
-- `ReturnCount` — `ScanEmptyReason.kt$fun classifyScanEmpty( scanning: Boolean, deviceCount: Int, availability: BleAvailability, error: String? = null, timedOut: Boolean = false, ): ScanEmptyReason` — 解码函数对每种非法输入提前返回并给出精确原因。
-- `SwallowedException` — `FirmwareLibraryReuse.kt$FirmwareLibraryReuse$error: Throwable` — 迁移/清理路径有意忽略异常，并通过迁移状态或提示向上暴露结果。
-- `SwallowedException` — `FirmwareSelectionController.kt$FirmwareSelectionController$cancelled: FirmwarePrecheckCancelledException` — 迁移/清理路径有意忽略异常，并通过迁移状态或提示向上暴露结果。
-- `ThrowsCount` — `DeviceHealthCheck.kt$DeviceHealthCheckController$suspend fun run(): HealthCheckResult?` — 解析函数对各类非法输入抛出不同错误码，便于定位。
-- `ThrowsCount` — `OtaController.kt$OtaController$private fun resolveStartOffset( requestedOffset: Int, acceptedOffset: Long, totalBytes: Int, ): Int` — 解析函数对各类非法输入抛出不同错误码，便于定位。
-- `ThrowsCount` — `OtaController.kt$OtaController$private suspend fun runTransfer( totalBytes: Long, crc16: Int, crc32: Long, version: FirmwareVersion, resumeFrom: OtaResumePoint?, read: suspend (offset: Long, length: Int) -> ByteArray, ): OtaState` — 解析函数对各类非法输入抛出不同错误码，便于定位。
-- `ThrowsCount` — `OtaController.kt$OtaController$private suspend fun sendChunk( offset: Int, chunk: ByteArray, )` — 解析函数对各类非法输入抛出不同错误码，便于定位。
-- `TooGenericExceptionCaught` — `AutoReconnectController.kt$AutoReconnectController$error: Throwable` — 平台边界（文件、JSON、蓝牙、键值存储）统一兜底并转为可见错误，避免崩溃。
-- `TooGenericExceptionCaught` — `AutomationRuleRunner.kt$AutomationRuleRunner$error: Throwable` — 平台边界（文件、JSON、蓝牙、键值存储）统一兜底并转为可见错误，避免崩溃。
-- `TooGenericExceptionCaught` — `BatchOperationController.kt$BatchOperationController$error: Throwable` — 平台边界（文件、JSON、蓝牙、键值存储）统一兜底并转为可见错误，避免崩溃。
-- `TooGenericExceptionCaught` — `ConfigEditorController.kt$ConfigEditorController$error: Throwable` — 平台边界（文件、JSON、蓝牙、键值存储）统一兜底并转为可见错误，避免崩溃。
-- `TooGenericExceptionCaught` — `ConfigPresetApplier.kt$ConfigPresetApplier$error: Throwable` — 平台边界（文件、JSON、蓝牙、键值存储）统一兜底并转为可见错误，避免崩溃。
-- `TooGenericExceptionCaught` — `DeviceDetailController.kt$DeviceDetailController$error: Throwable` — 平台边界（文件、JSON、蓝牙、键值存储）统一兜底并转为可见错误，避免崩溃。
-- `TooGenericExceptionCaught` — `DeviceHealthCheck.kt$DeviceHealthCheckController$error: Throwable` — 平台边界（文件、JSON、蓝牙、键值存储）统一兜底并转为可见错误，避免崩溃。
-- `TooGenericExceptionCaught` — `ErrorReporter.kt$error: Throwable` — 平台边界（文件、JSON、蓝牙、键值存储）统一兜底并转为可见错误，避免崩溃。
-- `TooGenericExceptionCaught` — `FileSaver.android.kt$<no name provided>$error: Throwable` — 平台边界（文件、JSON、蓝牙、键值存储）统一兜底并转为可见错误，避免崩溃。
-- `TooGenericExceptionCaught` — `FirmwareLibraryImporter.kt$FirmwareLibraryImporter$error: Throwable` — 平台边界（文件、JSON、蓝牙、键值存储）统一兜底并转为可见错误，避免崩溃。
-- `TooGenericExceptionCaught` — `FirmwareLibraryReuse.kt$FirmwareLibraryReuse$error: Throwable` — 平台边界（文件、JSON、蓝牙、键值存储）统一兜底并转为可见错误，避免崩溃。
-- `TooGenericExceptionCaught` — `FirmwareSelectionController.kt$FirmwareSelectionController$error: Throwable` — 平台边界（文件、JSON、蓝牙、键值存储）统一兜底并转为可见错误，避免崩溃。
-- `TooGenericExceptionCaught` — `OtaController.kt$OtaController$error: Throwable` — 平台边界（文件、JSON、蓝牙、键值存储）统一兜底并转为可见错误，避免崩溃。
-- `TooGenericExceptionCaught` — `OtaQueueController.kt$OtaQueueController$error: Throwable` — 平台边界（文件、JSON、蓝牙、键值存储）统一兜底并转为可见错误，避免崩溃。
-- `TooGenericExceptionCaught` — `ParamEditorController.kt$ParamEditorController$error: Throwable` — 平台边界（文件、JSON、蓝牙、键值存储）统一兜底并转为可见错误，避免崩溃。
-- `TooGenericExceptionCaught` — `ScanController.kt$ScanController$error: Throwable` — 平台边界（文件、JSON、蓝牙、键值存储）统一兜底并转为可见错误，避免崩溃。
-- `TooGenericExceptionCaught` — `ValhallaApp.kt$error: Throwable` — 平台边界（文件、JSON、蓝牙、键值存储）统一兜底并转为可见错误，避免崩溃。
-- `UnusedParameter` — `ValhallaApp.kt$format: LocaleFormat` — 接口/回调实现为兼容统一签名而保留的参数。
+## 剩余 95 条与逐条理由
 
-## composeApp（0 条）
+### core（30 条）
 
-无存量问题。
+#### CyclomaticComplexMethod（7）
+
+| 条目 | 理由 |
+|---|---|
+| `ConnectionQualityStats.kt$ConnectionQualityAnalyzer.analyze` | 每条分支对应一种质量指标（CRC、超时、失败率、样本量），拆分会引入中间结果类型但不减少判定数量。 |
+| `DeviceStateMachine.kt$DeviceStateMachine.resolve` | 分支与设备状态迁移表一一对应，保持与协议状态图同构更易核对。 |
+| `FirmwareHeader.kt$FirmwareHeader.decode` | 固件头按字段顺序校验，分支数量等于必需字段数量；拆成子函数会重复传递偏移量。 |
+| `MessageCodec.kt$MessageCodec.decodeRequest` | 命令码到请求体的分派是协议文档的直译，分支即命令类型。 |
+| `MessageCodec.kt$MessageCodec.decodeResponse` | 同 `decodeRequest`，响应分派逐命令展开。 |
+| `PacketLogExport.kt$parseLocalDateTimeMillis` | 年/月/日/时/分/秒逐段解析，任一段非法即提前返回，扁平结构比嵌套 `when` 更直观。 |
+| `PacketLogExport.kt$PacketLogExporter.compute` | 过滤、分组、进度、输出组装四个阶段串行；拆分需新增阶段结果对象，当前已在 120 行内。 |
+
+#### ThrowsCount（11）
+
+解析器对每个字段抛出带字段名的具体异常，合并为单一异常会丢失字段定位与用户可读的失败原因：
+
+`EcdsaP256.fromPem`、`EcdsaP256.parseDer`、`EcdsaP256.readInteger`、`EcdsaP256.readLength`、`FirmwareHeader.decode`、`FirmwareParser.parse`、`FirmwareSignature.decode`、`FrameCodec.decode`、`MessageCodec.decodeNotification`、`MessageCodec.decodeRequest`、`StartOtaRequest.decode`。
+
+#### TooGenericExceptionCaught（5）
+
+| 条目 | 理由 |
+|---|---|
+| `CommandDispatcher.kt$CommandDispatcher.select` | 命令队列边界需要把任何写入/序列化失败转成 `CommandFailure`，不得让异常穿透协程作用域。 |
+| `ConcurrentCommandDispatcher.kt$ConcurrentCommandDispatcher` | 并发调度边界：捕获后统一转为带 cause 的失败结果，已不再静默。 |
+| `EcdsaP256.kt$EcdsaP256Verifier.Companion` | 验签失败统一返回 `false`；平台签名实现可能抛任意 `Error`，收窄会漏掉平台异常。 |
+| `EcdsaP256.kt$EcdsaP256Verifier` | 同上，验签入口必须把平台异常转换为验签失败。 |
+| `PacketLog.kt$PacketLogFormatter` | 报文格式化属于诊断路径，任何格式化异常都不能中断日志采集，捕获后降级为占位文本。 |
+
+#### ReturnCount（3）
+
+| 条目 | 理由 |
+|---|---|
+| `EcdsaP256.extractP256PointFromSpki` | DER 结构逐层校验，失败即返回 `null`，线性提前返回比嵌套分支更清晰。 |
+| `FirmwareLibrary.parse` | 旧版/新版格式字段逐项校验并提前返回，保持两种格式的差异可读。 |
+| `PacketLogExport.parseLocalDateTimeMillis` | 逐段解析，任一段失败即返回 `null`。 |
+
+#### LoopWithTooManyJumpStatements（2）
+
+| 条目 | 理由 |
+|---|---|
+| `FrameParser.kt$FrameParser` | 帧同步循环需要 `continue` 跳过噪声、`break` 处理长度不足；状态机会让同步字处理更难验证。 |
+| `PacketLogIndex.kt$PacketLogIndex` | 索引扫描需要按帧边界提前退出，属于解析算法的自然结构。 |
+
+#### LongMethod（1）与 ExplicitGarbageCollectionCall（1）
+
+| 条目 | 理由 |
+|---|---|
+| `ConnectionQualityStats.kt$ConnectionQualityAnalyzer.analyze` | 分析流程按「样本→CRC→超时→失败率→结论」顺序展开，抽中间对象会与 `ConnectionQualityStats` 重复。 |
+| `PacketLogExportBenchmark.kt$gc()` | 基准测量需要显式 GC 固定多次测量起点，非生产代码路径。 |
+
+### data（5 条）
+
+全部为 `TooGenericExceptionCaught`：Android/iOS BLE 回调、连接池与平台分享回调必须捕获 `Throwable` 并转换为连接/分享失败结果，否则平台异常会直接终止 UI 协程。
+
+条目：`AndroidBleConnection`、`IosBleClient`（2 处）、`MultiDeviceConnectionPool`、`AndroidTextSharer`。
+
+### feature（60 条）
+
+#### TooGenericExceptionCaught（17）
+
+控制器与平台桥接层统一把异常转换为 `UiMessage`/失败状态并写入日志，禁止异常穿透 UI：
+
+`AutomationRuleRunner`、`AutoReconnectController`、`BatchOperationController`、`ConfigEditorController`、`ConfigPresetApplier`、`DeviceDetailController`、`DeviceHealthCheckController`、`ErrorReporter`、`FileSaver.android`、`FirmwareLibraryImporter`、`FirmwareLibraryReuse`、`FirmwareSelectionController`、`OtaController`、`OtaQueueController`、`ParamEditorController`、`ScanController`、`ValhallaContent`。
+
+#### LongMethod（15）
+
+| 条目 | 理由 |
+|---|---|
+| `BatchQueueScreens.BatchScreen` | Compose 声明式布局按设备选择、执行、结果三段展开；继续拆分会新增跨作用域的槽位参数。 |
+| `BatchQueueScreens.OtaQueueScreen` | 同上，队列控制与结果区块共享状态提升。 |
+| `FeatureScreens.BackupScreen` | 导入/导出/预览共享同一组局部状态，预览已拆出 `BackupPreview`，剩余为文件与控制区。 |
+| `FeatureScreens.UsageStatsScreen` | 统计卡片按周期、设备、导出顺序排列，拆分会重复格式化调用。 |
+| `FeatureScreens.PresetSection` | 预设列表、应用结果与禁用提示共享同一状态快照。 |
+| `InfoScreens.SettingsValuesSection` | 设置项按字段顺序渲染，字段文案/回调成对出现。 |
+| `OtaController.runTransfer` | 传输状态机按分块、进度、断点顺序展开，拆分需新增中间状态对象并与 `OtaState` 重复。 |
+| `ValhallaApp.ScanScreen` | 扫描列表、排序、空态/加载态在同一状态快照上渲染。 |
+| `ValhallaApp.DetailScreen` | 详情页聚合设备信息、指标、快捷操作与健康检查，共享 `DeviceSession`。 |
+| `ValhallaApp.QuickActionSection` | 快捷操作按钮、结果与禁用提示共享 `QuickActionState`；结果已拆出 `QuickActionResult`。 |
+| `ValhallaApp.DiagnosticScreen` | 诊断报告/打包两个进度区共享本地快照。 |
+| `ValhallaApp.OtaScreen` | 选包、预检、传输、结果四段共享 OTA 状态。 |
+| `ValhallaApp.PacketLogScreen` | 过滤、列表、导出三区共享日志快照。 |
+| `ValhallaApp.ValhallaContent` | 顶层路由与导航状态集中在此，拆分需要跨文件暴露私有路由类型。 |
+| `ValhallaApp.startExport` | 导出流程按校验、组装、保存顺序展开，错误分支需保持原位。 |
+
+#### CyclomaticComplexMethod（11）
+
+`BatchQueueScreens.BatchScreen`、`BatchQueueScreens.OtaQueueScreen`、`DeviceHealthCheckController.run`、`FeatureScreens.PresetSection`、`ValhallaApp.DisconnectBanner`、`ValhallaApp.ParamFieldRow`、`ValhallaApp.DetailScreen`、`ValhallaApp.DiagnosticScreen`、`ValhallaApp.OtaScreen`、`ValhallaApp.PacketLogScreen`、`ValhallaApp.ValhallaContent`。
+
+理由：分支分别对应设备状态、连接状态、字段校验状态与 OTA 阶段，数量与状态枚举同构；继续抽分会增加参数传递但不减少判定。
+
+#### LargeClass（4）
+
+| 条目 | 理由 |
+|---|---|
+| `DeviceSimulatorE2ETest` | 端到端共享场景步骤与模拟器装配，拆文件会复制大量夹具。 |
+| `OtaController` | OTA 状态机、断点、分块与通知在同一生命周期内协作，拆分会跨类暴露内部状态。 |
+| `OtaControllerPackageTest` | 与 `OtaController` 用例一一对应的测试夹具集合。 |
+| `Strings.kt$AppStrings` | `StringKey → 中英文` 的单一映射表，拆分会破坏「一处新增即中英同步」的完整性检查。 |
+
+#### ThrowsCount（4）
+
+| 条目 | 理由 |
+|---|---|
+| `DeviceHealthCheckController.run` | 每项体检失败抛出带项目名的异常，UI 据此展示具体失败项。 |
+| `OtaController.resolveStartOffset` | 断点不可用/越界/总量不符分别抛出不同原因，用户需要看到具体失效原因。 |
+| `OtaController.runTransfer` | 传输阶段按 CRC、确认、超时分别抛出不同失败原因。 |
+| `OtaController.sendChunk` | 单块写入对长度、应答、CRC 分别报错，便于定位坏块。 |
+
+#### LongParameterList（4）
+
+`InfoScreens.SettingsScreen`、`ValhallaApp.ValhallaContent`、`ValhallaApp.DetailScreen`、`ValhallaApp.ScanScreen`。
+
+理由：Compose 渲染函数的参数是「数据快照 + 导航回调」的天然组合；改成参数对象会把可组合边界藏进 data class，且调用点仍需逐项传递。非 Composable 的 `DeviceDashboardCard` 与自动化规则行已改为 data class。
+
+#### SwallowedException（2）
+
+| 条目 | 理由 |
+|---|---|
+| `FirmwareLibraryReuse` | 读取失败被转换为用户可见的 `FirmwareReuseCheck.Missing(READ_FAILED)`，并关闭文件句柄，不是静默吞掉。 |
+| `FirmwareSelectionController` | 捕获 `FirmwarePrecheckCancelledException` 是用户主动取消预检的正常路径，状态已复位并返回 `false`。 |
+
+#### ReturnCount（1）、RethrowCaughtException（1）、LoopWithTooManyJumpStatements（1）
+
+| 条目 | 理由 |
+|---|---|
+| `ScanEmptyReason.classifyScanEmpty` | 空扫描原因按「扫描中→无设备→权限/蓝牙不可用→错误→超时」优先级提前返回，顺序即产品语义。 |
+| `ValhallaApp.throw cancellation` | `catch (CancellationException)` 后原样抛出，保证协程取消语义不被吞掉。 |
+| `BatchOperationController` | 批量执行循环需要按取消/失败/跳过提前退出，属于任务调度结构。 |

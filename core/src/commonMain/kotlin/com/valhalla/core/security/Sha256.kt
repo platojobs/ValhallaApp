@@ -69,18 +69,18 @@ class Sha256Digest {
     fun digest(): ByteArray {
         val bitLength = totalLength * 8
         val remainder = totalLength % BLOCK_SIZE.toLong()
-        val paddingLength = if (remainder < 56L) 56L - remainder else 120L - remainder
+        val paddingLength = if (remainder < PADDING_LIMIT) PADDING_LIMIT - remainder else PADDING_LIMIT_NEXT_BLOCK - remainder
         val padding = ByteArray((paddingLength + 8).toInt())
         padding[0] = 0x80.toByte()
         for (index in 0 until 8) {
-            padding[padding.size - 1 - index] = ((bitLength ushr (8 * index)) and 0xFF).toByte()
+            padding[padding.size - 1 - index] = ((bitLength ushr (8 * index)) and MASK_LOW_BYTE_LONG).toByte()
         }
         update(padding)
 
-        val out = ByteArray(32)
+        val out = ByteArray(DIGEST_BYTES)
         for (index in 0 until 8) {
             val value = state[index]
-            out[index * 4] = (value ushr 24).toByte()
+            out[index * 4] = (value ushr SHIFT_24_BITS).toByte()
             out[index * 4 + 1] = (value ushr 16).toByte()
             out[index * 4 + 2] = (value ushr 8).toByte()
             out[index * 4 + 3] = value.toByte()
@@ -95,21 +95,21 @@ class Sha256Digest {
         for (index in 0 until 16) {
             val position = offset + index * 4
             schedule[index] =
-                ((data[position].toInt() and 0xFF) shl 24) or
-                ((data[position + 1].toInt() and 0xFF) shl 16) or
-                ((data[position + 2].toInt() and 0xFF) shl 8) or
-                (data[position + 3].toInt() and 0xFF)
+                ((data[position].toInt() and MASK_LOW_BYTE) shl SHIFT_24_BITS) or
+                ((data[position + 1].toInt() and MASK_LOW_BYTE) shl 16) or
+                ((data[position + 2].toInt() and MASK_LOW_BYTE) shl 8) or
+                (data[position + 3].toInt() and MASK_LOW_BYTE)
         }
-        for (index in 16 until 64) {
+        for (index in 16 until SHA256_ROUNDS) {
             val s0 =
-                schedule[index - 15].rotateRight(7) xor
-                    schedule[index - 15].rotateRight(18) xor
-                    (schedule[index - 15] ushr 3)
+                schedule[index - SCHEDULE_OFFSET_15].rotateRight(ROTATE_7_BITS) xor
+                    schedule[index - SCHEDULE_OFFSET_15].rotateRight(ROTATE_18_BITS) xor
+                    (schedule[index - SCHEDULE_OFFSET_15] ushr 3)
             val s1 =
-                schedule[index - 2].rotateRight(17) xor
-                    schedule[index - 2].rotateRight(19) xor
-                    (schedule[index - 2] ushr 10)
-            schedule[index] = schedule[index - 16] + s0 + schedule[index - 7] + s1
+                schedule[index - 2].rotateRight(ROTATE_17_BITS) xor
+                    schedule[index - 2].rotateRight(ROTATE_19_BITS) xor
+                    (schedule[index - 2] ushr SHIFT_10_BITS)
+            schedule[index] = schedule[index - 16] + s0 + schedule[index - SCHEDULE_OFFSET_7] + s1
         }
 
         var a = state[0]
@@ -117,15 +117,15 @@ class Sha256Digest {
         var c = state[2]
         var d = state[3]
         var e = state[4]
-        var f = state[5]
-        var g = state[6]
-        var h = state[7]
+        var f = state[STATE_INDEX_F]
+        var g = state[STATE_INDEX_G]
+        var h = state[STATE_INDEX_H]
 
-        for (index in 0 until 64) {
-            val s1 = e.rotateRight(6) xor e.rotateRight(11) xor e.rotateRight(25)
+        for (index in 0 until SHA256_ROUNDS) {
+            val s1 = e.rotateRight(ROTATE_6_BITS) xor e.rotateRight(ROTATE_11_BITS) xor e.rotateRight(ROTATE_25_BITS)
             val ch = (e and f) xor (e.inv() and g)
             val temp1 = h + s1 + ch + K[index] + schedule[index]
-            val s0 = a.rotateRight(2) xor a.rotateRight(13) xor a.rotateRight(22)
+            val s0 = a.rotateRight(2) xor a.rotateRight(ROTATE_13_BITS) xor a.rotateRight(ROTATE_22_BITS)
             val maj = (a and b) xor (a and c) xor (b and c)
             val temp2 = s0 + maj
 
@@ -144,15 +144,42 @@ class Sha256Digest {
         state[2] += c
         state[3] += d
         state[4] += e
-        state[5] += f
-        state[6] += g
-        state[7] += h
+        state[STATE_INDEX_F] += f
+        state[STATE_INDEX_G] += g
+        state[STATE_INDEX_H] += h
     }
 
-    private fun Int.rotateRight(bits: Int): Int = (this ushr bits) or (this shl (32 - bits))
+    private fun Int.rotateRight(bits: Int): Int = (this ushr bits) or (this shl (WORD_BITS - bits))
 
     private companion object {
         const val BLOCK_SIZE = 64
+
+        const val PADDING_LIMIT = 56L
+        const val PADDING_LIMIT_NEXT_BLOCK = 120L
+        const val MASK_LOW_BYTE = 0xFF
+        const val MASK_LOW_BYTE_LONG: Long = 0xFFL
+        const val DIGEST_BYTES = 32
+        const val SHA256_ROUNDS = 64
+        const val SHIFT_24_BITS = 24
+        const val WORD_BITS = 32
+
+        const val SCHEDULE_OFFSET_15 = 15
+        const val SCHEDULE_OFFSET_7 = 7
+
+        const val ROTATE_6_BITS = 6
+        const val ROTATE_7_BITS = 7
+        const val ROTATE_11_BITS = 11
+        const val ROTATE_13_BITS = 13
+        const val ROTATE_17_BITS = 17
+        const val ROTATE_18_BITS = 18
+        const val ROTATE_19_BITS = 19
+        const val ROTATE_22_BITS = 22
+        const val ROTATE_25_BITS = 25
+        const val SHIFT_10_BITS = 10
+
+        const val STATE_INDEX_F = 5
+        const val STATE_INDEX_G = 6
+        const val STATE_INDEX_H = 7
 
         val K =
             intArrayOf(

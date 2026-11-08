@@ -1,5 +1,7 @@
 package com.valhalla.feature.settings
 
+private const val CONTROL_CHAR_UPPER_BOUND = 0x20
+
 /**
  * 备份用最小 JSON 编解码。
  *
@@ -93,7 +95,7 @@ object MiniJson {
                 '\r' -> out.append("\\r")
                 '\t' -> out.append("\\t")
                 else ->
-                    if (char.code < 0x20) {
+                    if (char.code < CONTROL_CHAR_UPPER_BOUND) {
                         out.append("\\u")
                         out.append(char.code.toString(16).padStart(4, '0'))
                     } else {

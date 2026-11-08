@@ -10,6 +10,9 @@ import java.security.cert.X509Certificate
 import java.security.interfaces.ECPublicKey
 import java.security.spec.X509EncodedKeySpec
 
+private const val P256_FIELD_BITS = 256
+private const val P256_ORDER_BITS = 256
+
 /**
  * Android 侧 ECDSA-P256 验签实现（`java.security` + `NONEwithECDSA`）。
  *
@@ -73,7 +76,7 @@ private fun requireP256(key: PublicKey) {
             )
     val fieldBits = params.curve.field.fieldSize
     val orderBits = params.order.bitLength()
-    if (fieldBits != 256 || orderBits != 256) {
+    if (fieldBits != P256_FIELD_BITS || orderBits != P256_ORDER_BITS) {
         throw EcdsaKeyException(
             EcdsaFailureCode.PUBLIC_KEY_UNSUPPORTED,
             "仅支持 P-256，实际 field=$fieldBits order=$orderBits",

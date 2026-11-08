@@ -25,6 +25,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import com.valhalla.core.AppBuildInfo
 import com.valhalla.core.AppDependencyInfo
 import com.valhalla.core.logging.PacketLogExportOptions
@@ -387,7 +391,13 @@ private fun SettingsValuesSection(
             },
         ) { Text(strings.t(StringKey.SETTINGS_RESET_DEFAULTS)) }
     }
-    status?.let { Text(strings.t(it), style = MaterialTheme.typography.bodySmall) }
+    status?.let {
+        Text(
+            strings.t(it),
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+        )
+    }
     Text(strings.t(StringKey.SETTINGS_RESTART_NOTE), style = MaterialTheme.typography.bodySmall)
 }
 
@@ -412,6 +422,7 @@ private fun NotificationSettingsSection(
             strings.t(StringKey.SETTINGS_NOTIFY_UNSUPPORTED),
             style = MaterialTheme.typography.bodySmall,
         )
+        DisabledStatePanel(StringKey.STATE_UNAVAILABLE_HINT)
     } else {
         when (permissionState) {
             BlePermissionState.GRANTED ->
@@ -527,7 +538,11 @@ private fun NotificationToggleRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(label, modifier = Modifier.weight(1f))
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            modifier = Modifier.semantics { contentDescription = label },
+        )
     }
 }
 
@@ -561,6 +576,11 @@ private fun SettingNumberField(
                 } else {
                     strings.t(StringKey.SETTINGS_INVALID_VALUE, "min" to min.toString(), "max" to max.toString())
                 },
+                modifier =
+                    Modifier.semantics {
+                        liveRegion =
+                            if (valid) LiveRegionMode.Polite else LiveRegionMode.Assertive
+                    },
             )
         },
         modifier = Modifier.fillMaxWidth(),
@@ -616,7 +636,7 @@ fun AboutScreen(onBack: () -> Unit) {
         )
         SectionTitle(strings.t(StringKey.ABOUT_LICENSE_TITLE))
         if (AppDependencyInfo.entries.isEmpty()) {
-            Text(strings.t(StringKey.ABOUT_LICENSE_EMPTY), style = MaterialTheme.typography.bodyMedium)
+            EmptyStatePanel(body = strings.t(StringKey.ABOUT_LICENSE_EMPTY))
         } else {
             AppDependencyInfo.entries.forEach { dependency ->
                 Text(
@@ -678,6 +698,9 @@ fun PrivacyScreen(onBack: () -> Unit) {
             Text(strings.t(StringKey.PRIVACY_JVM_NOTE), style = MaterialTheme.typography.bodyMedium)
         }
         SectionTitle(strings.t(StringKey.PRIVACY_STORAGE_TITLE))
+        if (items.isEmpty()) {
+            EmptyStatePanel()
+        }
         items.groupBy { it.item }.forEach { (item, locations) ->
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(

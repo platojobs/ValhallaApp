@@ -47,7 +47,8 @@ sealed class CommandFailure(
 
     class InvalidResponse(
         val reason: String,
-    ) : CommandFailure("设备响应非法: $reason")
+        cause: Throwable? = null,
+    ) : CommandFailure("设备响应非法: $reason", cause)
 
     /** 设备以非 0 状态码显式拒绝指令。 */
     class DeviceRejected(

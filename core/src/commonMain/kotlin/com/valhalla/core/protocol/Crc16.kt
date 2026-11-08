@@ -1,5 +1,10 @@
 package com.valhalla.core.protocol
 
+private const val UINT8_MAX = 0xFF
+private const val UINT16_MAX = 0xFFFF
+private const val CRC_HIGH_BIT = 0x8000
+private const val CRC_MASK = 0xFFFF
+
 /**
  * CRC-16/CCITT-FALSE：poly = 0x1021，init = 0xFFFF，不反转输入输出，无最终异或。
  */
@@ -13,9 +18,9 @@ object Crc16 {
     ): Int {
         require(startIndex in 0..data.size) { "startIndex 越界: $startIndex" }
         require(endIndex in startIndex..data.size) { "endIndex 越界: $endIndex" }
-        var crc = 0xFFFF
+        var crc = INITIAL
         for (index in startIndex until endIndex) {
-            crc = step(crc, data[index].toInt() and 0xFF)
+            crc = step(crc, data[index].toInt() and UINT8_MAX)
         }
         return crc
     }
@@ -30,12 +35,12 @@ object Crc16 {
         startIndex: Int = 0,
         endIndex: Int = data.size,
     ): Int {
-        require(current in 0..0xFFFF) { "current 超出范围: $current" }
+        require(current in 0..UINT16_MAX) { "current 超出范围: $current" }
         require(startIndex in 0..data.size) { "startIndex 越界: $startIndex" }
         require(endIndex in startIndex..data.size) { "endIndex 越界: $endIndex" }
         var crc = current
         for (index in startIndex until endIndex) {
-            crc = step(crc, data[index].toInt() and 0xFF)
+            crc = step(crc, data[index].toInt() and UINT8_MAX)
         }
         return crc
     }
@@ -50,12 +55,12 @@ object Crc16 {
         var crc = current xor (value shl 8)
         repeat(8) {
             crc =
-                if (crc and 0x8000 != 0) {
+                if (crc and CRC_HIGH_BIT != 0) {
                     (crc shl 1) xor POLYNOMIAL
                 } else {
                     crc shl 1
                 }
-            crc = crc and 0xFFFF
+            crc = crc and CRC_MASK
         }
         return crc
     }

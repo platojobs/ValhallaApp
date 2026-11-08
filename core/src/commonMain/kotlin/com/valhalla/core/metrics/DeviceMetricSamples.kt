@@ -6,6 +6,9 @@ import com.valhalla.core.storage.StorageSchemaMigrator
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
 
+private const val RSSI_MIN_DBM = -127
+private const val RSSI_MAX_DBM = 20
+
 /**
  * 一条本机采样。
  *
@@ -20,7 +23,7 @@ data class DeviceMetricSample(
     init {
         require(timestampMillis >= 0) { "采样时间不能为负" }
         require(batteryPercent == null || batteryPercent in 0..100) { "电量应在 0..100" }
-        require(rssi == null || rssi in -127..20) { "RSSI 超出合理范围" }
+        require(rssi == null || rssi in RSSI_MIN_DBM..RSSI_MAX_DBM) { "RSSI 超出合理范围" }
     }
 
     val hasValue: Boolean get() = batteryPercent != null || rssi != null

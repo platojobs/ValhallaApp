@@ -33,7 +33,7 @@ class FirmwareSignature(
 ) {
     init {
         require(bytes.isNotEmpty()) { "签名内容不能为空" }
-        require(bytes.size <= 0xFFFF) { "签名内容超过 u16 长度上限: ${bytes.size}" }
+        require(bytes.size <= U16_MAX) { "签名内容超过 u16 长度上限: ${bytes.size}" }
     }
 
     /** 签名段的完整编码长度（算法 1 字节 + 长度 2 字节 + 签名内容）。 */
@@ -42,8 +42,8 @@ class FirmwareSignature(
     fun encode(): ByteArray {
         val out = ByteArray(encodedSize)
         out[0] = algorithm.code.toByte()
-        out[1] = (bytes.size and 0xFF).toByte()
-        out[2] = ((bytes.size shr 8) and 0xFF).toByte()
+        out[1] = (bytes.size and BYTE_MASK).toByte()
+        out[2] = ((bytes.size shr 8) and BYTE_MASK).toByte()
         bytes.copyInto(out, destinationOffset = HEADER_SIZE)
         return out
     }
@@ -52,6 +52,8 @@ class FirmwareSignature(
 
     companion object {
         const val HEADER_SIZE: Int = 3
+        private const val U16_MAX = 0xFFFF
+        private const val BYTE_MASK = 0xFF
 
         /** 解析签名段；长度与实际字节数不符时抛出 [FirmwareException.SignatureSectionInvalid]。 */
         fun decode(
@@ -62,11 +64,11 @@ class FirmwareSignature(
                 throw FirmwareException.SignatureSectionInvalid("签名段头部不完整：offset=$offset")
             }
             val algorithm =
-                FirmwareSignatureAlgorithm.fromCode(bytes[offset].toInt() and 0xFF)
-                    ?: throw FirmwareException.SignatureAlgorithmUnsupported(bytes[offset].toInt() and 0xFF)
+                FirmwareSignatureAlgorithm.fromCode(bytes[offset].toInt() and BYTE_MASK)
+                    ?: throw FirmwareException.SignatureAlgorithmUnsupported(bytes[offset].toInt() and BYTE_MASK)
             val length =
-                (bytes[offset + 1].toInt() and 0xFF) or
-                    ((bytes[offset + 2].toInt() and 0xFF) shl 8)
+                (bytes[offset + 1].toInt() and BYTE_MASK) or
+                    ((bytes[offset + 2].toInt() and BYTE_MASK) shl 8)
             if (length <= 0) {
                 throw FirmwareException.SignatureSectionInvalid("签名长度为 0")
             }

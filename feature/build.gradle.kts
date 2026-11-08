@@ -168,19 +168,19 @@ tasks.matching { it.name.contains("ktlint", ignoreCase = true) }.configureEach {
     dependsOn(generateFirmwareKey)
 }
 
-// 只统计 JVM 单元测试覆盖率，不含 Android instrumented；行覆盖阈值 60%。
-// Compose UI 包依赖 Android/iOS 渲染环境，JVM 单测无法执行，按可测逻辑范围统计
-// （ui 包排除；其余逻辑仍按 60% 硬阈值校验，见 docs/static-analysis-baseline.md）。
+// 只统计 JVM 单元测试覆盖率，不含 Android instrumented；行覆盖阈值见下。
+// 排除范围只保留真正的 @Composable 渲染函数（它们依赖 Android/iOS 渲染环境，JVM 单测无法执行）。
+// UI 包内的纯逻辑已下沉到可测普通函数，仍然计入覆盖率，不做整包排除。
 kover {
     reports {
         filters {
             excludes {
-                packages("com.valhalla.feature.ui")
+                annotatedBy("androidx.compose.runtime.Composable")
             }
         }
         verify {
             rule {
-                minBound(60)
+                minBound(80)
             }
         }
     }

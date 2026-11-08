@@ -2,6 +2,8 @@ package com.valhalla.core.firmware
 
 import com.valhalla.core.protocol.message.FirmwareVersion
 
+private const val VERSION_GROUP_CHANNEL = 5
+
 /** 固件库条目对某台设备的适用性。 */
 enum class FirmwareApplicabilityStatus {
     APPLICABLE,
@@ -46,7 +48,7 @@ object FirmwareApplicabilityEvaluator {
         val minor = match.groupValues[2].toIntOrNull() ?: return null
         val patch = match.groupValues[3].toIntOrNull() ?: return null
         val build = match.groupValues[4].takeIf { it.isNotEmpty() }?.toIntOrNull() ?: 0
-        val channel = match.groupValues[5].trim()
+        val channel = match.groupValues[VERSION_GROUP_CHANNEL].trim()
         return runCatching {
             FirmwareVersion(major = major, minor = minor, patch = patch, build = build, channel = channel)
         }.getOrNull()

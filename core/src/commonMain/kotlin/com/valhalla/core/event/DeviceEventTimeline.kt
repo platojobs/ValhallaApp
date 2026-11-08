@@ -4,6 +4,18 @@ import com.valhalla.core.logging.SensitiveTextRedaction
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
 
+private const val U8_MASK = 0xFF
+private const val EVENT_SUMMARY_INDEX = 5
+private const val EVENT_DETAIL_INDEX = 6
+private const val EVENT_ERROR_CODE_INDEX = 7
+private const val ASCII_DIGIT_START = 0x30
+private const val ASCII_DIGIT_END = 0x39
+private const val ASCII_UPPER_START = 0x41
+private const val ASCII_UPPER_END = 0x5A
+private const val ASCII_LOWER_START = 0x61
+private const val ASCII_LOWER_END = 0x7A
+private const val ASCII_PRINTABLE_MAX = 0x7E
+
 /** 事件类别；界面按此筛选。 */
 enum class DeviceEventType {
     CONNECTION,
@@ -139,7 +151,7 @@ object DeviceEventCodec {
         val result =
             DeviceEventResult.entries.firstOrNull { it.name == parts[4] }
                 ?: DeviceEventResult.INFO
-        val summary = unescape(parts[5]) ?: return null
+        val summary = unescape(parts[EVENT_SUMMARY_INDEX]) ?: return null
         return runCatching {
             DeviceEvent(
                 id = id,
@@ -149,8 +161,8 @@ object DeviceEventCodec {
                 timestampMillis = timestamp,
                 summary = summary,
                 result = result,
-                detail = unescape(parts[6]),
-                errorCode = unescape(parts[7]),
+                detail = unescape(parts[EVENT_DETAIL_INDEX]),
+                errorCode = unescape(parts[EVENT_ERROR_CODE_INDEX]),
             )
         }.getOrNull()
     }
@@ -163,7 +175,7 @@ object DeviceEventCodec {
         if (value == null) return ""
         return buildString {
             value.encodeToByteArray().forEach { byte ->
-                val code = byte.toInt() and 0xFF
+                val code = byte.toInt() and U8_MASK
                 if (isAsciiSafe(code)) {
                     append(code.toChar())
                 } else {
@@ -176,9 +188,9 @@ object DeviceEventCodec {
     }
 
     private fun isAsciiSafe(code: Int): Boolean =
-        code in 0x30..0x39 ||
-            code in 0x41..0x5A ||
-            code in 0x61..0x7A ||
+        code in ASCII_DIGIT_START..ASCII_DIGIT_END ||
+            code in ASCII_UPPER_START..ASCII_UPPER_END ||
+            code in ASCII_LOWER_START..ASCII_LOWER_END ||
             code == '.'.code ||
             code == '_'.code ||
             code == '~'.code ||
@@ -197,7 +209,7 @@ object DeviceEventCodec {
                 bytes += ((high shl 4) or low).toByte()
                 index += 3
             } else {
-                if (char.code > 0x7E) return null
+                if (char.code > ASCII_PRINTABLE_MAX) return null
                 bytes += char.code.toByte()
                 index++
             }

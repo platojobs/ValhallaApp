@@ -2,6 +2,8 @@ package com.valhalla.feature.ota
 
 import com.valhalla.core.firmware.FirmwarePrecheckResult
 
+private const val RESULT_STEP_INDEX = 5
+
 /** 固件升级向导的五个步骤。 */
 enum class OtaWizardStep(
     val index: Int,
@@ -10,7 +12,7 @@ enum class OtaWizardStep(
     PRECHECK(2),
     CONFIRM(3),
     TRANSFER(4),
-    RESULT(5),
+    RESULT(RESULT_STEP_INDEX),
     ;
 
     companion object {

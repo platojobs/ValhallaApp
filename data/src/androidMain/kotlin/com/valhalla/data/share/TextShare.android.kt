@@ -11,10 +11,11 @@ import java.io.File
 import java.util.TimeZone
 
 private const val EXPORT_DIR = "valhalla-exports"
+private const val MILLIS_PER_MINUTE = 60_000
 
 actual fun createTextSharer(): TextSharer = AndroidTextSharer(AndroidBleSupport.requireContext())
 
-actual fun currentTimeZoneOffsetMinutes(epochMillis: Long): Int = TimeZone.getDefault().getOffset(epochMillis) / 60_000
+actual fun currentTimeZoneOffsetMinutes(epochMillis: Long): Int = TimeZone.getDefault().getOffset(epochMillis) / MILLIS_PER_MINUTE
 
 /**
  * 写入 App cache 下的导出目录，再通过 [FileProvider] 生成可授予读权限的 content:// URI。

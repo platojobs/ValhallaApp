@@ -25,6 +25,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import com.valhalla.core.automation.AutomationAction
 import com.valhalla.core.automation.AutomationRule
 import com.valhalla.core.automation.AutomationRuleRepository
@@ -52,6 +56,7 @@ import com.valhalla.feature.export.rememberFileSaver
 import com.valhalla.feature.i18n.LocalStrings
 import com.valhalla.feature.i18n.LocaleFormat
 import com.valhalla.feature.i18n.StringKey
+import com.valhalla.feature.i18n.render
 import com.valhalla.feature.settings.BackupParseResult
 import com.valhalla.feature.settings.BackupPlanItem
 import com.valhalla.feature.settings.BackupSection
@@ -59,6 +64,7 @@ import com.valhalla.feature.settings.PreferencesBackupParser
 import com.valhalla.feature.settings.PreferencesBackupService
 import com.valhalla.feature.settings.PreferencesReset
 import com.valhalla.feature.theme.DesignTokens
+import com.valhalla.feature.uilogic.editableLoadedConfigFields
 import kotlinx.coroutines.launch
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
@@ -111,8 +117,7 @@ internal fun PresetSection(
     val items = remember(version, configState.fields) { presets.list() }
     val currentValues =
         remember(configState) {
-            configState.visibleFields
-                .filter { it.loaded && it.editable }
+            editableLoadedConfigFields(configState.visibleFields)
                 .associate { it.spec.key to it.text }
         }
     var nameDialog by remember { mutableStateOf<PresetNameDialog?>(null) }
@@ -120,6 +125,7 @@ internal fun PresetSection(
     var applyTarget by remember { mutableStateOf<Pair<ConfigPreset, List<com.valhalla.core.config.PresetFieldDiff>>?>(null) }
     var applyReport by remember { mutableStateOf<Pair<ConfigPreset, PresetApplyReport>?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
+    val configError = configState.error
 
     Column(verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm)) {
         Text(strings.t(StringKey.PRESET_SECTION_TITLE), style = MaterialTheme.typography.titleMedium)
@@ -127,7 +133,16 @@ internal fun PresetSection(
             strings.t(StringKey.PRESET_KEY_COUNT, "count" to currentValues.size.toString()),
             style = MaterialTheme.typography.bodySmall,
         )
-        if (currentValues.isEmpty()) {
+        if (configState.loading) {
+            LoadingStatePanel()
+        }
+        configError?.let { error ->
+            ErrorStatePanel(
+                detail = strings.render(error),
+                onRetry = { scope.launch { config.load() } },
+            )
+        }
+        if (currentValues.isEmpty() && !configState.loading) {
             Text(strings.t(StringKey.PRESET_NOT_LOADED), style = MaterialTheme.typography.bodySmall)
         }
         if (writeLocked) {
@@ -136,9 +151,10 @@ internal fun PresetSection(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.secondary,
             )
+            DisabledStatePanel(StringKey.STATE_DISABLED_READ_ONLY)
         }
-        if (items.isEmpty()) {
-            Text(strings.t(StringKey.PRESET_EMPTY), style = MaterialTheme.typography.bodySmall)
+        if (items.isEmpty() && !configState.loading && configError == null) {
+            EmptyStatePanel(body = strings.t(StringKey.PRESET_EMPTY))
         }
         items.forEach { preset ->
             Card(modifier = Modifier.fillMaxWidth()) {
@@ -202,7 +218,13 @@ internal fun PresetSection(
             },
             modifier = Modifier.fillMaxWidth(),
         ) { Text(strings.t(StringKey.PRESET_SAVE_CURRENT)) }
-        message?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+        message?.let {
+            Text(
+                it,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+            )
+        }
     }
 
     nameDialog?.let { dialog ->
@@ -304,7 +326,18 @@ internal fun PresetSection(
             onDismissRequest = { applyReport = null },
             title = { Text(strings.t(StringKey.PRESET_RESULT_TITLE)) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs)) {
+                Column(
+                    modifier =
+                        Modifier.semantics {
+                            liveRegion =
+                                if (report.failedCount > 0) {
+                                    LiveRegionMode.Assertive
+                                } else {
+                                    LiveRegionMode.Polite
+                                }
+                        },
+                    verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs),
+                ) {
                     Text(
                         strings.t(
                             StringKey.PRESET_RESULT_SUMMARY,
@@ -492,32 +525,38 @@ fun AutomationScreen(
                 verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm),
             ) {
                 if (items.isEmpty()) {
-                    Text(strings.t(StringKey.AUTOMATION_EMPTY))
+                    EmptyStatePanel(body = strings.t(StringKey.AUTOMATION_EMPTY))
                 }
                 items.forEachIndexed { index, rule ->
                     AutomationRuleRow(
-                        rule = rule,
-                        actionLabel = strings.t(rule.action.stringKey()),
-                        triggerLabel = strings.t(rule.trigger.stringKey()),
-                        enabledLabel = strings.t(StringKey.AUTOMATION_ENABLED),
-                        canMoveUp = index > 0,
-                        canMoveDown = index < items.lastIndex,
-                        upLabel = strings.t(StringKey.AUTOMATION_MOVE_UP),
-                        downLabel = strings.t(StringKey.AUTOMATION_MOVE_DOWN),
-                        deleteLabel = strings.t(StringKey.AUTOMATION_DELETE),
-                        onToggle = {
-                            rules.setEnabled(rule.id, !rule.enabled)
-                            version++
-                        },
-                        onMoveUp = {
-                            if (rules.move(rule.id, -1)) version++
-                        },
-                        onMoveDown = {
-                            if (rules.move(rule.id, 1)) version++
-                        },
-                        onDelete = {
-                            if (rules.delete(rule.id)) version++
-                        },
+                        ui =
+                            AutomationRuleRowUi(
+                                rule = rule,
+                                actionLabel = strings.t(rule.action.stringKey()),
+                                triggerLabel = strings.t(rule.trigger.stringKey()),
+                                enabledLabel = strings.t(StringKey.AUTOMATION_ENABLED),
+                                canMoveUp = index > 0,
+                                canMoveDown = index < items.lastIndex,
+                                upLabel = strings.t(StringKey.AUTOMATION_MOVE_UP),
+                                downLabel = strings.t(StringKey.AUTOMATION_MOVE_DOWN),
+                                deleteLabel = strings.t(StringKey.AUTOMATION_DELETE),
+                            ),
+                        actions =
+                            AutomationRuleRowActions(
+                                onToggle = {
+                                    rules.setEnabled(rule.id, !rule.enabled)
+                                    version++
+                                },
+                                onMoveUp = {
+                                    if (rules.move(rule.id, -1)) version++
+                                },
+                                onMoveDown = {
+                                    if (rules.move(rule.id, 1)) version++
+                                },
+                                onDelete = {
+                                    if (rules.delete(rule.id)) version++
+                                },
+                            ),
                     )
                 }
             }
@@ -535,7 +574,11 @@ fun AutomationScreen(
                         strings.t(StringKey.AUTOMATION_ACTION_DIAGNOSTIC),
                         style = MaterialTheme.typography.titleMedium,
                     )
-                    Text(report, style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        report,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                    )
                 }
             }
         }
@@ -554,34 +597,47 @@ fun AutomationScreen(
     }
 }
 
+private data class AutomationRuleRowUi(
+    val rule: AutomationRule,
+    val actionLabel: String,
+    val triggerLabel: String,
+    val enabledLabel: String,
+    val canMoveUp: Boolean,
+    val canMoveDown: Boolean,
+    val upLabel: String,
+    val downLabel: String,
+    val deleteLabel: String,
+)
+
+private data class AutomationRuleRowActions(
+    val onToggle: () -> Unit,
+    val onMoveUp: () -> Unit,
+    val onMoveDown: () -> Unit,
+    val onDelete: () -> Unit,
+)
+
 @Composable
 private fun AutomationRuleRow(
-    rule: AutomationRule,
-    actionLabel: String,
-    triggerLabel: String,
-    enabledLabel: String,
-    canMoveUp: Boolean,
-    canMoveDown: Boolean,
-    upLabel: String,
-    downLabel: String,
-    deleteLabel: String,
-    onToggle: () -> Unit,
-    onMoveUp: () -> Unit,
-    onMoveDown: () -> Unit,
-    onDelete: () -> Unit,
+    ui: AutomationRuleRowUi,
+    actions: AutomationRuleRowActions,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs)) {
-        Text("$triggerLabel · $actionLabel", style = MaterialTheme.typography.bodyMedium)
+        Text("${ui.triggerLabel} · ${ui.actionLabel}", style = MaterialTheme.typography.bodyMedium)
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs),
         ) {
-            Text(enabledLabel, style = MaterialTheme.typography.bodySmall)
-            Switch(checked = rule.enabled, onCheckedChange = { onToggle() })
-            TextButton(onClick = onMoveUp, enabled = canMoveUp) { Text(upLabel) }
-            TextButton(onClick = onMoveDown, enabled = canMoveDown) { Text(downLabel) }
-            TextButton(onClick = onDelete) { Text(deleteLabel) }
+            Text(ui.enabledLabel, style = MaterialTheme.typography.bodySmall)
+            Switch(
+                checked = ui.rule.enabled,
+                onCheckedChange = { actions.onToggle() },
+                modifier =
+                    Modifier.semantics { contentDescription = ui.enabledLabel },
+            )
+            TextButton(onClick = actions.onMoveUp, enabled = ui.canMoveUp) { Text(ui.upLabel) }
+            TextButton(onClick = actions.onMoveDown, enabled = ui.canMoveDown) { Text(ui.downLabel) }
+            TextButton(onClick = actions.onDelete) { Text(ui.deleteLabel) }
         }
     }
 }
@@ -631,7 +687,8 @@ private fun AddRuleDialog(
                 if (needsPreset) {
                     Text(strings.t(StringKey.AUTOMATION_PRESET_SELECT), style = MaterialTheme.typography.labelMedium)
                     if (presets.isEmpty()) {
-                        Text(strings.t(StringKey.AUTOMATION_NO_PRESET))
+                        EmptyStatePanel(body = strings.t(StringKey.AUTOMATION_NO_PRESET))
+                        DisabledStatePanel(StringKey.STATE_UNAVAILABLE_HINT)
                     } else {
                         presets.forEach { preset ->
                             FilterChip(
@@ -776,7 +833,7 @@ fun UsageStatsScreen(
 
         Text(strings.t(StringKey.STATS_DEVICES), style = MaterialTheme.typography.titleMedium)
         if (stats.devices.isEmpty()) {
-            Text(strings.t(StringKey.STATS_NO_DATA))
+            EmptyStatePanel(body = strings.t(StringKey.STATS_NO_DATA))
         } else {
             stats.devices.forEach { device ->
                 Card(modifier = Modifier.fillMaxWidth()) {
@@ -935,49 +992,32 @@ fun BackupScreen(
         ) { Text(strings.t(StringKey.BACKUP_VALIDATE)) }
 
         val parsed = parseResult
+        if (parsed is BackupParseResult.Failure) {
+            ErrorStatePanel(detail = parsed.reason)
+        }
         if (parsed is BackupParseResult.Success) {
-            parsed.warning?.let {
-                Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            BackupPreview(parsed, plan) {
+                PreferencesBackupService.apply(parsed.backup, store, presets, rules)
+                onReloadPersisted()
+                parseResult = null
+                plan = emptyList()
+                jsonText = ""
+                message = strings.t(StringKey.BACKUP_IMPORTED_TOAST)
             }
-            if (parsed.issues.isNotEmpty()) {
-                Text(strings.t(StringKey.BACKUP_ISSUES_TITLE), style = MaterialTheme.typography.titleMedium)
-                parsed.issues.forEach { issue ->
-                    Text(
-                        strings.t(
-                            if (issue.missing) StringKey.BACKUP_ISSUE_MISSING else StringKey.BACKUP_ISSUE_INVALID,
-                            "field" to issue.field,
-                        ),
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-            }
-            Text(strings.t(StringKey.BACKUP_PREVIEW_TITLE), style = MaterialTheme.typography.titleMedium)
-            plan.forEach { item ->
-                Text(
-                    strings.t(item.section.stringKey()) + "  " +
-                        strings.t(
-                            StringKey.BACKUP_PREVIEW_ROW,
-                            "current" to item.currentValue,
-                            "incoming" to item.incomingValue,
-                        ),
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-            Button(
-                onClick = {
-                    PreferencesBackupService.apply(parsed.backup, store, presets, rules)
-                    onReloadPersisted()
-                    parseResult = null
-                    plan = emptyList()
-                    jsonText = ""
-                    message = strings.t(StringKey.BACKUP_IMPORTED_TOAST)
-                },
-                enabled = parsed.canApply,
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text(strings.t(StringKey.BACKUP_IMPORT_CONFIRM)) }
         }
 
-        message?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+        message?.let {
+            val isError = parseResult is BackupParseResult.Failure
+            Text(
+                it,
+                style = MaterialTheme.typography.bodySmall,
+                modifier =
+                    Modifier.semantics {
+                        liveRegion =
+                            if (isError) LiveRegionMode.Assertive else LiveRegionMode.Polite
+                    },
+            )
+        }
 
         Text(strings.t(StringKey.BACKUP_FACTORY_RESET), style = MaterialTheme.typography.titleMedium)
         Text(strings.t(StringKey.BACKUP_FACTORY_RESET_DESC), style = MaterialTheme.typography.bodySmall)
@@ -1012,4 +1052,56 @@ fun BackupScreen(
             },
         )
     }
+}
+
+@Composable
+private fun BackupPreview(
+    parsed: BackupParseResult.Success,
+    plan: List<BackupPlanItem>,
+    onApply: () -> Unit,
+) {
+    val strings = LocalStrings.current
+    parsed.warning?.let {
+        Text(
+            it,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive },
+        )
+    }
+    if (parsed.issues.isNotEmpty()) {
+        Text(strings.t(StringKey.BACKUP_ISSUES_TITLE), style = MaterialTheme.typography.titleMedium)
+        parsed.issues.forEach { issue ->
+            Text(
+                strings.t(
+                    if (issue.missing) StringKey.BACKUP_ISSUE_MISSING else StringKey.BACKUP_ISSUE_INVALID,
+                    "field" to issue.field,
+                ),
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+    }
+    Text(strings.t(StringKey.BACKUP_PREVIEW_TITLE), style = MaterialTheme.typography.titleMedium)
+    if (parsed.canApply && plan.isEmpty()) {
+        EmptyStatePanel()
+    }
+    plan.forEach { item ->
+        Text(
+            strings.t(item.section.stringKey()) + "  " +
+                strings.t(
+                    StringKey.BACKUP_PREVIEW_ROW,
+                    "current" to item.currentValue,
+                    "incoming" to item.incomingValue,
+                ),
+            style = MaterialTheme.typography.bodySmall,
+        )
+    }
+    if (!parsed.canApply) {
+        DisabledStatePanel(StringKey.STATE_UNAVAILABLE_HINT)
+    }
+    Button(
+        onClick = onApply,
+        enabled = parsed.canApply,
+        modifier = Modifier.fillMaxWidth(),
+    ) { Text(strings.t(StringKey.BACKUP_IMPORT_CONFIRM)) }
 }

@@ -5,6 +5,30 @@ import com.valhalla.core.protocol.message.FirmwareVersion
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
 
+private const val U32_MAX = 0xFFFFFFFFL
+private const val BYTE_MASK = 0xFF
+private const val ASCII_ZERO = 0x30
+private const val ASCII_NINE = 0x39
+private const val ASCII_UPPER_A = 0x41
+private const val ASCII_UPPER_Z = 0x5A
+private const val ASCII_LOWER_A = 0x61
+private const val ASCII_LOWER_Z = 0x7A
+private const val ASCII_MAX_PRINTABLE = 0x7E
+private const val INDEX_FILE_NAME = 2
+private const val INDEX_VERSION = 3
+private const val INDEX_CHANNEL = 4
+private const val INDEX_MODELS = 5
+private const val INDEX_TOTAL_BYTES = 6
+private const val INDEX_CRC32 = 7
+private const val INDEX_ADDED_AT = 8
+private const val INDEX_LAST_USED = 9
+private const val INDEX_LAST_DEVICE = 10
+private const val INDEX_OUTCOME = 11
+private const val INDEX_FAVORITE = 12
+private const val INDEX_ALIAS = 13
+private const val INDEX_PATH = 14
+private const val INDEX_PATH_LEGACY = 13
+
 /** 固件库排序方式：最近使用优先，或按版本号优先。 */
 enum class FirmwareLibrarySort {
     RECENT,
@@ -47,7 +71,7 @@ data class FirmwareLibraryRecord(
         require(fileName.isNotBlank()) { "固件文件名不能为空" }
         require(version.isNotBlank()) { "固件版本不能为空" }
         require(totalBytes >= 0) { "固件总长不能为负" }
-        require(crc32 in 0L..0xFFFFFFFFL) { "CRC-32 超出 u32 范围: $crc32" }
+        require(crc32 in 0L..U32_MAX) { "CRC-32 超出 u32 范围: $crc32" }
         require(addedAtEpochMillis >= 0) { "引入时间不能为负" }
         require(sourcePath.isNotBlank()) { "固件引用路径不能为空" }
     }
@@ -169,40 +193,40 @@ object FirmwareLibraryCodec {
         parts: List<String>,
         legacy: Boolean,
     ): FirmwareLibraryRecord? {
-        val fileName = unescape(parts[2]) ?: return null
-        val version = unescape(parts[3]) ?: return null
-        val totalBytes = parts[6].toLongOrNull() ?: return null
-        val crc32 = parts[7].toLongOrNull() ?: return null
-        val addedAt = parts[8].toLongOrNull() ?: return null
-        val lastUsed = if (parts[9].isEmpty()) null else parts[9].toLongOrNull() ?: return null
+        val fileName = unescape(parts[INDEX_FILE_NAME]) ?: return null
+        val version = unescape(parts[INDEX_VERSION]) ?: return null
+        val totalBytes = parts[INDEX_TOTAL_BYTES].toLongOrNull() ?: return null
+        val crc32 = parts[INDEX_CRC32].toLongOrNull() ?: return null
+        val addedAt = parts[INDEX_ADDED_AT].toLongOrNull() ?: return null
+        val lastUsed = if (parts[INDEX_LAST_USED].isEmpty()) null else parts[INDEX_LAST_USED].toLongOrNull() ?: return null
         val outcome =
-            if (parts[11].isEmpty()) {
+            if (parts[INDEX_OUTCOME].isEmpty()) {
                 null
             } else {
-                FirmwareLibraryOutcome.entries.firstOrNull { it.name == parts[11] } ?: return null
+                FirmwareLibraryOutcome.entries.firstOrNull { it.name == parts[INDEX_OUTCOME] } ?: return null
             }
         val favorite =
-            when (parts[12]) {
+            when (parts[INDEX_FAVORITE]) {
                 "0" -> false
                 "1" -> true
                 else -> return null
             }
-        val alias = if (legacy) null else unescape(parts[13])
-        val pathIndex = if (legacy) 13 else 14
+        val alias = if (legacy) null else unescape(parts[INDEX_ALIAS])
+        val pathIndex = if (legacy) INDEX_PATH_LEGACY else INDEX_PATH
         val sourcePath = unescape(parts[pathIndex]) ?: return null
-        val models = unescape(parts[5])?.split(',')?.filter { it.isNotBlank() }.orEmpty()
+        val models = unescape(parts[INDEX_MODELS])?.split(',')?.filter { it.isNotBlank() }.orEmpty()
         return runCatching {
             FirmwareLibraryRecord(
                 fileName = fileName,
                 version = version,
-                channel = unescape(parts[4]).orEmpty(),
+                channel = unescape(parts[INDEX_CHANNEL]).orEmpty(),
                 modelWhitelist = models,
                 totalBytes = totalBytes,
                 crc32 = crc32,
                 addedAtEpochMillis = addedAt,
                 sourcePath = sourcePath,
                 lastUsedAtEpochMillis = lastUsed,
-                lastDeviceId = unescape(parts[10]),
+                lastDeviceId = unescape(parts[INDEX_LAST_DEVICE]),
                 lastOutcome = outcome,
                 favorite = favorite,
                 alias = alias,
@@ -218,7 +242,7 @@ object FirmwareLibraryCodec {
         if (value == null) return ""
         return buildString {
             value.encodeToByteArray().forEach { byte ->
-                val code = byte.toInt() and 0xFF
+                val code = byte.toInt() and BYTE_MASK
                 if (isAsciiSafe(code)) {
                     append(code.toChar())
                 } else {
@@ -231,9 +255,9 @@ object FirmwareLibraryCodec {
     }
 
     private fun isAsciiSafe(code: Int): Boolean =
-        code in 0x30..0x39 ||
-            code in 0x41..0x5A ||
-            code in 0x61..0x7A ||
+        code in ASCII_ZERO..ASCII_NINE ||
+            code in ASCII_UPPER_A..ASCII_UPPER_Z ||
+            code in ASCII_LOWER_A..ASCII_LOWER_Z ||
             code == '.'.code ||
             code == '_'.code ||
             code == '~'.code ||
@@ -252,7 +276,7 @@ object FirmwareLibraryCodec {
                 bytes += ((high shl 4) or low).toByte()
                 index += 3
             } else {
-                if (char.code > 0x7E) return null
+                if (char.code > ASCII_MAX_PRINTABLE) return null
                 bytes += char.code.toByte()
                 index++
             }

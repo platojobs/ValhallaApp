@@ -8,9 +8,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
@@ -30,6 +29,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.progressBarRangeInfo
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import com.valhalla.core.batch.BatchItemStatus
 import com.valhalla.core.batch.BatchOperationKind
@@ -52,13 +57,8 @@ import com.valhalla.feature.i18n.LocalStrings
 import com.valhalla.feature.i18n.StringKey
 import com.valhalla.feature.ota.OtaQueueController
 import com.valhalla.feature.theme.DesignTokens
+import com.valhalla.feature.uilogic.selectedById
 import kotlinx.coroutines.launch
-
-/** 批量/队列页面共用的「已连接设备」选项。 */
-internal data class BatchDeviceOption(
-    val deviceId: String,
-    val displayName: String,
-)
 
 internal fun BatchItemStatus.labelKey(): StringKey =
     when (this) {
@@ -137,7 +137,11 @@ internal fun BatchScreen(
             (kind == BatchOperationKind.HEALTH_CHECK || selectedPreset != null)
 
     Column(
-        modifier = Modifier.fillMaxSize().padding(DesignTokens.Spacing.lg),
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .padding(DesignTokens.Spacing.lg)
+                .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm),
     ) {
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -172,7 +176,7 @@ internal fun BatchScreen(
         if (kind == BatchOperationKind.APPLY_PRESET) {
             Text(strings.t(StringKey.BATCH_PRESET_LABEL), style = MaterialTheme.typography.titleSmall)
             if (presets.isEmpty()) {
-                Text(strings.t(StringKey.BATCH_PRESET_EMPTY), style = MaterialTheme.typography.bodySmall)
+                EmptyStatePanel(body = strings.t(StringKey.BATCH_PRESET_EMPTY))
             } else {
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm),
@@ -192,7 +196,7 @@ internal fun BatchScreen(
 
         Text(strings.t(StringKey.BATCH_TARGETS), style = MaterialTheme.typography.titleSmall)
         if (devices.isEmpty()) {
-            Text(strings.t(StringKey.DEVICES_EMPTY), style = MaterialTheme.typography.bodySmall)
+            EmptyStatePanel(body = strings.t(StringKey.DEVICES_EMPTY))
         } else {
             devices.forEach { device ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -207,6 +211,11 @@ internal fun BatchScreen(
                                 }
                         },
                         enabled = !running,
+                        modifier =
+                            Modifier.semantics {
+                                contentDescription =
+                                    strings.t(StringKey.BATCH_TARGETS) + ": " + device.displayName
+                            },
                     )
                     Text(device.displayName, style = MaterialTheme.typography.bodyMedium)
                 }
@@ -224,8 +233,7 @@ internal fun BatchScreen(
                             controller.run(
                                 kind = kind,
                                 targets =
-                                    devices
-                                        .filter { it.deviceId in selectedIds }
+                                    selectedById(devices, selectedIds) { it.deviceId }
                                         .map { BatchTarget(it.deviceId, it.displayName) },
                             ) { target, step ->
                                 execute(kind, selectedPreset, target, step)
@@ -242,25 +250,36 @@ internal fun BatchScreen(
             }
         }
 
+        when {
+            devices.isEmpty() -> DisabledStatePanel(StringKey.STATE_DISABLED_NOT_CONNECTED)
+            running -> DisabledStatePanel(StringKey.STATE_DISABLED_BUSY)
+        }
+
         if (running) {
-            Text(strings.t(StringKey.BATCH_RUNNING), style = MaterialTheme.typography.bodySmall)
-            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            LoadingStatePanel(body = strings.t(StringKey.BATCH_RUNNING))
         }
         if (cancelRequested) {
             Text(
                 strings.t(StringKey.BATCH_CANCEL_REQUESTED),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.secondary,
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
             )
         }
 
-        LazyColumn(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm),
-        ) {
-            items(items, key = { it.target.deviceId }) { item ->
+        Column(verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm)) {
+            items.forEach { item ->
                 var expanded by remember(item.target.deviceId) { mutableStateOf(false) }
-                Card(modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded }) {
+                Card(
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable { expanded = !expanded }
+                            .semantics {
+                                contentDescription =
+                                    item.target.displayName + " " + strings.t(item.status.labelKey())
+                            },
+                ) {
                     Column(
                         modifier = Modifier.padding(DesignTokens.Spacing.md),
                         verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xxs),
@@ -279,6 +298,15 @@ internal fun BatchScreen(
                                         MaterialTheme.colorScheme.error
                                     } else {
                                         MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
+                                modifier =
+                                    Modifier.semantics {
+                                        liveRegion =
+                                            if (item.status == BatchItemStatus.FAILED) {
+                                                LiveRegionMode.Assertive
+                                            } else {
+                                                LiveRegionMode.Polite
+                                            }
                                     },
                             )
                         }
@@ -322,6 +350,7 @@ internal fun BatchScreen(
                     "removed" to summary.removed.toString(),
                 ),
                 style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
             )
             Row(horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm)) {
                 TextButton(onClick = {
@@ -360,10 +389,15 @@ internal fun BatchScreen(
         }
 
         message?.let {
-            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
+            Text(
+                it,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.secondary,
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+            )
         }
         if (!running && items.isEmpty() && devices.isNotEmpty()) {
-            Text(strings.t(StringKey.BATCH_NO_TARGET), style = MaterialTheme.typography.bodySmall)
+            EmptyStatePanel(body = strings.t(StringKey.BATCH_NO_TARGET))
         }
     }
 }
@@ -415,7 +449,11 @@ internal fun OtaQueueScreen(
             }
 
     Column(
-        modifier = Modifier.fillMaxSize().padding(DesignTokens.Spacing.lg),
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .padding(DesignTokens.Spacing.lg)
+                .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm),
     ) {
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -431,7 +469,7 @@ internal fun OtaQueueScreen(
 
         Text(strings.t(StringKey.QUEUE_TARGETS), style = MaterialTheme.typography.titleSmall)
         if (devices.isEmpty()) {
-            Text(strings.t(StringKey.DEVICES_EMPTY), style = MaterialTheme.typography.bodySmall)
+            EmptyStatePanel(body = strings.t(StringKey.DEVICES_EMPTY))
         } else {
             devices.forEach { device ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -446,6 +484,11 @@ internal fun OtaQueueScreen(
                                 }
                         },
                         enabled = !snapshot.running,
+                        modifier =
+                            Modifier.semantics {
+                                contentDescription =
+                                    strings.t(StringKey.QUEUE_TARGETS) + ": " + device.displayName
+                            },
                     )
                     Text(device.displayName, style = MaterialTheme.typography.bodyMedium)
                 }
@@ -454,7 +497,7 @@ internal fun OtaQueueScreen(
 
         Text(strings.t(StringKey.QUEUE_FIRMWARE), style = MaterialTheme.typography.titleSmall)
         if (firmwareRecords.isEmpty()) {
-            Text(strings.t(StringKey.QUEUE_FIRMWARE_EMPTY), style = MaterialTheme.typography.bodySmall)
+            EmptyStatePanel(body = strings.t(StringKey.QUEUE_FIRMWARE_EMPTY))
         } else {
             Column(verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xxs)) {
                 firmwareRecords.forEach { record ->
@@ -481,7 +524,7 @@ internal fun OtaQueueScreen(
                 onClick = {
                     val firmware = selectedFirmware ?: return@OutlinedButton
                     var added = 0
-                    devices.filter { it.deviceId in selectedIds }.forEach { device ->
+                    selectedById(devices, selectedIds) { it.deviceId }.forEach { device ->
                         val ok =
                             controller.enqueue(
                                 OtaQueueTarget(
@@ -518,25 +561,28 @@ internal fun OtaQueueScreen(
             ) { Text(strings.t(StringKey.QUEUE_CANCEL_CURRENT)) }
         }
 
+        when {
+            snapshot.running -> DisabledStatePanel(StringKey.STATE_DISABLED_BUSY)
+            devices.isEmpty() -> DisabledStatePanel(StringKey.STATE_DISABLED_NOT_CONNECTED)
+            firmwareRecords.isEmpty() -> DisabledStatePanel(StringKey.STATE_UNAVAILABLE_HINT)
+        }
+
         if (snapshot.pauseRequested) {
             Text(
                 strings.t(StringKey.QUEUE_PAUSE_REQUESTED),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.secondary,
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
             )
         }
-        currentDevice?.let { name ->
-            Text(
-                strings.t(StringKey.QUEUE_CURRENT, "device" to name),
-                style = MaterialTheme.typography.bodySmall,
+        if (snapshot.running) {
+            LoadingStatePanel(
+                body = currentDevice?.let { name -> strings.t(StringKey.QUEUE_CURRENT, "device" to name) },
             )
         }
 
-        LazyColumn(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm),
-        ) {
-            items(snapshot.items, key = { it.target.deviceId }) { item ->
+        Column(verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm)) {
+            snapshot.items.forEach { item ->
                 QueueItemCard(
                     item = item,
                     onSkipFailed = { controller.skipFailed(item.target.deviceId) },
@@ -560,6 +606,7 @@ internal fun OtaQueueScreen(
                     "pending" to summary.pending.toString(),
                 ),
                 style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
             )
             if (summary.checkpointRetained > 0) {
                 Text(
@@ -605,11 +652,16 @@ internal fun OtaQueueScreen(
                 }) { Text(strings.t(StringKey.BATCH_SAVE)) }
             }
         } else {
-            Text(strings.t(StringKey.QUEUE_EMPTY), style = MaterialTheme.typography.bodySmall)
+            EmptyStatePanel(body = strings.t(StringKey.QUEUE_EMPTY))
         }
 
         message?.let {
-            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
+            Text(
+                it,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.secondary,
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+            )
         }
     }
 }
@@ -621,6 +673,13 @@ private fun QueueItemCard(
     onRemove: () -> Unit,
 ) {
     val strings = LocalStrings.current
+    val progress = item.progress.coerceIn(0f, 1f)
+    val progressText =
+        strings.t(
+            StringKey.QUEUE_PROGRESS,
+            "stage" to strings.t(item.stage.labelKey()),
+            "percent" to (progress * 100).toInt().toString(),
+        )
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(DesignTokens.Spacing.md),
@@ -641,23 +700,41 @@ private fun QueueItemCard(
                         } else {
                             MaterialTheme.colorScheme.onSurfaceVariant
                         },
+                    modifier =
+                        Modifier.semantics {
+                            liveRegion =
+                                if (item.status == OtaQueueItemStatus.FAILED) {
+                                    LiveRegionMode.Assertive
+                                } else {
+                                    LiveRegionMode.Polite
+                                }
+                        },
                 )
             }
             Text(item.target.firmwareLabel, style = MaterialTheme.typography.bodySmall)
-            Text(
-                strings.t(
-                    StringKey.QUEUE_PROGRESS,
-                    "stage" to strings.t(item.stage.labelKey()),
-                    "percent" to ((item.progress.coerceIn(0f, 1f)) * 100).toInt().toString(),
-                ),
-                style = MaterialTheme.typography.bodySmall,
-            )
+            Text(progressText, style = MaterialTheme.typography.bodySmall)
             LinearProgressIndicator(
-                progress = { item.progress.coerceIn(0f, 1f) },
-                modifier = Modifier.fillMaxWidth(),
+                progress = { progress },
+                modifier =
+                    Modifier.fillMaxWidth().semantics {
+                        progressBarRangeInfo = ProgressBarRangeInfo.Indeterminate
+                        contentDescription = progressText
+                    },
             )
             item.userReason?.let { reason ->
-                Text(reason, style = MaterialTheme.typography.bodySmall)
+                Text(
+                    reason,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier =
+                        Modifier.semantics {
+                            liveRegion =
+                                if (item.status == OtaQueueItemStatus.FAILED) {
+                                    LiveRegionMode.Assertive
+                                } else {
+                                    LiveRegionMode.Polite
+                                }
+                        },
+                )
             }
             if (item.checkpointRetained) {
                 Text(

@@ -48,7 +48,8 @@ object AppStrings {
             StringKey.SCAN_HINT to
                 StringsEntry(
                     "确保设备已上电并处于广播模式。扫描需要蓝牙权限：Android 12 及以上使用「附近的设备」，旧版本使用定位权限；iOS 使用蓝牙授权。",
-                    "Make sure the device is powered on and advertising. Scanning needs Bluetooth permission: Android 12+ uses Nearby devices, older versions use location; iOS uses Bluetooth authorization.",
+                    "Make sure the device is powered on and advertising. Scanning needs Bluetooth permission: " +
+                        "Android 12+ uses Nearby devices, older versions use location; iOS uses Bluetooth authorization.",
                 ),
             StringKey.START_SCAN to StringsEntry("开始扫描", "Start scan"),
             StringKey.STOP_SCAN to StringsEntry("停止", "Stop"),
@@ -856,7 +857,8 @@ object AppStrings {
             StringKey.ABOUT_LICENSE_BODY to
                 StringsEntry(
                     "本应用使用 Kotlin、Kotlinx Coroutines、Compose Multiplatform（Apache License 2.0）以及平台蓝牙框架。完整许可见各依赖仓库的 LICENSE 文件。",
-                    "This app uses Kotlin, Kotlinx Coroutines, Compose Multiplatform (Apache License 2.0), and platform Bluetooth frameworks. See each dependency's LICENSE file for full terms.",
+                    "This app uses Kotlin, Kotlinx Coroutines, Compose Multiplatform (Apache License 2.0), and platform Bluetooth frameworks. " +
+                        "See each dependency's LICENSE file for full terms.",
                 ),
             // ---- 帮助 ----
             StringKey.HELP_TITLE to StringsEntry("帮助与常见问题", "Help & FAQ"),
@@ -868,37 +870,48 @@ object AppStrings {
             StringKey.HELP_A_PERMISSION to
                 StringsEntry(
                     "扫描需要蓝牙权限。Android 12 及以上请授予「附近的设备」权限，Android 11 及以下请授予定位权限；iOS 需允许应用使用蓝牙。若曾拒绝，请到系统设置中为本应用开启权限，返回应用后重试。",
-                    "Scanning needs Bluetooth permission. On Android 12+ grant Nearby devices; on Android 11 and below grant location. On iOS allow Bluetooth access. If you denied it, enable it in system settings for this app, come back, and retry.",
+                    "Scanning needs Bluetooth permission. On Android 12+ grant Nearby devices; on Android 11 and below grant location. " +
+                        "On iOS allow Bluetooth access. If you denied it, enable it in system settings for this app, come back, and retry.",
                 ),
             StringKey.HELP_Q_CONNECT to StringsEntry("连接失败或频繁断开怎么办？", "Connection fails or keeps dropping?"),
             StringKey.HELP_A_CONNECT to
                 StringsEntry(
                     "先确认设备已上电、处于广播模式并靠近手机，蓝牙已开启。连接超时或设备侧断开时，应用会自动按退避间隔重连（最多 5 次）；可随时取消并手动重试。蓝牙关闭期间重连会暂停，开启后继续。",
-                    "Confirm the device is powered on, advertising, close to the phone, and Bluetooth is on. On timeout or device-side disconnect the app retries with backoff (up to 5 attempts); you can cancel and retry manually. Retries pause while Bluetooth is off and resume afterwards.",
+                    "Confirm the device is powered on, advertising, close to the phone, and Bluetooth is on. " +
+                        "On timeout or device-side disconnect the app retries with backoff (up to 5 attempts); " +
+                        "you can cancel and retry manually. Retries pause while Bluetooth is off and resume afterwards.",
                 ),
             StringKey.HELP_Q_OTA to StringsEntry("OTA 升级失败怎么办？", "What if an OTA update fails?"),
             StringKey.HELP_A_OTA to
                 StringsEntry(
                     "先看失败原因：CRC 不一致或固件不匹配时请重新选择正确固件并重新预检；链路断开时重新连接后可用「继续上次升级」从断点续传。断点保存在本机，成功或主动清除后删除。升级期间请保持设备靠近并避免关闭蓝牙。",
-                    "Read the failure reason first. On a CRC mismatch or model mismatch, select the correct firmware and re-run the precheck. If the link dropped, reconnect and use \"Resume last update\" to continue from the checkpoint. Checkpoints stay on this device and are removed after success or when cleared. Keep the device nearby and leave Bluetooth on during the update.",
+                    "Read the failure reason first. " +
+                        "On a CRC mismatch or model mismatch, select the correct firmware and re-run the precheck. " +
+                        "If the link dropped, reconnect and use \"Resume last update\" to continue from the checkpoint. " +
+                        "Checkpoints stay on this device and are removed after success or when cleared. " +
+                        "Keep the device nearby and leave Bluetooth on during the update.",
                 ),
             StringKey.HELP_Q_LOGS to StringsEntry("日志保存在哪里？如何导出？", "Where are logs stored and how do I export them?"),
             StringKey.HELP_A_LOGS to
                 StringsEntry(
                     "报文日志只保存在内存中（默认 500 条，滚动淘汰），不会自动落盘或上传。可在设备详情页进入「报文日志」，按命令、错误、时间范围与关键字筛选，再选择保存文件或系统分享。应用退出后内存日志会清空，需要留存请及时导出。",
-                    "Packet logs live in memory only (500 entries by default, oldest evicted) and are never written to disk or uploaded automatically. Open Packet logs from device details, filter by command, error, time range, and keyword, then save a file or share it. In-memory logs are cleared when the app exits, so export them before leaving.",
+                    "Packet logs live in memory only (500 entries by default, oldest evicted) and are never written to disk or uploaded automatically. " +
+                        "Open Packet logs from device details, filter by command, error, time range, and keyword, then save a file or share it. " +
+                        "In-memory logs are cleared when the app exits, so export them before leaving.",
                 ),
             StringKey.HELP_Q_DEVICES to StringsEntry("最多可以连接几台设备？", "How many devices can I connect?"),
             StringKey.HELP_A_DEVICES to
                 StringsEntry(
                     "默认最多同时连接 4 台。达到上限会直接提示，需要先断开一台；切换后详情、配置与 OTA 只作用于当前设备。",
-                    "Up to 4 devices can be connected at once. At the limit you must disconnect one first; switching only changes which device details, configuration, and OTA apply to.",
+                    "Up to 4 devices can be connected at once. At the limit you must disconnect one first; " +
+                        "switching only changes which device details, configuration, and OTA apply to.",
                 ),
             StringKey.HELP_Q_QUICK to StringsEntry("快捷操作会立即生效吗？", "Do quick actions take effect immediately?"),
             StringKey.HELP_A_QUICK to
                 StringsEntry(
                     "重启与恢复出厂都需要二次确认，恢复出厂不可撤销；心跳只读取运行时长与电量。恢复出厂的确认令牌语义需固件确认。",
-                    "Reboot and factory reset require confirmation, and factory reset cannot be undone; heartbeat only reads uptime and battery. Confirm-token semantics must be confirmed with the firmware.",
+                    "Reboot and factory reset require confirmation, and factory reset cannot be undone; heartbeat only reads uptime and battery. " +
+                        "Confirm-token semantics must be confirmed with the firmware.",
                 ),
             // ---- 隐私 ----
             StringKey.PRIVACY_TITLE to StringsEntry("隐私说明", "Privacy"),
@@ -936,7 +949,8 @@ object AppStrings {
             StringKey.PRIVACY_ITEM_FIRMWARE_LIBRARY to
                 StringsEntry(
                     "固件库：文件名、版本、渠道、CRC-32 与原始文件引用；不缓存固件二进制，文件失效时需重新选择。",
-                    "Firmware library: file name, version, channel, CRC-32, and the original file reference; firmware binaries are not cached and missing files must be re-selected.",
+                    "Firmware library: file name, version, channel, CRC-32, and the original file reference; " +
+                        "firmware binaries are not cached and missing files must be re-selected.",
                 ),
             StringKey.PRIVACY_ITEM_EVENTS to
                 StringsEntry(
@@ -959,13 +973,15 @@ object AppStrings {
             StringKey.PRIVACY_NETWORK_BODY to
                 StringsEntry(
                     "当前版本没有网络上传功能：应用不包含联网权限，设备档案、断点、令牌与日志都不会离开本机。",
-                    "This version has no network upload: the app requests no internet permission, and profiles, checkpoints, tokens, and logs never leave this device.",
+                    "This version has no network upload: the app requests no internet permission, " +
+                        "and profiles, checkpoints, tokens, and logs never leave this device.",
                 ),
             StringKey.PRIVACY_DELETE_TITLE to StringsEntry("如何清除", "How to erase"),
             StringKey.PRIVACY_DELETE_BODY to
                 StringsEntry(
                     "在系统设置中清除应用数据或卸载应用即可删除上述本地数据。报文日志退出应用后自动清空；OTA 断点可在升级页手动清除。",
-                    "Clear the app's data in system settings or uninstall the app to remove the local data above. Packet logs clear when the app exits; OTA checkpoints can be cleared on the update page.",
+                    "Clear the app's data in system settings or uninstall the app to remove the local data above. " +
+                        "Packet logs clear when the app exits; OTA checkpoints can be cleared on the update page.",
                 ),
             StringKey.PRIVACY_JVM_NOTE to
                 StringsEntry(
@@ -1095,7 +1111,8 @@ object AppStrings {
             StringKey.PARAM_FIRMWARE_NOTE to
                 StringsEntry(
                     "参数表来自协议约定值，固件尚未逐项确认；读写结果以设备应答为准，设备拒绝时展示错误码。",
-                    "The parameter table comes from protocol conventions and is not yet confirmed with the firmware. Results are whatever the device returns, and rejections show the error code.",
+                    "The parameter table comes from protocol conventions and is not yet confirmed with the firmware. " +
+                        "Results are whatever the device returns, and rejections show the error code.",
                 ),
             StringKey.PARAM_ID_LINE to StringsEntry("参数 ID：0x{id}", "Parameter ID: 0x{id}"),
             StringKey.PARAM_TYPE_INTEGER to StringsEntry("整数", "Integer"),
@@ -1215,7 +1232,9 @@ object AppStrings {
             StringKey.ONBOARDING_STEP_PERMISSION_BODY to
                 StringsEntry(
                     "扫描需要蓝牙权限：Android 12+ 为「附近的设备」，Android 11 及以下为定位权限；iOS 需允许蓝牙。蓝牙关闭时请先在系统设置中开启。本步骤只做说明，点击按钮才会触发系统权限请求。",
-                    "Scanning needs Bluetooth permission: Nearby devices on Android 12+, location on Android 11 and below, and Bluetooth access on iOS. Turn Bluetooth on in system settings if it is off. This step only explains; the system prompt appears only after you tap the button.",
+                    "Scanning needs Bluetooth permission: Nearby devices on Android 12+, location on Android 11 and below, and Bluetooth access on iOS. " +
+                        "Turn Bluetooth on in system settings if it is off. " +
+                        "This step only explains; the system prompt appears only after you tap the button.",
                 ),
             StringKey.ONBOARDING_STEP_SCAN_TITLE to StringsEntry("扫描设备", "Scan for devices"),
             StringKey.ONBOARDING_STEP_SCAN_BODY to
@@ -1231,7 +1250,8 @@ object AppStrings {
             StringKey.ONBOARDING_STEP_CONNECT_BODY to
                 StringsEntry(
                     "选择设备后建立连接；预共享密钥模式需要输入密钥，签名模式由设备发起挑战。鉴权成功后即可读取信息、配置与参数。",
-                    "Pick a device to connect. Pre-shared-key mode asks for the key; signed mode uses a device challenge. After authentication you can read info, configuration, and parameters.",
+                    "Pick a device to connect. Pre-shared-key mode asks for the key; signed mode uses a device challenge. " +
+                        "After authentication you can read info, configuration, and parameters.",
                 ),
             StringKey.ONBOARDING_GRANT_PERMISSION to
                 StringsEntry(
@@ -1320,7 +1340,10 @@ object AppStrings {
             StringKey.HELP_A_PARAM to
                 StringsEntry(
                     "参数面板通过 GET_PARAM / SET_PARAM 读写设备参数，写入前在本地校验类型、范围与字节长度。参数表来自协议约定值，固件尚未逐项确认，界面会标注「需固件确认」；设备拒绝时展示错误码。",
-                    "The panel reads and writes parameters through GET_PARAM / SET_PARAM, validating type, range, and byte length locally before sending. The table comes from protocol conventions and is not yet confirmed with the firmware, so it is labelled \"Needs firmware confirmation\"; rejections show the device error code.",
+                    "The panel reads and writes parameters through GET_PARAM / SET_PARAM, validating type, range, and byte length locally before sending. " +
+                        "The table comes from protocol conventions and is not yet confirmed with the firmware, " +
+                        "so it is labelled \"Needs firmware confirmation\"; " +
+                        "rejections show the device error code.",
                 ),
             StringKey.HELP_Q_DIAG to
                 StringsEntry(
@@ -1330,7 +1353,8 @@ object AppStrings {
             StringKey.HELP_A_DIAG to
                 StringsEntry(
                     "全部来自本机报文日志：请求成功率、平均/最大时延、重传、乱序与错误码分布。样本少于 20 条时只提示「样本不足」，不给出结论。",
-                    "Everything comes from on-device packet logs: success rate, average/max latency, retransmissions, out-of-order responses, and error-code distribution. Under 20 requests only \"not enough samples\" is shown.",
+                    "Everything comes from on-device packet logs: success rate, average/max latency, retransmissions, out-of-order responses, " +
+                        "and error-code distribution. Under 20 requests only \"not enough samples\" is shown.",
                 ),
             StringKey.HELP_Q_ONBOARDING to
                 StringsEntry(
@@ -1340,7 +1364,8 @@ object AppStrings {
             StringKey.HELP_A_ONBOARDING to
                 StringsEntry(
                     "三步引导可跳过，完成后写入本机偏好；可在设置页重新查看。引导不会自动触发系统权限弹窗，只有点击按钮才会走既有权限状态机。",
-                    "The three-step guide can be skipped and its completion is stored locally; you can reopen it from Settings. It never triggers the system permission prompt automatically; only a tap runs the existing permission state machine.",
+                    "The three-step guide can be skipped and its completion is stored locally; you can reopen it from Settings. " +
+                        "It never triggers the system permission prompt automatically; only a tap runs the existing permission state machine.",
                 ),
             // ---- 固件库（v2.5.0） ----
             StringKey.OTA_LIBRARY_TITLE to StringsEntry("固件库", "Firmware library"),
@@ -1352,7 +1377,8 @@ object AppStrings {
             StringKey.OTA_LIBRARY_NOTE to
                 StringsEntry(
                     "只保存文件名、版本、渠道、CRC-32 与原始文件引用，不缓存固件本体。文件失效时需重新选择。",
-                    "Only metadata (file name, version, channel, CRC-32) and the original file reference are stored; firmware binaries are never cached. Missing files must be re-selected.",
+                    "Only metadata (file name, version, channel, CRC-32) and the original file reference are stored; " +
+                        "firmware binaries are never cached. Missing files must be re-selected.",
                 ),
             StringKey.OTA_LIBRARY_USE to StringsEntry("从库中使用", "Use from library"),
             StringKey.OTA_LIBRARY_DELETE to StringsEntry("删除", "Delete"),
@@ -2301,6 +2327,46 @@ object AppStrings {
                 ),
             StringKey.QUEUE_PROGRESS to StringsEntry("{stage} {percent}%", "{stage} {percent}%"),
             StringKey.QUEUE_CURRENT to StringsEntry("当前：{device}", "Current: {device}"),
+            // ---- 界面四态与无障碍（v3.1.0） ----
+            StringKey.STATE_EMPTY_TITLE to StringsEntry("暂无内容", "Nothing here yet"),
+            StringKey.STATE_EMPTY_BODY to
+                StringsEntry(
+                    "当前没有可显示的数据。",
+                    "There is no data to show right now.",
+                ),
+            StringKey.STATE_LOADING_TITLE to StringsEntry("正在加载…", "Loading…"),
+            StringKey.STATE_LOADING_BODY to
+                StringsEntry(
+                    "请稍候，数据正在读取。",
+                    "Please wait while the data is being read.",
+                ),
+            StringKey.STATE_ERROR_TITLE to StringsEntry("加载失败", "Couldn't load"),
+            StringKey.STATE_ERROR_BODY to
+                StringsEntry(
+                    "读取数据时出错：{detail}",
+                    "Something went wrong while loading: {detail}",
+                ),
+            StringKey.STATE_DISABLED_TITLE to StringsEntry("当前不可用", "Unavailable"),
+            StringKey.STATE_DISABLED_NOT_CONNECTED to
+                StringsEntry(
+                    "设备未连接，相关操作暂不可用。",
+                    "The device is not connected, so these actions are unavailable.",
+                ),
+            StringKey.STATE_DISABLED_READ_ONLY to
+                StringsEntry(
+                    "当前为只读模式，写操作暂不可用。",
+                    "Read-only mode: write actions are unavailable.",
+                ),
+            StringKey.STATE_DISABLED_BUSY to
+                StringsEntry(
+                    "正在执行其他操作，请稍候。",
+                    "Another operation is running. Please wait.",
+                ),
+            StringKey.STATE_UNAVAILABLE_HINT to
+                StringsEntry(
+                    "此操作在当前状态下不可用。",
+                    "This action is unavailable in the current state.",
+                ),
         )
 
     /** 查表；缺失 key 直接抛出，避免静默显示空文案。 */

@@ -350,6 +350,19 @@ object PreferencesBackupParser {
         return value
     }
 
+    private fun presetFieldsComplete(
+        id: String?,
+        name: String?,
+        createdAt: Long?,
+        lastUsed: Long?,
+        values: JsonValue.Obj?,
+    ): Boolean =
+        !id.isNullOrBlank() &&
+            !name.isNullOrBlank() &&
+            createdAt != null &&
+            lastUsed != null &&
+            values != null
+
     private fun presetField(
         root: JsonValue.Obj,
         issues: MutableList<BackupIssue>,
@@ -375,17 +388,17 @@ object PreferencesBackupParser {
             val createdAt = objectValue.values["createdAtMillis"]?.asLong()
             val lastUsed = objectValue.values["lastUsedAtMillis"]?.asLong()
             val valuesObject = objectValue.values["values"]?.asObject()
-            if (id.isNullOrBlank() ||
-                name.isNullOrBlank() ||
-                createdAt == null ||
-                lastUsed == null ||
-                valuesObject == null
-            ) {
+            if (!presetFieldsComplete(id, name, createdAt, lastUsed, valuesObject)) {
                 issues += BackupIssue("presets[]", missing = false)
                 return@mapNotNull null
             }
+            val completeId = id ?: return@mapNotNull null
+            val completeName = name ?: return@mapNotNull null
+            val completeCreatedAt = createdAt ?: return@mapNotNull null
+            val completeLastUsed = lastUsed ?: return@mapNotNull null
+            val completeValues = valuesObject ?: return@mapNotNull null
             val values =
-                valuesObject.values
+                completeValues.values
                     .mapNotNull { (key, value) ->
                         val text = value.asString()
                         if (key.isBlank() || text == null) {
@@ -397,15 +410,29 @@ object PreferencesBackupParser {
                     }.toMap()
             runCatching {
                 ConfigPreset(
-                    id = id,
-                    name = name,
+                    id = completeId,
+                    name = completeName,
                     values = values,
-                    createdAtMillis = createdAt,
-                    lastUsedAtMillis = lastUsed,
+                    createdAtMillis = completeCreatedAt,
+                    lastUsedAtMillis = completeLastUsed,
                 )
             }.onFailure { issues += BackupIssue("presets[]", missing = false) }.getOrNull()
         }
     }
+
+    private fun ruleFieldsComplete(
+        id: String?,
+        trigger: AutomationTrigger?,
+        action: AutomationAction?,
+        enabled: Boolean?,
+        order: Int?,
+    ): Boolean =
+        !id.isNullOrBlank() &&
+            trigger != null &&
+            action != null &&
+            enabled != null &&
+            order != null &&
+            order >= 0
 
     private fun ruleField(
         root: JsonValue.Obj,
@@ -439,24 +466,23 @@ object PreferencesBackupParser {
             val enabled = objectValue.values["enabled"]?.asBoolean()
             val order = objectValue.values["order"]?.asLong()?.toInt()
             val presetId = objectValue.values["presetId"]?.asString()
-            if (id.isNullOrBlank() ||
-                trigger == null ||
-                action == null ||
-                enabled == null ||
-                order == null ||
-                order < 0
-            ) {
+            if (!ruleFieldsComplete(id, trigger, action, enabled, order)) {
                 issues += BackupIssue("automationRules[]", missing = false)
                 return@mapNotNull null
             }
+            val completeId = id ?: return@mapNotNull null
+            val completeTrigger = trigger ?: return@mapNotNull null
+            val completeAction = action ?: return@mapNotNull null
+            val completeEnabled = enabled ?: return@mapNotNull null
+            val completeOrder = order ?: return@mapNotNull null
             runCatching {
                 AutomationRule(
-                    id = id,
-                    trigger = trigger,
-                    action = action,
-                    enabled = enabled,
+                    id = completeId,
+                    trigger = completeTrigger,
+                    action = completeAction,
+                    enabled = completeEnabled,
                     presetId = presetId,
-                    order = order,
+                    order = completeOrder,
                 )
             }.onFailure { issues += BackupIssue("automationRules[]", missing = false) }.getOrNull()
         }

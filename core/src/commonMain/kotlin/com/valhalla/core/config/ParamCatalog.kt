@@ -1,5 +1,9 @@
 package com.valhalla.core.config
 
+private const val UINT8_MAX = 0xFF
+private const val UINT16_MAX = 0xFFFF
+private const val HIGH_BYTE_SHIFT = 24
+
 /**
  * 参数值的基础类型。
  *
@@ -41,7 +45,7 @@ data class ParamSpec(
     val confirmedByFirmware: Boolean = false,
 ) {
     init {
-        require(id in 0..0xFFFF) { "paramId 超出范围: $id" }
+        require(id in 0..UINT16_MAX) { "paramId 超出范围: $id" }
         require(displayName.isNotBlank()) { "参数名称不能为空" }
         require(maxLength > 0) { "maxLength 必须大于 0" }
         if (type == ParamValueType.INTEGER && writable) {
@@ -144,12 +148,12 @@ object ParamCatalog {
             ParamValueType.INTEGER -> {
                 val value = decodeInt(raw)
                 value?.toString() ?: raw.joinToString("") { byte ->
-                    (byte.toInt() and 0xFF).toString(16).padStart(2, '0')
+                    (byte.toInt() and UINT8_MAX).toString(16).padStart(2, '0')
                 }
             }
 
             ParamValueType.BOOLEAN ->
-                when (raw.firstOrNull()?.toInt()?.and(0xFF)) {
+                when (raw.firstOrNull()?.toInt()?.and(UINT8_MAX)) {
                     1, '1'.code, 't'.code, 'T'.code -> "true"
                     0, '0'.code, 'f'.code, 'F'.code -> "false"
                     else -> raw.decodeToString()
@@ -159,7 +163,7 @@ object ParamCatalog {
                 raw
                     .firstOrNull()
                     ?.toInt()
-                    ?.and(0xFF)
+                    ?.and(UINT8_MAX)
                     ?.toString()
                     ?: raw.decodeToString()
 
@@ -200,10 +204,10 @@ object ParamCatalog {
     /** 大端 u32 编码；位数不足时补零。 */
     fun encodeInt(value: Int): ByteArray =
         byteArrayOf(
-            ((value ushr 24) and 0xFF).toByte(),
-            ((value ushr 16) and 0xFF).toByte(),
-            ((value ushr 8) and 0xFF).toByte(),
-            (value and 0xFF).toByte(),
+            ((value ushr HIGH_BYTE_SHIFT) and UINT8_MAX).toByte(),
+            ((value ushr 16) and UINT8_MAX).toByte(),
+            ((value ushr 8) and UINT8_MAX).toByte(),
+            (value and UINT8_MAX).toByte(),
         )
 
     /** 大端解码 1..4 字节整数；空值或超长返回 null。 */
@@ -211,7 +215,7 @@ object ParamCatalog {
         if (raw.isEmpty() || raw.size > 4) return null
         var value = 0
         raw.forEach { byte ->
-            value = (value shl 8) or (byte.toInt() and 0xFF)
+            value = (value shl 8) or (byte.toInt() and UINT8_MAX)
         }
         return value
     }

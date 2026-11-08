@@ -60,12 +60,13 @@ android {
     }
 }
 
-// 只统计 JVM 单元测试覆盖率，不含 Android instrumented；行覆盖阈值 55%。
+// 只统计 JVM 单元测试覆盖率，不含 Android instrumented；行覆盖阈值 80%。
+// v3.1.0 基线瘦身后门禁同步收紧（实测 87%+，留出小幅波动余量）。
 kover {
     reports {
         verify {
             rule {
-                minBound(55)
+                minBound(80)
             }
         }
     }

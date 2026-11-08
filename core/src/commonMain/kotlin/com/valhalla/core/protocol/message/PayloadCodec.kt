@@ -2,6 +2,13 @@ package com.valhalla.core.protocol.message
 
 import com.valhalla.core.protocol.FrameException
 
+private const val UINT8_MAX = 0xFF
+private const val UINT16_MAX = 0xFFFF
+private const val UINT32_MAX = 0xFFFFFFFFL
+private const val INT16_MAX = 0x7FFF
+private const val INT16_SIGN_BIT = 0x8000
+private const val UINT16_MODULUS = 0x1_0000
+
 /** payload 结构非法，例如字段截断、长度越界或尾部存在未解析字节。 */
 class MessageDecodeException(
     message: String,
@@ -16,28 +23,28 @@ class PayloadWriter {
     private val values = mutableListOf<Byte>()
 
     fun byte(value: Int): PayloadWriter {
-        require(value in 0..0xFF) { "byte 超出范围: $value" }
+        require(value in 0..UINT8_MAX) { "byte 超出范围: $value" }
         values += value.toByte()
         return this
     }
 
     fun u16(value: Int): PayloadWriter {
-        require(value in 0..0xFFFF) { "u16 超出范围: $value" }
-        byte(value and 0xFF)
-        byte((value shr 8) and 0xFF)
+        require(value in 0..UINT16_MAX) { "u16 超出范围: $value" }
+        byte(value and UINT8_MAX)
+        byte((value shr 8) and UINT8_MAX)
         return this
     }
 
     fun u32(value: Long): PayloadWriter {
-        require(value in 0..0xFFFFFFFFL) { "u32 超出范围: $value" }
-        u16((value and 0xFFFF).toInt())
-        u16(((value shr 16) and 0xFFFF).toInt())
+        require(value in 0..UINT32_MAX) { "u32 超出范围: $value" }
+        u16((value and UINT16_MAX.toLong()).toInt())
+        u16(((value shr 16) and UINT16_MAX.toLong()).toInt())
         return this
     }
 
     fun i16(value: Int): PayloadWriter {
-        require(value in -0x8000..0x7FFF) { "i16 超出范围: $value" }
-        u16(value and 0xFFFF)
+        require(value in -0x8000..INT16_MAX) { "i16 超出范围: $value" }
+        u16(value and UINT16_MAX)
         return this
     }
 
@@ -48,7 +55,7 @@ class PayloadWriter {
 
     fun string1(value: String): PayloadWriter {
         val encoded = value.encodeToByteArray()
-        require(encoded.size <= 0xFF) { "字符串超过 1 字节长度上限: ${encoded.size}" }
+        require(encoded.size <= UINT8_MAX) { "字符串超过 1 字节长度上限: ${encoded.size}" }
         byte(encoded.size)
         bytes(encoded)
         return this
@@ -56,7 +63,7 @@ class PayloadWriter {
 
     fun string2(value: String): PayloadWriter {
         val encoded = value.encodeToByteArray()
-        require(encoded.size <= 0xFFFF) { "字符串超过 2 字节长度上限: ${encoded.size}" }
+        require(encoded.size <= UINT16_MAX) { "字符串超过 2 字节长度上限: ${encoded.size}" }
         u16(encoded.size)
         bytes(encoded)
         return this
@@ -78,13 +85,13 @@ class PayloadReader(
 
     fun byte(): Int {
         ensureAvailable(1, "1 字节")
-        return data[index++].toInt() and 0xFF
+        return data[index++].toInt() and UINT8_MAX
     }
 
     fun u16(): Int {
         ensureAvailable(2, "u16")
-        val low = data[index++].toInt() and 0xFF
-        val high = data[index++].toInt() and 0xFF
+        val low = data[index++].toInt() and UINT8_MAX
+        val high = data[index++].toInt() and UINT8_MAX
         return low or (high shl 8)
     }
 
@@ -97,7 +104,7 @@ class PayloadReader(
 
     fun i16(): Int {
         val raw = u16()
-        return if (raw and 0x8000 != 0) raw - 0x1_0000 else raw
+        return if (raw and INT16_SIGN_BIT != 0) raw - UINT16_MODULUS else raw
     }
 
     fun bytes(count: Int): ByteArray {

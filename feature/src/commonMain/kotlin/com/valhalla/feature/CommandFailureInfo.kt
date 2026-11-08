@@ -10,7 +10,7 @@ import com.valhalla.feature.i18n.UiMessage
  *
  * [message] 供日志/诊断使用（协议层原始描述），[ui] 供界面展示（可随语言切换）。
  */
-internal data class FailureInfo(
+internal data class CommandFailureInfo(
     val message: String,
     val ui: UiMessage,
     /** 仅含状态码/设备详情，供外层已表达「拒绝」语义的文案复用。 */
@@ -18,7 +18,7 @@ internal data class FailureInfo(
     val status: DeviceStatus? = null,
 )
 
-internal fun Throwable.toFailureInfo(): FailureInfo =
+internal fun Throwable.toFailureInfo(): CommandFailureInfo =
     when (this) {
         is CommandFailure.DeviceRejected -> {
             val detail = detail?.takeIf { it.isNotBlank() }
@@ -34,7 +34,7 @@ internal fun Throwable.toFailureInfo(): FailureInfo =
                 } else {
                     UiMessage.of(StringKey.FAILURE_STATUS_DETAIL, "code" to hex, "detail" to detail)
                 }
-            FailureInfo(
+            CommandFailureInfo(
                 message = status.describe() + if (detail == null) "" else "（$detail）",
                 ui =
                     UiMessage(
@@ -47,13 +47,13 @@ internal fun Throwable.toFailureInfo(): FailureInfo =
         }
 
         is CommandFailure.Timeout ->
-            FailureInfo(
+            CommandFailureInfo(
                 message = "设备无响应（$attempts 次尝试后超时）",
                 ui = UiMessage.of(StringKey.FAILURE_TIMEOUT, "attempts" to attempts.toString()),
             )
 
         is CommandFailure.TransportFailure ->
-            FailureInfo(
+            CommandFailureInfo(
                 message = "传输失败：${cause?.message ?: "链路异常"}",
                 ui =
                     UiMessage.of(
@@ -63,13 +63,13 @@ internal fun Throwable.toFailureInfo(): FailureInfo =
             )
 
         is CommandFailure.InvalidResponse ->
-            FailureInfo(
+            CommandFailureInfo(
                 message = "应答解析失败：$reason",
                 ui = UiMessage.of(StringKey.FAILURE_INVALID_RESPONSE, "detail" to reason),
             )
 
         else ->
-            FailureInfo(
+            CommandFailureInfo(
                 message = message ?: "未知错误",
                 ui =
                     UiMessage.of(

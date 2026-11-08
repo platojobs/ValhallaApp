@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -17,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -74,13 +74,11 @@ import com.valhalla.core.diagnostics.DiagnosticReportOptions
 import com.valhalla.core.diagnostics.DiagnosticReportOta
 import com.valhalla.core.diagnostics.DiagnosticReportProgress
 import com.valhalla.core.diagnostics.DiagnosticReportResult
-import com.valhalla.core.diagnostics.DiagnosticReportSection
 import com.valhalla.core.diagnostics.DiagnosticReportValue
 import com.valhalla.core.event.DeviceEventResult
 import com.valhalla.core.event.DeviceEventTimeline
 import com.valhalla.core.event.DeviceEventType
 import com.valhalla.core.firmware.FirmwareApplicabilityEvaluator
-import com.valhalla.core.firmware.FirmwareApplicabilityReason
 import com.valhalla.core.firmware.FirmwareLibraryFilter
 import com.valhalla.core.firmware.FirmwareLibraryOutcome
 import com.valhalla.core.firmware.FirmwareLibraryRecord
@@ -95,7 +93,6 @@ import com.valhalla.core.logging.PacketLogEntry
 import com.valhalla.core.logging.PacketLogExportEstimate
 import com.valhalla.core.logging.PacketLogExportFormat
 import com.valhalla.core.logging.PacketLogExportOptions
-import com.valhalla.core.logging.PacketLogExportPhase
 import com.valhalla.core.logging.PacketLogExportProgress
 import com.valhalla.core.logging.PacketLogExporter
 import com.valhalla.core.logging.PacketLogFilter
@@ -107,7 +104,6 @@ import com.valhalla.core.logging.parseLocalDateTimeMillis
 import com.valhalla.core.logging.validateByteLimitKb
 import com.valhalla.core.logging.validateEntryLimit
 import com.valhalla.core.metrics.DeviceMetricRepository
-import com.valhalla.core.metrics.DeviceMetricSeries
 import com.valhalla.core.ota.OtaQueueItem
 import com.valhalla.core.ota.OtaQueueStage
 import com.valhalla.core.profile.DeviceProfile
@@ -116,8 +112,6 @@ import com.valhalla.core.profile.OtaHistoryRecord
 import com.valhalla.core.profile.OtaOutcome
 import com.valhalla.core.protocol.CommandType
 import com.valhalla.core.protocol.message.AuthMode
-import com.valhalla.core.protocol.message.OtaAbortReason
-import com.valhalla.core.protocol.message.OtaStage
 import com.valhalla.core.security.HmacAuthSigner
 import com.valhalla.data.ble.BleAdapterState
 import com.valhalla.data.ble.BleConnection
@@ -161,7 +155,6 @@ import com.valhalla.feature.config.ConfigEditorState
 import com.valhalla.feature.config.ConfigFieldState
 import com.valhalla.feature.config.ConfigPresetApplier
 import com.valhalla.feature.detail.DeviceDetailController
-import com.valhalla.feature.detail.DeviceDetailState
 import com.valhalla.feature.detail.QuickActionState
 import com.valhalla.feature.detail.QuickActionType
 import com.valhalla.feature.device.ManagedDeviceInfo
@@ -243,6 +236,24 @@ import com.valhalla.feature.theme.DesignTokens
 import com.valhalla.feature.theme.ThemeMode
 import com.valhalla.feature.theme.ValhallaTheme
 import com.valhalla.feature.theme.statusColors
+import com.valhalla.feature.uilogic.ConfigFieldStatusKind
+import com.valhalla.feature.uilogic.abortReasonText
+import com.valhalla.feature.uilogic.availableCommandTypes
+import com.valhalla.feature.uilogic.configFieldActions
+import com.valhalla.feature.uilogic.configFieldStatus
+import com.valhalla.feature.uilogic.editableLoadedConfigFields
+import com.valhalla.feature.uilogic.formatKey
+import com.valhalla.feature.uilogic.formatUptime
+import com.valhalla.feature.uilogic.hex16
+import com.valhalla.feature.uilogic.hex32
+import com.valhalla.feature.uilogic.label
+import com.valhalla.feature.uilogic.labelKey
+import com.valhalla.feature.uilogic.paramReloadEnabled
+import com.valhalla.feature.uilogic.paramTypeKey
+import com.valhalla.feature.uilogic.quickActionEnabled
+import com.valhalla.feature.uilogic.reportLabelKey
+import com.valhalla.feature.uilogic.rssiBandLabel
+import com.valhalla.feature.uilogic.timelineKey
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -254,6 +265,9 @@ import kotlinx.coroutines.withContext
 import kotlin.random.Random
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
+
+private const val ONE_DECIMAL_FACTOR = 10
+private const val VERIFY_PROGRESS = 0.99f
 
 /** 一次已建立连接对应的协议栈与控制器，详情页与 OTA 页共享同一调度器与断点存储。 */
 private class DeviceSession(
@@ -1045,8 +1059,7 @@ private fun ValhallaContent(
                                 )
                                 session.config.load()
                                 val current =
-                                    session.config.state.value.visibleFields
-                                        .filter { it.loaded && it.editable }
+                                    editableLoadedConfigFields(session.config.state.value.visibleFields)
                                         .associate { it.spec.key to it.text }
                                 val diffs =
                                     ConfigPresetDiffer.diff(
@@ -1302,7 +1315,6 @@ private fun ScanScreen(
     onOpenSettings: () -> Unit,
 ) {
     val strings = LocalStrings.current
-    val status = statusColors()
     val format = remember(strings.language) { LocaleFormat(strings.language) }
     val zoneOffsetMinutes = remember { currentTimeZoneOffsetMinutes(Clock.System.now().toEpochMilliseconds()) }
     val canScan = availability.allowsConnection()
@@ -1373,6 +1385,10 @@ private fun ScanScreen(
             }
         }
 
+        if (!canScan) {
+            DisabledStatePanel(reason = StringKey.STATE_UNAVAILABLE_HINT)
+        }
+
         Row(
             horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm),
             modifier = Modifier.horizontalScroll(rememberScrollState()),
@@ -1400,46 +1416,20 @@ private fun ScanScreen(
         }
 
         if (state.scanning) {
-            LinearProgressIndicator(
-                modifier =
-                    Modifier.fillMaxWidth().semantics {
-                        contentDescription = strings.t(StringKey.SCAN_EMPTY_SCANNING)
-                    },
-            )
+            LoadingStatePanel(body = strings.t(StringKey.SCAN_EMPTY_SCANNING))
         }
 
         errorMessage?.let { message ->
-            Text(
-                strings.render(message),
-                color = status.error,
-                modifier =
-                    Modifier.semantics {
-                        liveRegion = LiveRegionMode.Polite
-                        contentDescription = strings.render(message)
-                    },
-            )
+            ErrorStatePanel(detail = strings.render(message))
         }
 
-        if (state.devices.isEmpty() && errorMessage == null) {
+        if (state.devices.isEmpty() && errorMessage == null && !state.scanning) {
             val emptyText = emptyReasonText(emptyReason, strings)
-            if (emptyText != null) {
-                Text(
-                    emptyText,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color =
-                        if (emptyReason == ScanEmptyReason.SCAN_TIMEOUT) {
-                            status.warning
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                )
-            }
-            state.error?.let { message ->
-                Text(
-                    strings.render(message),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+            val error = state.error
+            if (error != null) {
+                ErrorStatePanel(detail = strings.render(error))
+            } else if (emptyText != null) {
+                EmptyStatePanel(body = emptyText)
             }
         }
 
@@ -1509,16 +1499,6 @@ private fun ScanScreen(
     }
 }
 
-private fun rssiBandLabel(
-    band: RssiBand,
-    strings: StringResolver,
-): String =
-    when (band) {
-        RssiBand.STRONG -> strings.t(StringKey.SCAN_RSSI_STRONG)
-        RssiBand.MEDIUM -> strings.t(StringKey.SCAN_RSSI_MEDIUM)
-        RssiBand.WEAK -> strings.t(StringKey.SCAN_RSSI_WEAK)
-    }
-
 private fun emptyReasonText(
     reason: ScanEmptyReason,
     strings: StringResolver,
@@ -1568,7 +1548,8 @@ private fun DevicesScreen(
         Text(strings.t(StringKey.DEVICES_LIMIT_POLICY), style = MaterialTheme.typography.bodySmall)
 
         if (state.devices.isEmpty()) {
-            Text(strings.t(StringKey.DEVICES_EMPTY), style = MaterialTheme.typography.bodyMedium)
+            EmptyStatePanel(body = strings.t(StringKey.DEVICES_EMPTY))
+            DisabledStatePanel(reason = StringKey.STATE_DISABLED_NOT_CONNECTED)
         }
 
         LazyColumn(
@@ -1771,20 +1752,18 @@ private const val TIMELINE_VISIBLE_LIMIT = 20
 private const val LIBRARY_VISIBLE_LIMIT = 8
 
 @Composable
-private fun DeviceDashboardCard(
-    detail: DeviceDetailState,
-    series: DeviceMetricSeries,
-    rssi: Int?,
-    rssiSource: RssiSource,
-    degradedReason: RssiDegradedReason?,
-    legacyMetricsIgnored: Boolean,
-    observedAtMillis: Long,
-    strings: StringResolver,
-    format: LocaleFormat,
-    zoneOffsetMinutes: Int,
-    accent: androidx.compose.ui.graphics.Color,
-    muted: androidx.compose.ui.graphics.Color,
-) {
+private fun DeviceDashboardCard(ui: DeviceDashboardCardUi) {
+    val strings = ui.strings
+    val detail = ui.detail
+    val series = ui.series
+    val rssi = ui.rssi
+    val rssiSource = ui.rssiSource
+    val degradedReason = ui.degradedReason
+    val legacyMetricsIgnored = ui.legacyMetricsIgnored
+    val observedAtMillis = ui.observedAtMillis
+    val zoneOffsetMinutes = ui.zoneOffsetMinutes
+    val accent = ui.accent
+    val muted = ui.muted
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(DesignTokens.Spacing.md),
@@ -1872,38 +1851,45 @@ private fun DeviceDashboardCard(
                     color = muted,
                 )
             }
-            if (series.canDrawBattery || series.canDrawRssi) {
-                Text(
-                    strings.t(
-                        StringKey.DASH_TREND_TITLE,
-                        "count" to series.samples.size.toString(),
-                    ),
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                if (series.canDrawBattery) {
-                    TrendLine(
-                        values = series.batteryPoints.map { it.second.toFloat() },
-                        minValue = 0f,
-                        maxValue = 100f,
-                        color = accent,
-                    )
-                }
-                if (series.canDrawRssi) {
-                    TrendLine(
-                        values = series.rssiPoints.map { it.second.toFloat() },
-                        minValue = -100f,
-                        maxValue = -30f,
-                        color = accent,
-                    )
-                }
-            } else {
-                Text(
-                    strings.t(StringKey.DASH_TREND_INSUFFICIENT),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = muted,
-                )
-            }
+            DeviceDashboardTrend(ui)
         }
+    }
+}
+
+@Composable
+private fun DeviceDashboardTrend(ui: DeviceDashboardCardUi) {
+    val strings = ui.strings
+    val series = ui.series
+    if (series.canDrawBattery || series.canDrawRssi) {
+        Text(
+            strings.t(
+                StringKey.DASH_TREND_TITLE,
+                "count" to series.samples.size.toString(),
+            ),
+            style = MaterialTheme.typography.bodySmall,
+        )
+        if (series.canDrawBattery) {
+            TrendLine(
+                values = series.batteryPoints.map { it.second.toFloat() },
+                minValue = 0f,
+                maxValue = 100f,
+                color = ui.accent,
+            )
+        }
+        if (series.canDrawRssi) {
+            TrendLine(
+                values = series.rssiPoints.map { it.second.toFloat() },
+                minValue = -100f,
+                maxValue = -30f,
+                color = ui.accent,
+            )
+        }
+    } else {
+        Text(
+            strings.t(StringKey.DASH_TREND_INSUFFICIENT),
+            style = MaterialTheme.typography.bodySmall,
+            color = ui.muted,
+        )
     }
 }
 
@@ -1965,58 +1951,6 @@ private fun healthReportText(
         platform = platformDisplayName(),
         resolve = { strings.render(it) },
     )
-
-private fun formatUptime(
-    seconds: Long,
-    strings: StringResolver,
-): String {
-    val safe = seconds.coerceAtLeast(0)
-    return if (safe < 3_600) {
-        strings.t(
-            StringKey.DASH_UPTIME_MS,
-            "minutes" to (safe / 60).toString(),
-            "seconds" to (safe % 60).toString(),
-        )
-    } else {
-        strings.t(
-            StringKey.DASH_UPTIME_HM,
-            "hours" to (safe / 3_600).toString(),
-            "minutes" to ((safe % 3_600) / 60).toString(),
-        )
-    }
-}
-
-private fun DiagnosticReportSection.reportLabelKey(): StringKey =
-    when (this) {
-        DiagnosticReportSection.DEVICE -> StringKey.DIAG_REPORT_SECTION_DEVICE
-        DiagnosticReportSection.FIRMWARE -> StringKey.DIAG_REPORT_SECTION_FIRMWARE
-        DiagnosticReportSection.BATTERY -> StringKey.DIAG_REPORT_SECTION_BATTERY
-        DiagnosticReportSection.CONFIG -> StringKey.DIAG_REPORT_SECTION_CONFIG
-        DiagnosticReportSection.PARAM -> StringKey.DIAG_REPORT_SECTION_PARAM
-        DiagnosticReportSection.ERRORS -> StringKey.DIAG_REPORT_SECTION_ERRORS
-        DiagnosticReportSection.QUALITY -> StringKey.DIAG_REPORT_SECTION_QUALITY
-        DiagnosticReportSection.OTA -> StringKey.DIAG_REPORT_SECTION_OTA
-        DiagnosticReportSection.PACKET_LOG -> StringKey.DIAG_REPORT_SECTION_PACKET_LOG
-    }
-
-private fun DiagnosticReportFormat.formatKey(): StringKey =
-    when (this) {
-        DiagnosticReportFormat.MARKDOWN -> StringKey.DIAG_REPORT_FORMAT_MARKDOWN
-        DiagnosticReportFormat.TEXT -> StringKey.DIAG_REPORT_FORMAT_TEXT
-    }
-
-private fun DeviceEventType.timelineKey(): StringKey =
-    when (this) {
-        DeviceEventType.CONNECTION -> StringKey.TIMELINE_TYPE_CONNECTION
-        DeviceEventType.DISCONNECTION -> StringKey.TIMELINE_TYPE_DISCONNECTION
-        DeviceEventType.AUTH -> StringKey.TIMELINE_TYPE_AUTH
-        DeviceEventType.CONFIG_CHANGE -> StringKey.TIMELINE_TYPE_CONFIG
-        DeviceEventType.PARAM_CHANGE -> StringKey.TIMELINE_TYPE_PARAM
-        DeviceEventType.OTA -> StringKey.TIMELINE_TYPE_OTA
-        DeviceEventType.HEALTH -> StringKey.TIMELINE_TYPE_HEALTH
-        DeviceEventType.AUTOMATION -> StringKey.TIMELINE_TYPE_AUTOMATION
-        DeviceEventType.ERROR -> StringKey.TIMELINE_TYPE_ERROR
-    }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -2278,18 +2212,19 @@ private fun DetailScreen(
                     rssiState.latest
                         ?.takeIf { it.source == RssiSource.CONNECTED_LIVE }
                 DeviceDashboardCard(
-                    detail = state,
-                    series = metricSeries,
-                    rssi = liveReading?.rssi ?: session.device.rssi,
-                    rssiSource = if (liveReading != null) RssiSource.CONNECTED_LIVE else RssiSource.SNAPSHOT,
-                    degradedReason = if (liveReading == null) rssiState.degradedReason else null,
-                    legacyMetricsIgnored = metricLoad.legacyIgnored,
-                    observedAtMillis = liveReading?.timestampMillis ?: connectObservedAt,
-                    strings = strings,
-                    format = format,
-                    zoneOffsetMinutes = zoneOffsetMinutes,
-                    accent = MaterialTheme.colorScheme.primary,
-                    muted = MaterialTheme.colorScheme.onSurfaceVariant,
+                    DeviceDashboardCardUi(
+                        detail = state,
+                        series = metricSeries,
+                        rssi = liveReading?.rssi ?: session.device.rssi,
+                        rssiSource = if (liveReading != null) RssiSource.CONNECTED_LIVE else RssiSource.SNAPSHOT,
+                        degradedReason = if (liveReading == null) rssiState.degradedReason else null,
+                        legacyMetricsIgnored = metricLoad.legacyIgnored,
+                        observedAtMillis = liveReading?.timestampMillis ?: connectObservedAt,
+                        strings = strings,
+                        zoneOffsetMinutes = zoneOffsetMinutes,
+                        accent = MaterialTheme.colorScheme.primary,
+                        muted = MaterialTheme.colorScheme.onSurfaceVariant,
+                    ),
                 )
             }
             item {
@@ -2301,22 +2236,28 @@ private fun DetailScreen(
                     ) {
                         Text(strings.t(StringKey.HEALTH_TITLE), style = MaterialTheme.typography.titleMedium)
                         if (healthState.running) {
-                            LinearProgressIndicator(
-                                progress = {
-                                    if (healthState.total > 0) {
-                                        healthState.completed.toFloat() / healthState.total
-                                    } else {
-                                        0f
-                                    }
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                            Text(
+                            val healthProgress =
+                                if (healthState.total > 0) {
+                                    healthState.completed.toFloat() / healthState.total
+                                } else {
+                                    0f
+                                }
+                            val healthRunningText =
                                 strings.t(
                                     StringKey.HEALTH_RUNNING,
                                     "done" to healthState.completed.toString(),
                                     "total" to healthState.total.toString(),
-                                ),
+                                )
+                            LinearProgressIndicator(
+                                progress = { healthProgress },
+                                modifier =
+                                    Modifier.fillMaxWidth().semantics {
+                                        progressBarRangeInfo = ProgressBarRangeInfo(healthProgress, 0f..1f)
+                                        contentDescription = healthRunningText
+                                    },
+                            )
+                            Text(
+                                healthRunningText,
                                 style = MaterialTheme.typography.bodySmall,
                             )
                             OutlinedButton(onClick = { healthJob?.cancel() }) {
@@ -2375,6 +2316,9 @@ private fun DetailScreen(
                                 Text(strings.t(StringKey.HEALTH_RUN))
                             }
                         }
+                        if (!healthState.running && healthState.result == null) {
+                            EmptyStatePanel()
+                        }
                         result?.let { checked ->
                             val overallText =
                                 when {
@@ -2399,6 +2343,16 @@ private fun DetailScreen(
                                         HealthCheckStatus.OK -> status.success
                                         HealthCheckStatus.ABNORMAL -> status.warning
                                         else -> status.error
+                                    },
+                                modifier =
+                                    Modifier.semantics {
+                                        liveRegion =
+                                            if (checked.overall == HealthCheckStatus.OK) {
+                                                LiveRegionMode.Polite
+                                            } else {
+                                                LiveRegionMode.Assertive
+                                            }
+                                        contentDescription = overallText
                                     },
                             )
                             checked.items.forEach { item ->
@@ -2480,6 +2434,16 @@ private fun DetailScreen(
                                 message,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = if (healthMessageSuccess) status.success else status.error,
+                                modifier =
+                                    Modifier.semantics {
+                                        liveRegion =
+                                            if (healthMessageSuccess) {
+                                                LiveRegionMode.Polite
+                                            } else {
+                                                LiveRegionMode.Assertive
+                                            }
+                                        contentDescription = message
+                                    },
                             )
                         }
                     }
@@ -2491,12 +2455,13 @@ private fun DetailScreen(
                         state.deviceId,
                         style = MaterialTheme.typography.titleMedium,
                         modifier =
-                            Modifier.combinedClickable(
-                                onClick = {},
-                                onLongClick = {
-                                    clipboard.setText(AnnotatedString(state.deviceId))
-                                },
-                            ),
+                            Modifier
+                                .combinedClickable(
+                                    onClick = {},
+                                    onLongClick = {
+                                        clipboard.setText(AnnotatedString(state.deviceId))
+                                    },
+                                ).semantics { contentDescription = state.deviceId },
                     )
                     Text(
                         strings.t(StringKey.LONG_PRESS_TO_COPY),
@@ -2619,15 +2584,15 @@ private fun DetailScreen(
 
             if (state.loading) {
                 item {
-                    Column(verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm)) {
-                        Text(strings.t(StringKey.LOADING_DETAIL), style = MaterialTheme.typography.bodySmall)
-                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                    }
+                    LoadingStatePanel(body = strings.t(StringKey.LOADING_DETAIL))
                 }
             }
 
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm)) {
+                    if (writeLocked) {
+                        DisabledStatePanel(reason = StringKey.STATE_DISABLED_READ_ONLY)
+                    }
                     OutlinedButton(
                         onClick = onOpenOta,
                         enabled = !writeLocked,
@@ -2663,18 +2628,11 @@ private fun DetailScreen(
             state.error?.let { message ->
                 item {
                     Column(verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs)) {
-                        Text(
-                            strings.render(message),
-                            color = status.error,
-                            modifier =
-                                Modifier
-                                    .combinedClickable(
-                                        onClick = {},
-                                        onLongClick = { clipboard.setText(AnnotatedString(strings.render(message))) },
-                                    ).semantics {
-                                        liveRegion = LiveRegionMode.Polite
-                                        contentDescription = strings.render(message)
-                                    },
+                        ErrorStatePanel(
+                            detail = strings.render(message),
+                            onRetry = {
+                                scope.launchSafely(errorReporter, "retry-info") { controller.refreshInfo() }
+                            },
                         )
                         state.errorCode?.let { code ->
                             Text(
@@ -2686,19 +2644,10 @@ private fun DetailScreen(
                                 style = MaterialTheme.typography.bodySmall,
                             )
                         }
-                        Row(horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm)) {
-                            OutlinedButton(
-                                onClick = {
-                                    scope.launchSafely(errorReporter, "retry-info") { controller.refreshInfo() }
-                                },
-                            ) {
-                                Text(strings.t(StringKey.ACTION_RETRY))
-                            }
-                            TextButton(
-                                onClick = { clipboard.setText(AnnotatedString(strings.render(message))) },
-                            ) {
-                                Text(strings.t(StringKey.LONG_PRESS_TO_COPY))
-                            }
+                        TextButton(
+                            onClick = { clipboard.setText(AnnotatedString(strings.render(message))) },
+                        ) {
+                            Text(strings.t(StringKey.LONG_PRESS_TO_COPY))
                         }
                     }
                 }
@@ -2706,16 +2655,21 @@ private fun DetailScreen(
 
             (state.quickAction as? QuickActionState.Failed)?.let { failure ->
                 item {
+                    val failureText = strings.render(failure.error)
                     Text(
-                        strings.render(failure.error),
+                        failureText,
                         color = status.error,
                         modifier =
-                            Modifier.combinedClickable(
-                                onClick = {},
-                                onLongClick = {
-                                    clipboard.setText(AnnotatedString(strings.render(failure.error)))
+                            Modifier
+                                .combinedClickable(
+                                    onClick = {},
+                                    onLongClick = {
+                                        clipboard.setText(AnnotatedString(failureText))
+                                    },
+                                ).semantics {
+                                    liveRegion = LiveRegionMode.Assertive
+                                    contentDescription = failureText
                                 },
-                            ),
                     )
                 }
             }
@@ -2742,7 +2696,7 @@ private fun DetailScreen(
                     }
                     val events = session.events.list(state.deviceId, timelineFilter)
                     if (events.isEmpty()) {
-                        Text(strings.t(StringKey.TIMELINE_EMPTY), style = MaterialTheme.typography.bodySmall)
+                        EmptyStatePanel(body = strings.t(StringKey.TIMELINE_EMPTY))
                     } else {
                         events.take(TIMELINE_VISIBLE_LIMIT).forEach { event ->
                             Row(
@@ -2776,7 +2730,7 @@ private fun DetailScreen(
                                                         ),
                                                     )
                                                 },
-                                            ),
+                                            ).semantics { contentDescription = event.summary },
                                 )
                             }
                         }
@@ -2855,6 +2809,9 @@ private fun DetailScreen(
             }
 
             item { Text(strings.t(StringKey.DEVICE_LOGS), style = MaterialTheme.typography.titleMedium) }
+            if (state.logs.isEmpty()) {
+                item { EmptyStatePanel() }
+            }
             items(state.logs) { line ->
                 Text(
                     line,
@@ -2866,6 +2823,70 @@ private fun DetailScreen(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun QuickActionResult(quickAction: QuickActionState) {
+    val strings = LocalStrings.current
+    when (quickAction) {
+        QuickActionState.Idle -> Unit
+        is QuickActionState.Running -> {
+            val runningText = strings.t(StringKey.QUICK_RUNNING)
+            LinearProgressIndicator(
+                modifier =
+                    Modifier.fillMaxWidth().semantics {
+                        progressBarRangeInfo = ProgressBarRangeInfo.Indeterminate
+                        contentDescription = runningText
+                    },
+            )
+            Text(runningText, style = MaterialTheme.typography.bodySmall)
+        }
+
+        is QuickActionState.Succeeded ->
+            when (quickAction.type) {
+                QuickActionType.REBOOT ->
+                    Text(
+                        strings.t(
+                            StringKey.QUICK_REBOOT_SUCCESS,
+                            "delay" to (quickAction.delayMillis ?: 0).toString(),
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier =
+                            Modifier.semantics {
+                                liveRegion = LiveRegionMode.Polite
+                            },
+                    )
+
+                QuickActionType.FACTORY_RESET ->
+                    Text(
+                        strings.t(StringKey.QUICK_FACTORY_SUCCESS),
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier =
+                            Modifier.semantics {
+                                liveRegion = LiveRegionMode.Polite
+                            },
+                    )
+
+                QuickActionType.HEARTBEAT ->
+                    Text(
+                        strings.t(
+                            StringKey.QUICK_HEARTBEAT_SUCCESS,
+                            "uptime" to "${quickAction.uptimeSeconds ?: 0}s",
+                            "percent" to (
+                                quickAction.batteryPercent?.toString()
+                                    ?: strings.t(StringKey.UNKNOWN)
+                            ),
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier =
+                            Modifier.semantics {
+                                liveRegion = LiveRegionMode.Polite
+                            },
+                    )
+            }
+
+        is QuickActionState.Failed -> Unit // 失败文案统一在页面错误区展示，支持长按复制。
     }
 }
 
@@ -2885,7 +2906,7 @@ private fun QuickActionSection(
     var delayText by remember { mutableStateOf("0") }
     var confirmToken by remember { mutableStateOf("") }
     val busy = quickAction.busy
-    val enabled = connected && !busy && !writeLocked
+    val enabled = quickActionEnabled(connected, writeLocked, busy)
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
@@ -2893,6 +2914,14 @@ private fun QuickActionSection(
             verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm),
         ) {
             Text(strings.t(StringKey.QUICK_ACTIONS_TITLE), style = MaterialTheme.typography.titleMedium)
+            if (!connected) {
+                DisabledStatePanel(reason = StringKey.STATE_DISABLED_NOT_CONNECTED)
+            } else if (writeLocked) {
+                DisabledStatePanel(reason = StringKey.STATE_DISABLED_READ_ONLY)
+            }
+            if (busy) {
+                DisabledStatePanel(reason = StringKey.STATE_DISABLED_BUSY)
+            }
             if (writeLocked) {
                 Text(
                     strings.t(StringKey.BATCH_LOCKED_HINT),
@@ -2922,46 +2951,7 @@ private fun QuickActionSection(
                 }
             }
 
-            when (quickAction) {
-                QuickActionState.Idle -> Unit
-                is QuickActionState.Running -> {
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                    Text(strings.t(StringKey.QUICK_RUNNING), style = MaterialTheme.typography.bodySmall)
-                }
-
-                is QuickActionState.Succeeded ->
-                    when (quickAction.type) {
-                        QuickActionType.REBOOT ->
-                            Text(
-                                strings.t(
-                                    StringKey.QUICK_REBOOT_SUCCESS,
-                                    "delay" to (quickAction.delayMillis ?: 0).toString(),
-                                ),
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-
-                        QuickActionType.FACTORY_RESET ->
-                            Text(
-                                strings.t(StringKey.QUICK_FACTORY_SUCCESS),
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-
-                        QuickActionType.HEARTBEAT ->
-                            Text(
-                                strings.t(
-                                    StringKey.QUICK_HEARTBEAT_SUCCESS,
-                                    "uptime" to "${quickAction.uptimeSeconds ?: 0}s",
-                                    "percent" to (
-                                        quickAction.batteryPercent?.toString()
-                                            ?: strings.t(StringKey.UNKNOWN)
-                                    ),
-                                ),
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                    }
-
-                is QuickActionState.Failed -> Unit // 失败文案统一在页面错误区展示，支持长按复制。
-            }
+            QuickActionResult(quickAction)
         }
     }
 
@@ -3125,6 +3115,7 @@ private fun OtaHistoryRow(
             Modifier
                 .fillMaxWidth()
                 .combinedClickable(onClick = onToggle, onLongClick = {})
+                .semantics { contentDescription = record.firmwareVersion }
                 .padding(vertical = DesignTokens.Spacing.xs),
         verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs),
     ) {
@@ -3232,6 +3223,15 @@ private fun ConfigSection(
                 strings.t(StringKey.CONFIG_HINT),
                 style = MaterialTheme.typography.bodySmall,
             )
+            if (state.loading) {
+                LoadingStatePanel(body = strings.t(StringKey.CONFIG_FIELD_LOADING))
+            }
+            if (writeLocked) {
+                DisabledStatePanel(reason = StringKey.STATE_DISABLED_READ_ONLY)
+            }
+            if (state.saving) {
+                DisabledStatePanel(reason = StringKey.STATE_DISABLED_BUSY)
+            }
             if (writeLocked) {
                 Text(
                     strings.t(StringKey.BATCH_LOCKED_HINT),
@@ -3239,41 +3239,9 @@ private fun ConfigSection(
                     color = MaterialTheme.colorScheme.secondary,
                 )
             }
-            state.capabilityNoticeKey?.let { noticeKey ->
-                val notice =
-                    if (noticeKey == StringKey.CONFIG_HIDDEN_UNKNOWN_TARGET) {
-                        strings.t(noticeKey, "count" to state.hiddenFields.size.toString())
-                    } else {
-                        strings.t(
-                            noticeKey,
-                            "count" to state.hiddenFields.size.toString(),
-                            "firmware" to (
-                                state.target.firmwareVersion
-                                    ?.let { "${it.major}.${it.minor}.${it.patch}" }
-                                    ?: strings.t(StringKey.UNKNOWN)
-                            ),
-                            "model" to (state.target.model ?: strings.t(StringKey.UNKNOWN)),
-                        )
-                    }
-                Row(horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm)) {
-                    Text(
-                        notice,
-                        color = MaterialTheme.colorScheme.secondary,
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.weight(1f),
-                    )
-                    TextButton(onClick = onRefreshDevice) {
-                        Text(strings.t(StringKey.REFRESH_DEVICE_INFO))
-                    }
-                }
-                state.hiddenFields.forEach { field ->
-                    field.capability.reason?.let { reason ->
-                        Text(
-                            strings.t(StringKey.TECHNICAL_DETAIL, "detail" to reason),
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
-                }
+            ConfigCapabilityNotice(state, onRefreshDevice)
+            if (state.visibleFields.isEmpty() && !state.loading && state.error == null) {
+                EmptyStatePanel()
             }
             state.visibleFields.forEach { field ->
                 ConfigFieldRow(
@@ -3298,11 +3266,51 @@ private fun ConfigSection(
                 )
             }
             state.error?.let { message ->
-                Text(
-                    strings.render(message),
-                    color = status.error,
-                )
+                ErrorStatePanel(detail = strings.render(message))
             }
+        }
+    }
+}
+
+@Composable
+private fun ConfigCapabilityNotice(
+    state: ConfigEditorState,
+    onRefreshDevice: () -> Unit,
+) {
+    val strings = LocalStrings.current
+    val noticeKey = state.capabilityNoticeKey ?: return
+    val notice =
+        if (noticeKey == StringKey.CONFIG_HIDDEN_UNKNOWN_TARGET) {
+            strings.t(noticeKey, "count" to state.hiddenFields.size.toString())
+        } else {
+            strings.t(
+                noticeKey,
+                "count" to state.hiddenFields.size.toString(),
+                "firmware" to (
+                    state.target.firmwareVersion
+                        ?.let { "${it.major}.${it.minor}.${it.patch}" }
+                        ?: strings.t(StringKey.UNKNOWN)
+                ),
+                "model" to (state.target.model ?: strings.t(StringKey.UNKNOWN)),
+            )
+        }
+    Row(horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm)) {
+        Text(
+            notice,
+            color = MaterialTheme.colorScheme.secondary,
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.weight(1f),
+        )
+        TextButton(onClick = onRefreshDevice) {
+            Text(strings.t(StringKey.REFRESH_DEVICE_INFO))
+        }
+    }
+    state.hiddenFields.forEach { field ->
+        field.capability.reason?.let { reason ->
+            Text(
+                strings.t(StringKey.TECHNICAL_DETAIL, "detail" to reason),
+                style = MaterialTheme.typography.bodySmall,
+            )
         }
     }
 }
@@ -3316,45 +3324,71 @@ private fun ConfigFieldRow(
 ) {
     val strings = LocalStrings.current
     val status = statusColors()
+    val fieldStatus =
+        configFieldStatus(
+            loading = field.loading,
+            loadError = field.loadError,
+            validationError = field.validationError,
+            readOnlyReason = field.spec.readOnlyReason,
+            saving = field.saving,
+            lastSavedAtEpochMillis = field.lastSavedAtEpochMillis,
+            dirty = field.dirty,
+        )
     val supporting =
-        when {
-            field.loading -> strings.t(StringKey.CONFIG_FIELD_LOADING)
-            field.loadError != null ->
-                strings.t(StringKey.TECHNICAL_DETAIL, "detail" to field.loadError!!)
-            field.validationError != null ->
-                strings.t(StringKey.TECHNICAL_DETAIL, "detail" to field.validationError!!)
-            !field.editable ->
+        when (fieldStatus.kind) {
+            ConfigFieldStatusKind.LOADING -> strings.t(StringKey.CONFIG_FIELD_LOADING)
+            ConfigFieldStatusKind.LOAD_ERROR,
+            ConfigFieldStatusKind.VALIDATION_ERROR,
+            ->
+                strings.t(StringKey.TECHNICAL_DETAIL, "detail" to fieldStatus.detail!!)
+            ConfigFieldStatusKind.READ_ONLY ->
                 strings.t(StringKey.CONFIG_FIELD_READ_ONLY) +
                     (
-                        field.spec.readOnlyReason?.let {
+                        fieldStatus.detail?.let {
                             " · " + strings.t(StringKey.TECHNICAL_DETAIL, "detail" to it)
                         } ?: ""
                     )
-            field.saving -> strings.t(StringKey.CONFIG_FIELD_SAVING)
-            field.lastSavedAtEpochMillis != null && !field.dirty -> strings.t(StringKey.CONFIG_FIELD_SAVED)
-            field.dirty -> strings.t(StringKey.CONFIG_FIELD_UNSAVED)
-            else -> strings.t(StringKey.CONFIG_FIELD_EDITABLE)
+            ConfigFieldStatusKind.SAVING -> strings.t(StringKey.CONFIG_FIELD_SAVING)
+            ConfigFieldStatusKind.SAVED -> strings.t(StringKey.CONFIG_FIELD_SAVED)
+            ConfigFieldStatusKind.DIRTY -> strings.t(StringKey.CONFIG_FIELD_UNSAVED)
+            ConfigFieldStatusKind.EDITABLE -> strings.t(StringKey.CONFIG_FIELD_EDITABLE)
         }
+    val actions =
+        configFieldActions(
+            editable = field.editable,
+            dirty = field.dirty,
+            saving = field.saving,
+            savingAny = savingAny,
+        )
     val isError = field.loadError != null || field.validationError != null
     Column(verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs)) {
         Row(horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm)) {
             OutlinedTextField(
                 value = field.text,
                 onValueChange = onTextChange,
-                enabled = field.editable && !field.saving && !savingAny,
+                enabled = actions.canEditText,
                 label = { Text(field.spec.key.toString()) },
                 singleLine = true,
                 supportingText = {
                     Text(
                         supporting,
                         color = if (isError) status.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier =
+                            if (isError) {
+                                Modifier.semantics {
+                                    liveRegion = LiveRegionMode.Assertive
+                                    contentDescription = supporting
+                                }
+                            } else {
+                                Modifier
+                            },
                     )
                 },
                 modifier = Modifier.weight(1f),
             )
             Button(
                 onClick = onSave,
-                enabled = field.editable && field.dirty && !field.saving && !savingAny,
+                enabled = actions.canSave,
             ) {
                 Text(
                     if (field.saving) {
@@ -3402,7 +3436,7 @@ private fun ParamSection(
                 )
                 TextButton(
                     onClick = { scope.launchSafely(errorReporter, "param-load") { controller.load() } },
-                    enabled = connected && !state.busy,
+                    enabled = paramReloadEnabled(connected, state.busy),
                 ) {
                     Text(
                         if (state.loading) {
@@ -3414,6 +3448,17 @@ private fun ParamSection(
                 }
             }
             Text(strings.t(StringKey.PARAM_HINT), style = MaterialTheme.typography.bodySmall)
+            if (state.loading) {
+                LoadingStatePanel(body = strings.t(StringKey.PARAM_LOADING))
+            }
+            if (!connected) {
+                DisabledStatePanel(reason = StringKey.STATE_DISABLED_NOT_CONNECTED)
+            } else if (writeLocked) {
+                DisabledStatePanel(reason = StringKey.STATE_DISABLED_READ_ONLY)
+            }
+            if (state.busy && !state.loading) {
+                DisabledStatePanel(reason = StringKey.STATE_DISABLED_BUSY)
+            }
             if (writeLocked) {
                 Text(
                     strings.t(StringKey.BATCH_LOCKED_HINT),
@@ -3430,6 +3475,9 @@ private fun ParamSection(
             }
             Text(strings.t(StringKey.PARAM_FIRMWARE_NOTE), style = MaterialTheme.typography.bodySmall)
 
+            if (state.fields.isEmpty() && !state.loading && state.error == null) {
+                EmptyStatePanel()
+            }
             state.fields.forEach { field ->
                 ParamFieldRow(
                     field = field,
@@ -3452,7 +3500,7 @@ private fun ParamSection(
                 Text(strings.render(message), color = status.success)
             }
             state.error?.let { message ->
-                Text(strings.render(message), color = status.error)
+                ErrorStatePanel(detail = strings.render(message))
                 state.errorCode?.let { code ->
                     Text(
                         strings.t(
@@ -3563,6 +3611,15 @@ private fun ParamFieldRow(
                     Text(
                         supporting,
                         color = if (isError) status.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier =
+                            if (isError) {
+                                Modifier.semantics {
+                                    liveRegion = LiveRegionMode.Assertive
+                                    contentDescription = supporting
+                                }
+                            } else {
+                                Modifier
+                            },
                     )
                 },
                 modifier = Modifier.weight(1f),
@@ -3582,14 +3639,6 @@ private fun ParamFieldRow(
         }
     }
 }
-
-private fun paramTypeKey(type: ParamValueType): StringKey =
-    when (type) {
-        ParamValueType.INTEGER -> StringKey.PARAM_TYPE_INTEGER
-        ParamValueType.BOOLEAN -> StringKey.PARAM_TYPE_BOOLEAN
-        ParamValueType.ENUM -> StringKey.PARAM_TYPE_ENUM
-        ParamValueType.STRING -> StringKey.PARAM_TYPE_STRING
-    }
 
 /**
  * 连接质量看板 + 一键诊断报告。
@@ -3936,15 +3985,22 @@ private fun DiagnosticScreen(
                             }
                         }
                         if (reportGenerating) {
-                            LinearProgressIndicator(
-                                progress = { reportProgress?.fraction ?: 0f },
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                            Text(
+                            val reportFraction = reportProgress?.fraction ?: 0f
+                            val reportProgressText =
                                 strings.t(
                                     StringKey.DIAG_REPORT_GENERATING,
-                                    "percent" to ((reportProgress?.fraction ?: 0f) * 100).toInt().toString(),
-                                ),
+                                    "percent" to (reportFraction * 100).toInt().toString(),
+                                )
+                            LinearProgressIndicator(
+                                progress = { reportFraction },
+                                modifier =
+                                    Modifier.fillMaxWidth().semantics {
+                                        progressBarRangeInfo = ProgressBarRangeInfo(reportFraction, 0f..1f)
+                                        contentDescription = reportProgressText
+                                    },
+                            )
+                            Text(
+                                reportProgressText,
                                 style = MaterialTheme.typography.bodySmall,
                             )
                             OutlinedButton(onClick = { reportJob?.cancel() }) {
@@ -3976,6 +4032,16 @@ private fun DiagnosticScreen(
                                 message,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = if (reportMessageSuccess) cards.success else cards.error,
+                                modifier =
+                                    Modifier.semantics {
+                                        liveRegion =
+                                            if (reportMessageSuccess) {
+                                                LiveRegionMode.Polite
+                                            } else {
+                                                LiveRegionMode.Assertive
+                                            }
+                                        contentDescription = message
+                                    },
                             )
                         }
                     }
@@ -3996,12 +4062,18 @@ private fun DiagnosticScreen(
                             style = MaterialTheme.typography.bodySmall,
                         )
                         if (packageGenerating) {
+                            val packageFraction = packageProgress?.fraction ?: 0f
+                            val packageProgressText = strings.t(StringKey.DIAG_PACKAGE_EXPORTING)
                             LinearProgressIndicator(
-                                progress = { packageProgress?.fraction ?: 0f },
-                                modifier = Modifier.fillMaxWidth(),
+                                progress = { packageFraction },
+                                modifier =
+                                    Modifier.fillMaxWidth().semantics {
+                                        progressBarRangeInfo = ProgressBarRangeInfo(packageFraction, 0f..1f)
+                                        contentDescription = packageProgressText
+                                    },
                             )
                             Text(
-                                strings.t(StringKey.DIAG_PACKAGE_EXPORTING),
+                                packageProgressText,
                                 style = MaterialTheme.typography.bodySmall,
                             )
                             OutlinedButton(onClick = { packageJob?.cancel() }) {
@@ -4013,12 +4085,19 @@ private fun DiagnosticScreen(
                             }
                         }
                         packageResult?.let { built ->
-                            Text(
+                            val packageEntriesText =
                                 strings.t(
                                     StringKey.DIAG_PACKAGE_ENTRIES,
                                     "names" to built.entries.joinToString(", ") { it.name },
-                                ),
+                                )
+                            Text(
+                                packageEntriesText,
                                 style = MaterialTheme.typography.bodySmall,
+                                modifier =
+                                    Modifier.semantics {
+                                        liveRegion = LiveRegionMode.Polite
+                                        contentDescription = packageEntriesText
+                                    },
                             )
                             if (built.truncated) {
                                 Text(
@@ -4040,6 +4119,16 @@ private fun DiagnosticScreen(
                                 message,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = if (packageMessageSuccess) cards.success else cards.error,
+                                modifier =
+                                    Modifier.semantics {
+                                        liveRegion =
+                                            if (packageMessageSuccess) {
+                                                LiveRegionMode.Polite
+                                            } else {
+                                                LiveRegionMode.Assertive
+                                            }
+                                        contentDescription = message
+                                    },
                             )
                         }
                     }
@@ -4049,7 +4138,7 @@ private fun DiagnosticScreen(
                 Text(strings.t(StringKey.DIAG_HINT), style = MaterialTheme.typography.bodySmall)
             }
             if (stats.requests == 0) {
-                item { Text(strings.t(StringKey.DIAG_EMPTY)) }
+                item { EmptyStatePanel(body = strings.t(StringKey.DIAG_EMPTY)) }
             } else if (stats.insufficientSample) {
                 item {
                     Card(modifier = Modifier.fillMaxWidth()) {
@@ -4148,7 +4237,7 @@ private fun DiagnosticScreen(
                     )
                 }
                 if (stats.errorCodes.isEmpty()) {
-                    item { Text(strings.t(StringKey.DIAG_NO_FAILURE)) }
+                    item { EmptyStatePanel(body = strings.t(StringKey.DIAG_NO_FAILURE)) }
                 } else {
                     items(stats.errorCodes) { error ->
                         Text(
@@ -4215,18 +4304,25 @@ private fun DiagnosticScreen(
                     )
                 }
                 if (stats.recentFailures.isEmpty()) {
-                    item { Text(strings.t(StringKey.DIAG_NO_FAILURE)) }
+                    item { EmptyStatePanel(body = strings.t(StringKey.DIAG_NO_FAILURE)) }
                 } else {
                     items(stats.recentFailures) { failure ->
-                        Text(
+                        val failureText =
                             strings.t(
                                 StringKey.DIAG_FAILURE_LINE,
                                 "time" to format.absoluteTime(failure.timestampMillis, zoneOffsetMinutes),
                                 "command" to failure.command.name,
                                 "detail" to failure.detail,
-                            ),
+                            )
+                        Text(
+                            failureText,
                             style = MaterialTheme.typography.bodySmall,
                             color = cards.error,
+                            modifier =
+                                Modifier.semantics {
+                                    liveRegion = LiveRegionMode.Assertive
+                                    contentDescription = failureText
+                                },
                         )
                     }
                 }
@@ -4237,8 +4333,8 @@ private fun DiagnosticScreen(
 
 /** 一位小数，避免把估算值展示成精确值。 */
 internal fun formatOneDecimal(value: Double): String {
-    val scaled = (value * 10).toLong()
-    return "${scaled / 10}.${scaled % 10}"
+    val scaled = (value * ONE_DECIMAL_FACTOR).toLong()
+    return "${scaled / ONE_DECIMAL_FACTOR}.${scaled % ONE_DECIMAL_FACTOR}"
 }
 
 /** 首次使用引导：三步说明 + 可跳过；完成状态由控制器写入平台偏好。 */
@@ -4391,7 +4487,7 @@ private fun PacketLogScreen(
     val zoneOffsetMinutes = remember { currentTimeZoneOffsetMinutes(nowMillis) }
     // 会话内已使用的文件名，用于重名冲突解析。
     val exportedNames = remember { mutableListOf<String>() }
-    val availableCommands = remember(entries) { entries.map { it.command }.distinct().sortedBy { it.name } }
+    val availableCommands = remember(entries) { availableCommandTypes(entries) }
 
     // 输入去抖：停止输入 150ms 后才切换过滤结果，避免每个按键触发全量过滤。
     LaunchedEffect(query) {
@@ -4636,6 +4732,12 @@ private fun PacketLogScreen(
             TextButton(onClick = onBack) { Text(strings.t(StringKey.BACK)) }
         }
 
+        if (exporting) {
+            DisabledStatePanel(reason = StringKey.STATE_DISABLED_BUSY)
+        } else if (entries.isEmpty()) {
+            DisabledStatePanel(reason = StringKey.STATE_UNAVAILABLE_HINT)
+        }
+
         OutlinedTextField(
             value = query,
             onValueChange = { query = it },
@@ -4808,18 +4910,30 @@ private fun PacketLogScreen(
             val phaseText =
                 current?.phase?.let { it.label(strings) }
                     ?: strings.t(StringKey.LOGS_EXPORT_PREPARING)
-            Text(
+            val exportingText =
                 strings.t(
                     StringKey.LOGS_EXPORTING,
                     "phase" to phaseText,
                     "processed" to localeFormat.number(current?.processed ?: 0),
                     "total" to localeFormat.number(current?.total ?: 0),
-                ),
+                )
+            val exportFraction = current?.fraction ?: 0f
+            Text(
+                exportingText,
                 style = MaterialTheme.typography.bodySmall,
+                modifier =
+                    Modifier.semantics {
+                        liveRegion = LiveRegionMode.Polite
+                        contentDescription = exportingText
+                    },
             )
             LinearProgressIndicator(
-                progress = { current?.fraction ?: 0f },
-                modifier = Modifier.fillMaxWidth(),
+                progress = { exportFraction },
+                modifier =
+                    Modifier.fillMaxWidth().semantics {
+                        progressBarRangeInfo = ProgressBarRangeInfo(exportFraction, 0f..1f)
+                        contentDescription = exportingText
+                    },
                 color = status.inProgress,
             )
         }
@@ -4838,21 +4952,32 @@ private fun PacketLogScreen(
             TextButton(onClick = { packetLog.clear() }) { Text(strings.t(StringKey.CLEAR)) }
         }
 
-        exportMessage?.let {
+        exportMessage?.let { message ->
             Text(
-                it,
+                message,
                 style = MaterialTheme.typography.bodySmall,
                 color = if (exportSuccess) status.success else status.error,
+                modifier =
+                    Modifier.semantics {
+                        liveRegion =
+                            if (exportSuccess) {
+                                LiveRegionMode.Polite
+                            } else {
+                                LiveRegionMode.Assertive
+                            }
+                        contentDescription = message
+                    },
             )
         }
 
         if (filtered.isEmpty()) {
-            Text(
-                if (entries.isEmpty()) {
-                    strings.t(StringKey.LOGS_EMPTY)
-                } else {
-                    strings.t(StringKey.LOGS_NO_MATCH)
-                },
+            EmptyStatePanel(
+                body =
+                    if (entries.isEmpty()) {
+                        strings.t(StringKey.LOGS_EMPTY)
+                    } else {
+                        strings.t(StringKey.LOGS_NO_MATCH)
+                    },
             )
         }
 
@@ -4876,13 +5001,6 @@ private fun PacketLogScreen(
         }
     }
 }
-
-private fun PacketLogExportPhase.label(strings: StringResolver): String =
-    when (this) {
-        PacketLogExportPhase.FILTERING -> strings.t(StringKey.LOGS_EXPORT_PHASE_FILTERING)
-        PacketLogExportPhase.RENDERING -> strings.t(StringKey.LOGS_EXPORT_PHASE_RENDERING)
-        PacketLogExportPhase.ASSEMBLING -> strings.t(StringKey.LOGS_EXPORT_PHASE_ASSEMBLING)
-    }
 
 @Composable
 private fun PacketLogCard(
@@ -4925,13 +5043,6 @@ private fun PacketLogCard(
         }
     }
 }
-
-private fun OtaOutcome.label(strings: StringResolver): String =
-    when (this) {
-        OtaOutcome.SUCCEEDED -> strings.t(StringKey.OTA_OUTCOME_SUCCEEDED)
-        OtaOutcome.FAILED -> strings.t(StringKey.OTA_OUTCOME_FAILED)
-        OtaOutcome.ABORTED -> strings.t(StringKey.OTA_OUTCOME_ABORTED)
-    }
 
 @OptIn(ExperimentalTime::class)
 @Composable
@@ -4977,6 +5088,7 @@ private fun OtaScreen(
     val scope = rememberCoroutineScope()
     val errorReporter = LocalErrorReporter.current
     val running = state is OtaState.Preparing || state is OtaState.Transferring || state is OtaState.Verifying
+    val otaBusy = libraryBusyId != null || running || selectionState.picking || selectionState.prechecking
     var wizardStep by remember { mutableStateOf(OtaWizardStep.SELECT) }
 
     LaunchedEffect(selection) { selection.refreshResume() }
@@ -5026,18 +5138,29 @@ private fun OtaScreen(
         val path = selectionState.sourcePath
         val crc = selectionState.computedCrc32 ?: selectionState.declaredCrc32
         val firmware = selection.firmware
-        if (version != null && path != null && crc != null && firmware != null && selectionState.packageName != null) {
+        val selectionComplete =
+            version != null &&
+                path != null &&
+                crc != null &&
+                firmware != null &&
+                selectionState.packageName != null
+        if (selectionComplete) {
+            val completeVersion = requireNotNull(version)
+            val completePath = requireNotNull(path)
+            val completeCrc = requireNotNull(crc)
+            val completeFirmware = requireNotNull(firmware)
+            val completePackageName = requireNotNull(selectionState.packageName)
             val insurer =
                 library.record(
                     FirmwareLibraryRecord(
-                        fileName = selectionState.packageName!!,
-                        version = version.toString(),
-                        channel = version.channel,
-                        modelWhitelist = firmware.header.targetModels.toList(),
+                        fileName = completePackageName,
+                        version = completeVersion.toString(),
+                        channel = completeVersion.channel,
+                        modelWhitelist = completeFirmware.header.targetModels.toList(),
                         totalBytes = selectionState.payloadBytes,
-                        crc32 = crc,
+                        crc32 = completeCrc,
                         addedAtEpochMillis = Clock.System.now().toEpochMilliseconds(),
-                        sourcePath = path,
+                        sourcePath = completePath,
                     ),
                 )
             val outcome =
@@ -5098,7 +5221,11 @@ private fun OtaScreen(
     }
 
     Column(
-        modifier = Modifier.fillMaxSize().padding(DesignTokens.Spacing.lg),
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .padding(DesignTokens.Spacing.lg)
+                .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.md),
     ) {
         Row(modifier = Modifier.fillMaxWidth()) {
@@ -5178,7 +5305,7 @@ private fun OtaScreen(
             }
 
             if (selectionState.picking) {
-                Text(strings.t(StringKey.OPENING_PICKER), style = MaterialTheme.typography.bodySmall)
+                LoadingStatePanel(body = strings.t(StringKey.OPENING_PICKER))
             }
             if (selectionState.prechecking) {
                 LinearProgressIndicator(
@@ -5219,7 +5346,16 @@ private fun OtaScreen(
             )
 
             libraryMessage?.let { message ->
-                Text(message, color = status.warning, style = MaterialTheme.typography.bodySmall)
+                Text(
+                    message,
+                    color = status.warning,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier =
+                        Modifier.semantics {
+                            liveRegion = LiveRegionMode.Polite
+                            contentDescription = message
+                        },
+                )
             }
             var libraryAvailability by remember { mutableStateOf<Map<String, FirmwareReuseCheck>>(emptyMap()) }
             val libraryFilter =
@@ -5258,6 +5394,9 @@ private fun OtaScreen(
                     verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs),
                 ) {
                     Text(strings.t(StringKey.OTA_LIBRARY_TITLE), style = MaterialTheme.typography.titleMedium)
+                    if (otaBusy) {
+                        DisabledStatePanel(reason = StringKey.STATE_DISABLED_BUSY)
+                    }
                     Text(
                         strings.t(StringKey.OTA_LIBRARY_NOTE),
                         style = MaterialTheme.typography.bodySmall,
@@ -5369,7 +5508,7 @@ private fun OtaScreen(
                         )
                     }
                     if (libraryRecords.isEmpty()) {
-                        Text(strings.t(StringKey.OTA_LIBRARY_EMPTY), style = MaterialTheme.typography.bodySmall)
+                        EmptyStatePanel(body = strings.t(StringKey.OTA_LIBRARY_EMPTY))
                     } else {
                         libraryRecords.take(LIBRARY_VISIBLE_LIMIT).forEach { record ->
                             val availability = libraryAvailability[record.id]
@@ -5476,11 +5615,7 @@ private fun OtaScreen(
                                     }
                                     TextButton(
                                         onClick = {
-                                            if (libraryBusyId != null ||
-                                                running ||
-                                                selectionState.picking ||
-                                                selectionState.prechecking
-                                            ) {
+                                            if (otaBusy) {
                                                 return@TextButton
                                             }
                                             scope.launchSafely(errorReporter, "firmware-library-use") {
@@ -5650,14 +5785,26 @@ private fun OtaScreen(
             }
             val precheck = selectionState.precheck
             if (precheck == null) {
-                Text(
+                val precheckMessage =
                     selectionState.error?.let { strings.render(it) }
-                        ?: strings.t(StringKey.FIRMWARE_NOT_PRECHECKED),
+                        ?: strings.t(StringKey.FIRMWARE_NOT_PRECHECKED)
+                Text(
+                    precheckMessage,
                     color =
                         if (selectionState.error != null) {
                             status.error
                         } else {
                             MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    modifier =
+                        Modifier.semantics {
+                            liveRegion =
+                                if (selectionState.error != null) {
+                                    LiveRegionMode.Assertive
+                                } else {
+                                    LiveRegionMode.Polite
+                                }
+                            contentDescription = precheckMessage
                         },
                 )
             } else {
@@ -5718,9 +5865,15 @@ private fun OtaScreen(
                 )
             }
             selectionState.error?.let { message ->
+                val errorText = strings.render(message) + (selectionState.errorCode?.let { " ($it)" } ?: "")
                 Text(
-                    strings.render(message) + (selectionState.errorCode?.let { " ($it)" } ?: ""),
+                    errorText,
                     color = status.error,
+                    modifier =
+                        Modifier.semantics {
+                            liveRegion = LiveRegionMode.Assertive
+                            contentDescription = errorText
+                        },
                 )
             }
             TextButton(
@@ -5821,8 +5974,8 @@ private fun OtaScreen(
         if (wizardStep == OtaWizardStep.TRANSFER || wizardStep == OtaWizardStep.RESULT) {
             when (val current = state) {
                 OtaState.Idle -> Text(strings.t(StringKey.OTA_IDLE))
-                is OtaState.Preparing ->
-                    Text(
+                is OtaState.Preparing -> {
+                    val preparingText =
                         strings.t(
                             StringKey.OTA_PREPARING,
                             "bytes" to format.bytes(current.totalBytes.toLong()),
@@ -5832,8 +5985,16 @@ private fun OtaScreen(
                                     strings.t(StringKey.OTA_SESSION_SUFFIX, "id" to it.toString())
                                 } ?: ""
                             ),
-                        ),
+                        )
+                    Text(
+                        preparingText,
+                        modifier =
+                            Modifier.semantics {
+                                liveRegion = LiveRegionMode.Polite
+                                contentDescription = preparingText
+                            },
                     )
+                }
 
                 is OtaState.Transferring -> {
                     val progressText =
@@ -5860,7 +6021,7 @@ private fun OtaScreen(
                         } else {
                             ""
                         }
-                    Text(
+                    val transferringText =
                         strings.t(
                             StringKey.OTA_TRANSFERRING,
                             "stage" to current.stage.label(strings),
@@ -5868,7 +6029,14 @@ private fun OtaScreen(
                             "total" to format.number(current.totalBytes),
                             "percent" to (current.progress * 100).toInt().toString(),
                             "resume" to resumeNote,
-                        ),
+                        )
+                    Text(
+                        transferringText,
+                        modifier =
+                            Modifier.semantics {
+                                liveRegion = LiveRegionMode.Polite
+                                contentDescription = transferringText
+                            },
                     )
                     if (current.retransmissions > 0) {
                         Text(
@@ -5888,47 +6056,84 @@ private fun OtaScreen(
                     }
                 }
 
-                is OtaState.Verifying ->
+                is OtaState.Verifying -> {
+                    val verifyingText = strings.t(StringKey.OTA_VERIFYING, "crc" to hex16(current.crc16))
                     Text(
-                        strings.t(StringKey.OTA_VERIFYING, "crc" to hex16(current.crc16)),
+                        verifyingText,
+                        modifier =
+                            Modifier.semantics {
+                                liveRegion = LiveRegionMode.Polite
+                                contentDescription = verifyingText
+                            },
                     )
+                }
 
-                is OtaState.Succeeded ->
-                    Text(
+                is OtaState.Succeeded -> {
+                    val succeededText =
                         strings.t(
                             StringKey.OTA_SUCCEEDED,
                             "chunks" to format.number(current.chunks),
                             "crc" to hex16(current.crc16),
-                        ) + if (current.rebootRequired) strings.t(StringKey.OTA_REBOOT_REQUIRED) else "",
-                        color = status.success,
-                    )
-
-                is OtaState.Paused ->
+                        ) + if (current.rebootRequired) strings.t(StringKey.OTA_REBOOT_REQUIRED) else ""
                     Text(
+                        succeededText,
+                        color = status.success,
+                        modifier =
+                            Modifier.semantics {
+                                liveRegion = LiveRegionMode.Polite
+                                contentDescription = succeededText
+                            },
+                    )
+                }
+
+                is OtaState.Paused -> {
+                    val pausedText =
                         strings.t(
                             StringKey.OTA_PAUSED_SAFE_POINT,
                             "sent" to format.number(current.sentBytes),
                             "total" to format.number(current.totalBytes),
-                        ),
-                        color = status.warning,
-                    )
-
-                is OtaState.Aborted ->
+                        )
                     Text(
+                        pausedText,
+                        color = status.warning,
+                        modifier =
+                            Modifier.semantics {
+                                liveRegion = LiveRegionMode.Polite
+                                contentDescription = pausedText
+                            },
+                    )
+                }
+
+                is OtaState.Aborted -> {
+                    val abortedText =
                         strings.t(
                             StringKey.OTA_ABORTED,
                             "reason" to abortReasonText(current.reason, strings),
                             "sent" to format.number(current.sentBytes),
                             "total" to format.number(current.totalBytes),
-                        ),
+                        )
+                    Text(
+                        abortedText,
                         color = status.warning,
+                        modifier =
+                            Modifier.semantics {
+                                liveRegion = LiveRegionMode.Assertive
+                                contentDescription = abortedText
+                            },
                     )
+                }
 
                 is OtaState.Failed ->
                     Column(verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs)) {
+                        val failedText = strings.t(StringKey.OTA_FAILED, "reason" to strings.render(current.reason))
                         Text(
-                            strings.t(StringKey.OTA_FAILED, "reason" to strings.render(current.reason)),
+                            failedText,
                             color = status.error,
+                            modifier =
+                                Modifier.semantics {
+                                    liveRegion = LiveRegionMode.Assertive
+                                    contentDescription = failedText
+                                },
                         )
                         Text(
                             strings.t(
@@ -5973,8 +6178,6 @@ private fun OtaScreen(
                 }
             }
         }
-
-        Spacer(modifier = Modifier.weight(1f))
 
         when (wizardStep) {
             OtaWizardStep.SELECT ->
@@ -6051,6 +6254,12 @@ private fun OtaScreen(
                 Column(
                     verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs),
                 ) {
+                    if (writeLocked) {
+                        DisabledStatePanel(reason = StringKey.STATE_DISABLED_READ_ONLY)
+                    }
+                    if (running) {
+                        DisabledStatePanel(reason = StringKey.STATE_DISABLED_BUSY)
+                    }
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm),
@@ -6208,10 +6417,16 @@ private fun FirmwareCard(
                 )
             }
             selectionState.resumeBlockedReason?.let { reason ->
+                val resumeBlockedText = strings.render(reason)
                 Text(
-                    strings.render(reason),
+                    resumeBlockedText,
                     color = status.error,
                     style = MaterialTheme.typography.bodySmall,
+                    modifier =
+                        Modifier.semantics {
+                            liveRegion = LiveRegionMode.Assertive
+                            contentDescription = resumeBlockedText
+                        },
                 )
             }
 
@@ -6221,23 +6436,50 @@ private fun FirmwareCard(
                     Text(strings.t(StringKey.FIRMWARE_NOT_PRECHECKED), style = MaterialTheme.typography.bodySmall)
                 }
             } else if (precheck.passed) {
-                Text(strings.t(StringKey.FIRMWARE_PRECHECK_PASSED), color = status.success)
+                Text(
+                    strings.t(StringKey.FIRMWARE_PRECHECK_PASSED),
+                    color = status.success,
+                    modifier =
+                        Modifier.semantics {
+                            liveRegion = LiveRegionMode.Polite
+                        },
+                )
             } else {
-                Text(strings.t(StringKey.FIRMWARE_PRECHECK_FAILED), color = status.error)
+                Text(
+                    strings.t(StringKey.FIRMWARE_PRECHECK_FAILED),
+                    color = status.error,
+                    modifier =
+                        Modifier.semantics {
+                            liveRegion = LiveRegionMode.Assertive
+                        },
+                )
                 precheck.errors.forEach { error ->
+                    val errorText = "· " + strings.t(StringKey.TECHNICAL_DETAIL, "detail" to (error.message ?: ""))
                     Text(
-                        "· " + strings.t(StringKey.TECHNICAL_DETAIL, "detail" to (error.message ?: "")),
+                        errorText,
                         color = status.error,
                         style = MaterialTheme.typography.bodySmall,
+                        modifier =
+                            Modifier.semantics {
+                                liveRegion = LiveRegionMode.Assertive
+                                contentDescription = errorText
+                            },
                     )
                 }
             }
 
             selectionState.error?.let { message ->
-                Text(
+                val firmwareErrorText =
                     strings.render(message) +
-                        (selectionState.errorCode?.let { " ($it)" } ?: ""),
+                        (selectionState.errorCode?.let { " ($it)" } ?: "")
+                Text(
+                    firmwareErrorText,
                     color = status.error,
+                    modifier =
+                        Modifier.semantics {
+                            liveRegion = LiveRegionMode.Assertive
+                            contentDescription = firmwareErrorText
+                        },
                 )
             }
 
@@ -6245,34 +6487,6 @@ private fun FirmwareCard(
         }
     }
 }
-
-private fun abortReasonText(
-    reasonName: String,
-    strings: StringResolver,
-): String =
-    when (
-        OtaAbortReason.entries.firstOrNull { it.name == reasonName }
-    ) {
-        OtaAbortReason.TIMEOUT -> strings.t(StringKey.OTA_ABORT_TIMEOUT)
-        OtaAbortReason.VERIFY_FAILED -> strings.t(StringKey.OTA_ABORT_VERIFY_FAILED)
-        OtaAbortReason.TRANSPORT_ERROR -> strings.t(StringKey.OTA_ABORT_TRANSPORT)
-        OtaAbortReason.DEVICE_REJECTED -> strings.t(StringKey.OTA_ABORT_DEVICE_REJECTED)
-        OtaAbortReason.USER_CANCELLED -> strings.t(StringKey.OTA_ABORT_USER)
-        null -> strings.t(StringKey.OTA_ABORT_USER)
-    }
-
-private fun hex32(value: Long?): String = value?.let { "0x" + it.toString(16).padStart(8, '0') } ?: "—"
-
-private fun hex16(value: Int?): String = value?.let { "0x" + it.toString(16).uppercase().padStart(4, '0') } ?: "—"
-
-private fun OtaStage.label(strings: StringResolver): String =
-    when (this) {
-        OtaStage.PREPARING -> strings.t(StringKey.OTA_STAGE_PREPARING)
-        OtaStage.TRANSFERRING -> strings.t(StringKey.OTA_STAGE_TRANSFERRING)
-        OtaStage.VERIFYING -> strings.t(StringKey.OTA_STAGE_VERIFYING)
-        OtaStage.APPLYING -> strings.t(StringKey.OTA_STAGE_APPLYING)
-        OtaStage.COMPLETED -> strings.t(StringKey.OTA_STAGE_COMPLETED)
-    }
 
 /**
  * OTA 队列执行器：逐台打开固件库引用，走完整预检后再用既有 OTA 控制器升级。
@@ -6337,7 +6551,7 @@ private class SessionOtaQueueExecutor(
                                     is OtaState.Transferring ->
                                         progress(OtaQueueStage.TRANSFER, state.progress)
 
-                                    is OtaState.Verifying -> progress(OtaQueueStage.VERIFY, 0.99f)
+                                    is OtaState.Verifying -> progress(OtaQueueStage.VERIFY, VERIFY_PROGRESS)
                                     is OtaState.Succeeded -> progress(OtaQueueStage.DONE, 1f)
                                     else -> Unit
                                 }
@@ -6386,13 +6600,3 @@ private class SessionOtaQueueExecutor(
         }
     }
 }
-
-private fun FirmwareApplicabilityReason.labelKey(): StringKey? =
-    when (this) {
-        FirmwareApplicabilityReason.NONE -> null
-        FirmwareApplicabilityReason.MODEL_UNKNOWN -> StringKey.LIB_REASON_MODEL_UNKNOWN
-        FirmwareApplicabilityReason.MODEL_MISMATCH -> StringKey.LIB_REASON_MODEL_MISMATCH
-        FirmwareApplicabilityReason.VERSION_UNKNOWN -> StringKey.LIB_REASON_VERSION_UNKNOWN
-        FirmwareApplicabilityReason.VERSION_UNPARSEABLE -> StringKey.LIB_REASON_VERSION_UNPARSEABLE
-        FirmwareApplicabilityReason.VERSION_ROLLBACK -> StringKey.LIB_REASON_VERSION_ROLLBACK
-    }

@@ -25,7 +25,7 @@ import com.valhalla.core.protocol.message.OtaStage
 import com.valhalla.core.protocol.message.StartOtaRequest
 import com.valhalla.core.protocol.message.StartOtaResponse
 import com.valhalla.data.ble.BleException
-import com.valhalla.feature.FailureInfo
+import com.valhalla.feature.CommandFailureInfo
 import com.valhalla.feature.error.ErrorReporter
 import com.valhalla.feature.i18n.StringKey
 import com.valhalla.feature.i18n.UiMessage
@@ -44,6 +44,9 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.yield
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
+
+private const val MAX_CHUNK_SIZE = 1024
+private const val MAX_U16 = 0xFFFF
 
 /** OTA 流程状态。 */
 sealed interface OtaState {
@@ -181,7 +184,7 @@ class OtaController(
     }
 
     init {
-        require(chunkSize in 1..1024) { "chunkSize 需在 1..1024 之间" }
+        require(chunkSize in 1..MAX_CHUNK_SIZE) { "chunkSize 需在 1..1024 之间" }
         require(maxChunkRetries >= 0) { "maxChunkRetries 不能为负" }
     }
 
@@ -241,7 +244,7 @@ class OtaController(
     ): OtaState =
         startMutex.withLock {
             if (knownCrc16 != null) {
-                require(knownCrc16 in 0..0xFFFF) { "knownCrc16 超出 u16 范围: $knownCrc16" }
+                require(knownCrc16 in 0..MAX_U16) { "knownCrc16 超出 u16 范围: $knownCrc16" }
             }
             prepareRun()
             if (firmware.payloadLength <= 0 || firmware.payloadLength > Int.MAX_VALUE.toLong()) {
@@ -288,11 +291,7 @@ class OtaController(
      */
     suspend fun abort(reason: OtaAbortReason = OtaAbortReason.USER_CANCELLED): OtaState {
         val current = mutableState.value
-        if (current !is OtaState.Preparing &&
-            current !is OtaState.Transferring &&
-            current !is OtaState.Verifying &&
-            current !is OtaState.Paused
-        ) {
+        if (!isBusyState(current)) {
             return current
         }
 
@@ -340,6 +339,12 @@ class OtaController(
         clearCheckpointStore()
         mutableState.value = OtaState.Idle
     }
+
+    private fun isBusyState(state: OtaState): Boolean =
+        state is OtaState.Preparing ||
+            state is OtaState.Transferring ||
+            state is OtaState.Verifying ||
+            state is OtaState.Paused
 
     private suspend fun prepareRun() {
         abortMutex.withLock { abortReason = null }
@@ -393,7 +398,7 @@ class OtaController(
             sessionId = session.response.sessionId
             activeSessionId = sessionId
 
-            val effectiveChunkSize = session.response.chunkSize.takeIf { it in 1..1024 } ?: chunkSize
+            val effectiveChunkSize = session.response.chunkSize.takeIf { it in 1..MAX_CHUNK_SIZE } ?: chunkSize
             sent = resolveStartOffset(requestedOffset, session.response.acceptedOffset, total)
             lastCheckpointBytes = sent
             // 新会话一旦建立，旧会话的断点立即失效：按设备确认值立即落盘（或清除），
@@ -886,7 +891,7 @@ class OtaController(
     }
 
     /** 把传输失败翻译成可操作的提示；拒绝类失败优先展示设备状态码。 */
-    private fun Throwable.toOtaFailureMessage(failure: FailureInfo): UiMessage =
+    private fun Throwable.toOtaFailureMessage(failure: CommandFailureInfo): UiMessage =
         when (this) {
             is OtaValidationException -> uiMessage
             is BleException -> UiMessage(StringKey.OTA_REASON_DISCONNECTED)

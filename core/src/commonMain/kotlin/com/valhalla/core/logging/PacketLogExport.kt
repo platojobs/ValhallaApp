@@ -4,6 +4,36 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.yield
 
+private const val BYTES_PER_KIB = 1_024
+private const val DEFAULT_MAX_BYTES = 524_288
+private const val PROGRESS_YIELD_INTERVAL = 64
+private const val FIRST_PRINTABLE_ASCII_CODE = 0x20
+private const val MONTHS_PER_YEAR = 12
+private const val MAX_DAYS_PER_MONTH = 31
+private const val MAX_HOUR_OF_DAY = 23
+private const val MAX_MINUTE_OF_HOUR = 59
+private const val MAX_SECOND_OF_MINUTE = 59
+private const val MILLIS_PER_SECOND = 1_000L
+private const val MILLIS_PER_MINUTE = 60_000L
+private const val MILLIS_PER_HOUR = 3_600_000L
+private const val SECONDS_PER_MINUTE = 60
+private const val SECONDS_PER_HOUR = 3_600
+private const val MINUTES_PER_HOUR = 60
+private const val CIVIL_EPOCH_DAY_OFFSET = 719_468L
+private const val CIVIL_ERA_DAY_ADJUSTMENT = 146_096L
+private const val DAYS_PER_ERA = 146_097L
+private const val DAYS_PER_FOUR_YEARS_CYCLE = 1_460L
+private const val DAYS_PER_CENTURY_CYCLE = 36_524L
+private const val DAYS_PER_YEAR = 365L
+private const val YEARS_PER_ERA = 400L
+private const val YEARS_PER_ERA_COUNT = 400
+private const val YEARS_PER_ERA_MINUS_ONE = 399
+private const val MONTH_PHASE_MULTIPLIER = 5L
+private const val MONTH_PHASE_DIVISOR = 153L
+private const val MONTH_PHASE_THRESHOLD = 10L
+private const val MONTH_PHASE_OVERFLOW = 9L
+private const val WINTER_MONTH_SHIFT = 9
+
 /** 导出格式；[extension] 与 [mimeType] 用于文件名与平台保存/分享。 */
 enum class PacketLogExportFormat(
     val extension: String,
@@ -29,7 +59,7 @@ enum class PacketLogTruncationTarget {
  */
 data class PacketLogExportOptions(
     val maxEntries: Int = 200,
-    val maxBytes: Int = 512 * 1024,
+    val maxBytes: Int = DEFAULT_MAX_BYTES,
     val maxHexCharsPerEntry: Int = 4096,
 ) {
     init {
@@ -84,7 +114,7 @@ fun validateEntryLimit(input: String): PacketLogLimitCheck {
 /** 校验“大小上限”输入（单位 KB，1..16384 KB，即 1 KiB..16 MiB），返回字节值。 */
 fun validateByteLimitKb(input: String): PacketLogLimitCheck {
     val text = input.trim()
-    val maxKb = PacketLogExportOptions.MAX_BYTES / 1024
+    val maxKb = PacketLogExportOptions.MAX_BYTES / BYTES_PER_KIB
     if (text.isEmpty()) {
         return PacketLogLimitCheck(error = "请输入 1..$maxKb 之间的整数（KB）")
     }
@@ -265,7 +295,7 @@ object PacketLogExporter {
         val matched = ArrayList<PacketLogEntry>(entries.size)
         entries.forEachIndexed { index, entry ->
             if (filter.matches(entry)) matched += entry
-            if (index % 64 == 0 || index == entries.lastIndex) {
+            if (index % PROGRESS_YIELD_INTERVAL == 0 || index == entries.lastIndex) {
                 currentCoroutineContext().ensureActive()
                 onProgress(PacketLogExportProgress(index + 1, entries.size, PacketLogExportPhase.FILTERING))
                 yield()
@@ -310,7 +340,7 @@ object PacketLogExporter {
             selectedCount = count
             bodyBytes += separatorBytes + blockBytes
 
-            if (index % 64 == 0 || index == matched.lastIndex) {
+            if (index % PROGRESS_YIELD_INTERVAL == 0 || index == matched.lastIndex) {
                 currentCoroutineContext().ensureActive()
                 onProgress(PacketLogExportProgress(index + 1, matched.size, PacketLogExportPhase.RENDERING))
                 yield()
@@ -364,7 +394,7 @@ object PacketLogExporter {
         for (index in 0 until selectedCount) {
             if (index > 0) builder.append(renderer.separator)
             builder.append(renderer.entry(matched[index]))
-            if (index % 64 == 0 || index == selectedCount - 1) {
+            if (index % PROGRESS_YIELD_INTERVAL == 0 || index == selectedCount - 1) {
                 currentCoroutineContext().ensureActive()
                 yield()
             }
@@ -763,7 +793,7 @@ private fun jsonString(value: String): String =
                 '\r' -> append("\\r")
                 '\t' -> append("\\t")
                 else ->
-                    if (char.code < 0x20) {
+                    if (char.code < FIRST_PRINTABLE_ASCII_CODE) {
                         append("\\u").append(char.code.toString(16).padStart(4, '0'))
                     } else {
                         append(char)
@@ -854,13 +884,13 @@ fun parseLocalDateTimeMillis(
     val year = date[0].toIntOrNull() ?: return null
     val month = date[1].toIntOrNull() ?: return null
     val day = date[2].toIntOrNull() ?: return null
-    if (month !in 1..12 || day !in 1..31) return null
+    if (month !in 1..MONTHS_PER_YEAR || day !in 1..MAX_DAYS_PER_MONTH) return null
 
     val time = parts[1].split(':')
     if (time.size !in 2..3) return null
     val hour = time[0].toIntOrNull() ?: return null
     val minute = time[1].toIntOrNull() ?: return null
-    if (hour !in 0..23 || minute !in 0..59) return null
+    if (hour !in 0..MAX_HOUR_OF_DAY || minute !in 0..MAX_MINUTE_OF_HOUR) return null
 
     var second = 0
     var millis = 0
@@ -869,7 +899,7 @@ fun parseLocalDateTimeMillis(
         val dot = secondsPart.indexOf('.')
         val secondsText = if (dot >= 0) secondsPart.substring(0, dot) else secondsPart
         second = secondsText.toIntOrNull() ?: return null
-        if (second !in 0..59) return null
+        if (second !in 0..MAX_SECOND_OF_MINUTE) return null
         if (dot >= 0) {
             val fraction = secondsPart.substring(dot + 1)
             if (fraction.isEmpty() || fraction.any { !it.isDigit() }) return null
@@ -881,8 +911,8 @@ fun parseLocalDateTimeMillis(
     val roundTrip = civilFromDays(days)
     if (roundTrip.first != year || roundTrip.second != month || roundTrip.third != day) return null
 
-    val millisOfDay = hour * 3_600_000L + minute * 60_000L + second * 1_000L + millis
-    return days * MILLIS_PER_DAY + millisOfDay - zoneOffsetMinutes.toLong() * 60_000L
+    val millisOfDay = hour * MILLIS_PER_HOUR + minute * MILLIS_PER_MINUTE + second * MILLIS_PER_SECOND + millis
+    return days * MILLIS_PER_DAY + millisOfDay - zoneOffsetMinutes.toLong() * MILLIS_PER_MINUTE
 }
 
 /**
@@ -900,7 +930,7 @@ fun formatRelativeTime(
 ): String {
     val delta = nowMillis - entryMillis
     return when {
-        delta < -1_000L -> "$futurePrefix${formatDuration(-delta)}"
+        delta < -MILLIS_PER_SECOND -> "$futurePrefix${formatDuration(-delta)}"
         delta < 1_000L -> justNow
         else -> "${formatDuration(delta)}$agoSuffix"
     }
@@ -909,12 +939,12 @@ fun formatRelativeTime(
 private fun formatDuration(millis: Long): String {
     val totalSeconds = millis / 1_000L
     return when {
-        totalSeconds < 60 -> "${totalSeconds}s"
-        totalSeconds < 3_600 ->
-            "${totalSeconds / 60}m${(totalSeconds % 60).toString().padStart(2, '0')}s"
+        totalSeconds < SECONDS_PER_MINUTE -> "${totalSeconds}s"
+        totalSeconds < SECONDS_PER_HOUR ->
+            "${totalSeconds / SECONDS_PER_MINUTE}m${(totalSeconds % SECONDS_PER_MINUTE).toString().padStart(2, '0')}s"
 
         else ->
-            "${totalSeconds / 3_600}h${((totalSeconds % 3_600) / 60).toString().padStart(2, '0')}m"
+            "${totalSeconds / SECONDS_PER_HOUR}h${((totalSeconds % SECONDS_PER_HOUR) / SECONDS_PER_MINUTE).toString().padStart(2, '0')}m"
     }
 }
 
@@ -923,9 +953,9 @@ private fun formatOffset(offsetMinutes: Int): String {
     val absolute = if (offsetMinutes < 0) -offsetMinutes else offsetMinutes
     return buildString {
         append(sign)
-        append((absolute / 60).toString().padStart(2, '0'))
+        append((absolute / MINUTES_PER_HOUR).toString().padStart(2, '0'))
         append(':')
-        append((absolute % 60).toString().padStart(2, '0'))
+        append((absolute % MINUTES_PER_HOUR).toString().padStart(2, '0'))
     }
 }
 
@@ -945,7 +975,7 @@ private fun localParts(
     epochMillis: Long,
     zoneOffsetMinutes: Int,
 ): LocalParts {
-    val shifted = epochMillis + zoneOffsetMinutes.toLong() * 60_000L
+    val shifted = epochMillis + zoneOffsetMinutes.toLong() * MILLIS_PER_MINUTE
     val days = floorDiv(shifted, MILLIS_PER_DAY)
     val millisOfDay = shifted - days * MILLIS_PER_DAY
     val (year, month, day) = civilFromDays(days)
@@ -971,16 +1001,20 @@ private fun floorDiv(
 
 /** Howard Hinnant 的 civil_from_days，用于在 commonMain 中把天数转换为公历日期。 */
 private fun civilFromDays(days: Long): Triple<Int, Int, Int> {
-    val z = days + 719_468L
-    val era = (if (z >= 0) z else z - 146_096L) / 146_097L
-    val dayOfEra = z - era * 146_097L
-    val yearOfEra = (dayOfEra - dayOfEra / 1_460L + dayOfEra / 36_524L - dayOfEra / 146_096L) / 365L
+    val z = days + CIVIL_EPOCH_DAY_OFFSET
+    val era = (if (z >= 0) z else z - CIVIL_ERA_DAY_ADJUSTMENT) / DAYS_PER_ERA
+    val dayOfEra = z - era * DAYS_PER_ERA
+    val yearOfEra =
+        (
+            dayOfEra - dayOfEra / DAYS_PER_FOUR_YEARS_CYCLE + dayOfEra / DAYS_PER_CENTURY_CYCLE -
+                dayOfEra / CIVIL_ERA_DAY_ADJUSTMENT
+        ) / DAYS_PER_YEAR
     val year =
-        yearOfEra + era * 400L
-    val dayOfYear = dayOfEra - (365L * yearOfEra + yearOfEra / 4L - yearOfEra / 100L)
-    val mp = (5L * dayOfYear + 2L) / 153L
-    val day = dayOfYear - (153L * mp + 2L) / 5L + 1L
-    val month = if (mp < 10L) mp + 3L else mp - 9L
+        yearOfEra + era * YEARS_PER_ERA
+    val dayOfYear = dayOfEra - (DAYS_PER_YEAR * yearOfEra + yearOfEra / 4L - yearOfEra / 100L)
+    val mp = (MONTH_PHASE_MULTIPLIER * dayOfYear + 2L) / MONTH_PHASE_DIVISOR
+    val day = dayOfYear - (MONTH_PHASE_DIVISOR * mp + 2L) / MONTH_PHASE_MULTIPLIER + 1L
+    val month = if (mp < MONTH_PHASE_THRESHOLD) mp + 3L else mp - MONTH_PHASE_OVERFLOW
     return Triple(
         (if (month <= 2L) year + 1L else year).toInt(),
         month.toInt(),
@@ -995,10 +1029,10 @@ private fun daysFromCivil(
     day: Int,
 ): Long {
     val y = if (month <= 2) year - 1 else year
-    val era = (if (y >= 0) y else y - 399) / 400
-    val yearOfEra = y - era * 400
-    val monthShift = if (month > 2) month - 3 else month + 9
-    val dayOfYear = (153L * monthShift + 2L) / 5L + day - 1L
-    val dayOfEra = yearOfEra.toLong() * 365L + yearOfEra / 4 - yearOfEra / 100 + dayOfYear
-    return era.toLong() * 146_097L + dayOfEra - 719_468L
+    val era = (if (y >= 0) y else y - YEARS_PER_ERA_MINUS_ONE) / YEARS_PER_ERA_COUNT
+    val yearOfEra = y - era * YEARS_PER_ERA_COUNT
+    val monthShift = if (month > 2) month - 3 else month + WINTER_MONTH_SHIFT
+    val dayOfYear = (MONTH_PHASE_DIVISOR * monthShift + 2L) / MONTH_PHASE_MULTIPLIER + day - 1L
+    val dayOfEra = yearOfEra.toLong() * DAYS_PER_YEAR + yearOfEra / 4 - yearOfEra / 100 + dayOfYear
+    return era.toLong() * DAYS_PER_ERA + dayOfEra - CIVIL_EPOCH_DAY_OFFSET
 }

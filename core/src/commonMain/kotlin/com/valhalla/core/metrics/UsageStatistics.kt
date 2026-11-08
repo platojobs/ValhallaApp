@@ -16,13 +16,15 @@ enum class UsageRange {
     /** 起始时间；[ALL] 返回 null 表示不设下限。 */
     fun startMillis(nowMillis: Long): Long? =
         when (this) {
-            LAST_7_DAYS -> nowMillis - DAY_MILLIS * 7
-            LAST_30_DAYS -> nowMillis - DAY_MILLIS * 30
+            LAST_7_DAYS -> nowMillis - DAY_MILLIS * LAST_7_DAYS_DAY_COUNT
+            LAST_30_DAYS -> nowMillis - DAY_MILLIS * LAST_30_DAYS_DAY_COUNT
             ALL -> null
         }
 
     companion object {
         const val DAY_MILLIS: Long = 24L * 60 * 60 * 1000
+        const val LAST_7_DAYS_DAY_COUNT: Int = 7
+        const val LAST_30_DAYS_DAY_COUNT: Int = 30
     }
 }
 
@@ -192,7 +194,10 @@ object UsageStatisticsCalculator {
                     val started = openAt ?: return@forEach
                     val ended = event.timestampMillis
                     openAt = null
-                    if (ended <= nowMillis && (start == null || started >= start) && ended >= started) {
+                    val withinWindow = ended <= nowMillis
+                    val startsAfterFilter = start == null || started >= start
+                    val hasValidSpan = ended >= started
+                    if (withinWindow && startsAfterFilter && hasValidSpan) {
                         durations += ended - started
                     }
                 }

@@ -166,13 +166,11 @@ fun CoroutineScope.launchSafely(
         } catch (timeout: TimeoutCancellationException) {
             val error = reporter.record(origin, timeout, ErrorKind.TIMEOUT)
             onError?.invoke(error)
+        } catch (cancelled: UserCancelledException) {
+            val error = reporter.record(origin, cancelled, ErrorKind.USER_CANCELLED)
+            onError?.invoke(error)
         } catch (cancelled: CancellationException) {
-            if (cancelled is UserCancelledException) {
-                val error = reporter.record(origin, cancelled, ErrorKind.USER_CANCELLED)
-                onError?.invoke(error)
-            } else {
-                throw cancelled
-            }
+            throw cancelled
         } catch (error: Throwable) {
             val recorded = reporter.record(origin, error)
             onError?.invoke(recorded)

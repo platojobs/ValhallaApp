@@ -5,6 +5,14 @@ import com.valhalla.core.storage.StorageKind
 import com.valhalla.core.storage.StorageMigrationStatus
 import com.valhalla.core.storage.StorageSchemaMigrator
 
+private const val U32_MAX = 0xFFFFFFFFL
+private const val U16_MAX = 0xFFFF
+private const val INDEX_SESSION_ID = 1
+private const val INDEX_TOTAL_BYTES = 4
+private const val INDEX_SENT_BYTES = 5
+private const val INDEX_CRC16 = 6
+private const val INDEX_CRC32 = 7
+
 /**
  * OTA 断点锚点。
  *
@@ -31,11 +39,11 @@ data class OtaResumePoint(
     val crc32: Long,
 ) {
     fun isValid(): Boolean =
-        sessionId in 0..0xFFFFFFFFL &&
+        sessionId in 0..U32_MAX &&
             totalBytes in 1..Int.MAX_VALUE &&
             sentBytes in 1 until totalBytes &&
-            crc16 in 0..0xFFFF &&
-            crc32 in 0..0xFFFFFFFFL
+            crc16 in 0..U16_MAX &&
+            crc32 in 0..U32_MAX
 
     /** 固件身份是否一致（版本号 + 总长 + payload CRC-32）。版本号忽略渠道名。 */
     fun matchesFirmware(firmware: FirmwarePackage): Boolean =
@@ -122,22 +130,22 @@ object OtaResumePointCodec {
             return ParsedOtaCheckpoint(null, "断点字段数量异常")
         }
         val sessionId =
-            parts[1].toLongOrNull()
+            parts[INDEX_SESSION_ID].toLongOrNull()
                 ?: return ParsedOtaCheckpoint(null, "sessionId 无法解析")
         val version =
             decodeVersion(parts[2], parts[3])
                 ?: return ParsedOtaCheckpoint(null, "固件版本字段无法解析")
         val totalBytes =
-            parts[4].toIntOrNull()
+            parts[INDEX_TOTAL_BYTES].toIntOrNull()
                 ?: return ParsedOtaCheckpoint(null, "totalBytes 无法解析")
         val sentBytes =
-            parts[5].toIntOrNull()
+            parts[INDEX_SENT_BYTES].toIntOrNull()
                 ?: return ParsedOtaCheckpoint(null, "sentBytes 无法解析")
         val crc16 =
-            parts[6].toIntOrNull()
+            parts[INDEX_CRC16].toIntOrNull()
                 ?: return ParsedOtaCheckpoint(null, "crc16 无法解析")
         val crc32 =
-            parts[7].toLongOrNull()
+            parts[INDEX_CRC32].toLongOrNull()
                 ?: return ParsedOtaCheckpoint(null, "crc32 无法解析")
 
         val point =

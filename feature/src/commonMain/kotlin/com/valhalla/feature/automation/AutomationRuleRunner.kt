@@ -37,6 +37,8 @@ import kotlinx.coroutines.CancellationException
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
 
+private const val RECENT_DIAGNOSTIC_ENTRY_LIMIT = 5
+
 /** 自动化执行上下文；全部依赖当前前台会话。 */
 class AutomationContext(
     val deviceId: String,
@@ -281,7 +283,7 @@ class AutomationRuleRunner(
                 recentErrors =
                     recentEvents
                         .filter { it.result == DeviceEventResult.FAILURE }
-                        .takeLast(5)
+                        .takeLast(RECENT_DIAGNOSTIC_ENTRY_LIMIT)
                         .map { event ->
                             DiagnosticReportError(
                                 timestampMillis = event.timestampMillis,
@@ -291,7 +293,7 @@ class AutomationRuleRunner(
                             )
                         },
                 otaHistory =
-                    profile?.otaHistory.orEmpty().takeLast(5).map { record ->
+                    profile?.otaHistory.orEmpty().takeLast(RECENT_DIAGNOSTIC_ENTRY_LIMIT).map { record ->
                         DiagnosticReportOta(
                             firmwareVersion = record.firmwareVersion,
                             finishedAtEpochMillis = record.finishedAtEpochMillis,

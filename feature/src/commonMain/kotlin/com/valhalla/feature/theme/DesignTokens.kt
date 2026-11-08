@@ -9,6 +9,11 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 
+private const val LUMINANCE_RED_WEIGHT = 0.2126
+private const val LUMINANCE_GREEN_WEIGHT = 0.7152
+private const val LUMINANCE_BLUE_WEIGHT = 0.0722
+private const val DARK_LUMINANCE_THRESHOLD = 0.5
+
 /**
  * 设计令牌：间距、圆角、状态色。
  *
@@ -111,8 +116,8 @@ fun statusColors(): DesignTokens.StatusColors =
     }
 
 private fun Color.luminanceIsDark(): Boolean {
-    val luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue
-    return luminance < 0.5
+    val luminance = LUMINANCE_RED_WEIGHT * red + LUMINANCE_GREEN_WEIGHT * green + LUMINANCE_BLUE_WEIGHT * blue
+    return luminance < DARK_LUMINANCE_THRESHOLD
 }
 
 /** 应用主题：按偏好或系统解析亮暗，套用统一的颜色方案。 */

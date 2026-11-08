@@ -1,5 +1,18 @@
 package com.valhalla.core.protocol.message
 
+private const val STATUS_AUTH_FAILED: Int = 0x05
+private const val STATUS_CHALLENGE_EXPIRED: Int = 0x06
+private const val STATUS_BUSY: Int = 0x07
+private const val STATUS_NOT_READY: Int = 0x09
+private const val STATUS_OUT_OF_RANGE: Int = 0x0A
+private const val STATUS_STORAGE_FULL: Int = 0x0B
+private const val STATUS_OTA_VERIFY_FAILED: Int = 0x0C
+private const val STATUS_CRC_MISMATCH: Int = 0x0E
+private const val STATUS_OTA_RESUME_OFFSET_INVALID: Int = 0x11
+private const val STATUS_OTA_RESUME_CONTEXT_INVALID: Int = 0x12
+private const val STATUS_OTA_FIRMWARE_MISMATCH: Int = 0x13
+private const val STATUS_UNKNOWN_ERROR: Int = 0x7F
+
 /**
  * 设备应答状态码。每个应答帧 payload 的第 0 字节即为该状态码。
  *
@@ -15,22 +28,22 @@ enum class DeviceStatus(
     INVALID_PAYLOAD(0x02, "报文负载非法"),
     INVALID_PARAMETER(0x03, "参数非法"),
     UNAUTHORIZED(0x04, "未鉴权"),
-    AUTH_FAILED(0x05, "鉴权失败"),
-    CHALLENGE_EXPIRED(0x06, "挑战已过期"),
-    BUSY(0x07, "设备忙"),
+    AUTH_FAILED(STATUS_AUTH_FAILED, "鉴权失败"),
+    CHALLENGE_EXPIRED(STATUS_CHALLENGE_EXPIRED, "挑战已过期"),
+    BUSY(STATUS_BUSY, "设备忙"),
     TIMEOUT(0x08, "设备处理超时"),
-    NOT_READY(0x09, "设备未就绪"),
-    OUT_OF_RANGE(0x0A, "取值超出范围"),
-    STORAGE_FULL(0x0B, "存储空间不足"),
-    OTA_VERIFY_FAILED(0x0C, "OTA 固件校验失败"),
+    NOT_READY(STATUS_NOT_READY, "设备未就绪"),
+    OUT_OF_RANGE(STATUS_OUT_OF_RANGE, "取值超出范围"),
+    STORAGE_FULL(STATUS_STORAGE_FULL, "存储空间不足"),
+    OTA_VERIFY_FAILED(STATUS_OTA_VERIFY_FAILED, "OTA 固件校验失败"),
     OTA_STATE_INVALID(0x0D, "OTA 状态不允许该操作"),
-    CRC_MISMATCH(0x0E, "CRC 校验失败"),
+    CRC_MISMATCH(STATUS_CRC_MISMATCH, "CRC 校验失败"),
     UNSUPPORTED(0x0F, "设备不支持该能力"),
     INTERNAL_ERROR(0x10, "设备内部错误"),
-    OTA_RESUME_OFFSET_INVALID(0x11, "OTA 续传偏移非法"),
-    OTA_RESUME_CONTEXT_INVALID(0x12, "OTA 续传上下文失效"),
-    OTA_FIRMWARE_MISMATCH(0x13, "OTA 固件标识不匹配"),
-    UNKNOWN_ERROR(0x7F, "未定义错误"),
+    OTA_RESUME_OFFSET_INVALID(STATUS_OTA_RESUME_OFFSET_INVALID, "OTA 续传偏移非法"),
+    OTA_RESUME_CONTEXT_INVALID(STATUS_OTA_RESUME_CONTEXT_INVALID, "OTA 续传上下文失效"),
+    OTA_FIRMWARE_MISMATCH(STATUS_OTA_FIRMWARE_MISMATCH, "OTA 固件标识不匹配"),
+    UNKNOWN_ERROR(STATUS_UNKNOWN_ERROR, "未定义错误"),
     ;
 
     val isSuccess: Boolean get() = this == OK

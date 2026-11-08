@@ -1,5 +1,16 @@
 package com.valhalla.core.automation
 
+private const val UINT8_MAX = 0xFF
+private const val ASCII_DIGIT_START = 0x30
+private const val ASCII_DIGIT_END = 0x39
+private const val ASCII_UPPER_START = 0x41
+private const val ASCII_UPPER_END = 0x5A
+private const val ASCII_LOWER_START = 0x61
+private const val ASCII_LOWER_END = 0x7A
+private const val ASCII_PRINTABLE_MAX = 0x7E
+private const val ORDER_FIELD_INDEX = 5
+private const val PRESET_FIELD_INDEX = 6
+
 /** 触发时机；只在本 App 前台运行期间发生。 */
 enum class AutomationTrigger {
     /** 连接（含自动重连）成功后。 */
@@ -110,8 +121,8 @@ object AutomationRuleCodec {
                 "0" -> false
                 else -> return null
             }
-        val order = parts[5].toIntOrNull() ?: return null
-        val presetRaw = unescape(parts[6])
+        val order = parts[ORDER_FIELD_INDEX].toIntOrNull() ?: return null
+        val presetRaw = unescape(parts[PRESET_FIELD_INDEX])
         val presetId = presetRaw?.takeUnless { it == EMPTY }
         return runCatching {
             AutomationRule(
@@ -128,7 +139,7 @@ object AutomationRuleCodec {
     private fun escape(value: String): String =
         buildString {
             value.encodeToByteArray().forEach { byte ->
-                val code = byte.toInt() and 0xFF
+                val code = byte.toInt() and UINT8_MAX
                 if (isAsciiSafe(code)) {
                     append(code.toChar())
                 } else {
@@ -140,9 +151,9 @@ object AutomationRuleCodec {
         }
 
     private fun isAsciiSafe(code: Int): Boolean =
-        code in 0x30..0x39 ||
-            code in 0x41..0x5A ||
-            code in 0x61..0x7A ||
+        code in ASCII_DIGIT_START..ASCII_DIGIT_END ||
+            code in ASCII_UPPER_START..ASCII_UPPER_END ||
+            code in ASCII_LOWER_START..ASCII_LOWER_END ||
             code == '.'.code ||
             code == '_'.code ||
             code == '~'.code ||
@@ -161,7 +172,7 @@ object AutomationRuleCodec {
                 bytes += ((high shl 4) or low).toByte()
                 index += 3
             } else {
-                if (char.code > 0x7E) return null
+                if (char.code > ASCII_PRINTABLE_MAX) return null
                 bytes += char.code.toByte()
                 index++
             }
