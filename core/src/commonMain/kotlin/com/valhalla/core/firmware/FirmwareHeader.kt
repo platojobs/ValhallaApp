@@ -134,33 +134,71 @@ class FirmwareHeader(
         fun decode(bytes: ByteArray): FirmwareHeader {
             if (bytes.size < SIZE) throw FirmwareException.Truncated(SIZE.toLong(), bytes.size.toLong())
 
+            validateMagic(bytes)
+            validateFormatVersion(bytes)
+            val hasSignature = readSignatureFlag(bytes)
+            verifyHeaderCrc(bytes)
+
+            val version = readVersionFields(bytes)
+            val channel = readChannel(bytes)
+            val models = readModels(bytes)
+            val payload = readPayload(bytes)
+
+            return FirmwareHeader(
+                firmwareVersion = FirmwareVersion(version.major, version.minor, version.patch, version.build, channel),
+                targetModels = models,
+                payloadLength = payload.length,
+                payloadCrc32 = payload.crc32,
+                hasSignature = hasSignature,
+            )
+        }
+
+        private fun validateMagic(bytes: ByteArray) {
             if (bytes[OFFSET_MAGIC_0] != MAGIC_0 || bytes[OFFSET_MAGIC_1] != MAGIC_1) {
                 throw FirmwareException.InvalidMagic(
                     "0x${hex(bytes[OFFSET_MAGIC_0])} 0x${hex(bytes[OFFSET_MAGIC_1])}",
                 )
             }
+        }
 
+        private fun validateFormatVersion(bytes: ByteArray) {
             val formatVersion = bytes[OFFSET_FORMAT_VERSION].toInt() and BYTE_MASK
             if (formatVersion != FORMAT_VERSION) throw FirmwareException.UnsupportedFormat(formatVersion)
+        }
 
+        private fun readSignatureFlag(bytes: ByteArray): Boolean {
             val flags = bytes[OFFSET_FLAGS].toInt() and BYTE_MASK
             if ((flags and SIGNATURE_FLAG.inv() and BYTE_MASK) != 0) throw FirmwareException.UnsupportedFlags(flags)
-            val hasSignature = (flags and SIGNATURE_FLAG) != 0
+            return (flags and SIGNATURE_FLAG) != 0
+        }
 
+        private fun verifyHeaderCrc(bytes: ByteArray) {
             val expectedHeaderCrc = readU16(bytes, OFFSET_HEADER_CRC)
             val actualHeaderCrc = Crc16.ccittFalse(bytes, 0, OFFSET_HEADER_CRC)
             if (expectedHeaderCrc != actualHeaderCrc) {
                 throw FirmwareException.HeaderChecksumMismatch(expectedHeaderCrc, actualHeaderCrc)
             }
+        }
 
-            val major = readU16(bytes, OFFSET_VERSION_MAJOR)
-            val minor = readU16(bytes, OFFSET_VERSION_MINOR)
-            val patch = readU16(bytes, OFFSET_VERSION_PATCH)
+        private fun readVersionFields(bytes: ByteArray): VersionFields {
+            val major = readVersionField(bytes, OFFSET_VERSION_MAJOR, "major")
+            val minor = readVersionField(bytes, OFFSET_VERSION_MINOR, "minor")
+            val patch = readVersionField(bytes, OFFSET_VERSION_PATCH, "patch")
             val build = readU16(bytes, OFFSET_VERSION_BUILD)
-            if (major > BYTE_MASK) throw FirmwareException.InvalidHeaderField("major", "超出 0..255: $major")
-            if (minor > BYTE_MASK) throw FirmwareException.InvalidHeaderField("minor", "超出 0..255: $minor")
-            if (patch > BYTE_MASK) throw FirmwareException.InvalidHeaderField("patch", "超出 0..255: $patch")
+            return VersionFields(major, minor, patch, build)
+        }
 
+        private fun readVersionField(
+            bytes: ByteArray,
+            offset: Int,
+            name: String,
+        ): Int {
+            val value = readU16(bytes, offset)
+            if (value > BYTE_MASK) throw FirmwareException.InvalidHeaderField(name, "超出 0..255: $value")
+            return value
+        }
+
+        private fun readChannel(bytes: ByteArray): String {
             val channelLength = bytes[OFFSET_CHANNEL_LENGTH].toInt() and BYTE_MASK
             if (channelLength > CHANNEL_FIELD_SIZE) {
                 throw FirmwareException.InvalidHeaderField("channelLength", "超出 0..$CHANNEL_FIELD_SIZE: $channelLength")
@@ -172,7 +210,10 @@ class FirmwareHeader(
             if (hasNonZeroTail(bytes, OFFSET_CHANNEL + channelLength, OFFSET_CHANNEL + CHANNEL_FIELD_SIZE)) {
                 throw FirmwareException.InvalidHeaderField("channel", "长度之外的填充字节非零")
             }
+            return channel
+        }
 
+        private fun readModels(bytes: ByteArray): List<String> {
             val modelCount = bytes[OFFSET_MODEL_COUNT].toInt() and BYTE_MASK
             if (modelCount !in 1..MAX_MODELS) {
                 throw FirmwareException.InvalidHeaderField("modelCount", "超出 1..$MAX_MODELS: $modelCount")
@@ -181,39 +222,63 @@ class FirmwareHeader(
             repeat(MAX_MODELS) { index ->
                 val fieldStart = OFFSET_MODELS + index * MODEL_FIELD_SIZE
                 if (index < modelCount) {
-                    val length =
-                        firstZeroIndex(bytes, fieldStart, fieldStart + MODEL_FIELD_SIZE)
-                            .let { zero -> zero - fieldStart }
-                    if (length == 0) {
-                        throw FirmwareException.InvalidHeaderField("model[$index]", "型号为空")
-                    }
-                    val model = readFixedString(bytes, fieldStart, MODEL_FIELD_SIZE, length) { isModelValidChar(it) }
-                    if (!isModelValid(model)) {
-                        throw FirmwareException.InvalidHeaderField("model[$index]", "型号格式非法: $model")
-                    }
-                    if (models.any { it.equals(model, ignoreCase = true) }) {
-                        throw FirmwareException.InvalidHeaderField("model[$index]", "型号重复: $model")
-                    }
-                    models += model
+                    models += readModel(bytes, index, fieldStart, models)
                 } else if (hasNonZeroTail(bytes, fieldStart, fieldStart + MODEL_FIELD_SIZE)) {
                     throw FirmwareException.InvalidHeaderField("model[$index]", "未使用的型号字段非零")
                 }
             }
+            return models
+        }
 
+        private fun readModel(
+            bytes: ByteArray,
+            index: Int,
+            fieldStart: Int,
+            existing: List<String>,
+        ): String {
+            val length =
+                firstZeroIndex(bytes, fieldStart, fieldStart + MODEL_FIELD_SIZE)
+                    .let { zero -> zero - fieldStart }
+            if (length == 0) {
+                throw FirmwareException.InvalidHeaderField("model[$index]", "型号为空")
+            }
+            val model = readFixedString(bytes, fieldStart, MODEL_FIELD_SIZE, length) { isModelValidChar(it) }
+            validateModel(model, index, existing)
+            return model
+        }
+
+        private fun validateModel(
+            model: String,
+            index: Int,
+            existing: List<String>,
+        ) {
+            if (!isModelValid(model)) {
+                throw FirmwareException.InvalidHeaderField("model[$index]", "型号格式非法: $model")
+            }
+            if (existing.any { it.equals(model, ignoreCase = true) }) {
+                throw FirmwareException.InvalidHeaderField("model[$index]", "型号重复: $model")
+            }
+        }
+
+        private fun readPayload(bytes: ByteArray): PayloadInfo {
             val payloadLength = readU32(bytes, OFFSET_PAYLOAD_LENGTH)
             if (payloadLength == 0L) {
                 throw FirmwareException.InvalidHeaderField("payloadLength", "必须大于 0")
             }
-            val payloadCrc32 = readU32(bytes, OFFSET_PAYLOAD_CRC32)
-
-            return FirmwareHeader(
-                firmwareVersion = FirmwareVersion(major, minor, patch, build, channel),
-                targetModels = models,
-                payloadLength = payloadLength,
-                payloadCrc32 = payloadCrc32,
-                hasSignature = hasSignature,
-            )
+            return PayloadInfo(payloadLength, readU32(bytes, OFFSET_PAYLOAD_CRC32))
         }
+
+        private data class VersionFields(
+            val major: Int,
+            val minor: Int,
+            val patch: Int,
+            val build: Int,
+        )
+
+        private data class PayloadInfo(
+            val length: Long,
+            val crc32: Long,
+        )
 
         private fun readFixedString(
             bytes: ByteArray,

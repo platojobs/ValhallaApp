@@ -292,16 +292,7 @@ object PacketLogExporter {
     ): Computed {
         currentCoroutineContext().ensureActive()
 
-        val matched = ArrayList<PacketLogEntry>(entries.size)
-        entries.forEachIndexed { index, entry ->
-            if (filter.matches(entry)) matched += entry
-            if (index % PROGRESS_YIELD_INTERVAL == 0 || index == entries.lastIndex) {
-                currentCoroutineContext().ensureActive()
-                onProgress(PacketLogExportProgress(index + 1, entries.size, PacketLogExportPhase.FILTERING))
-                yield()
-            }
-        }
-
+        val matched = collectMatchedEntries(entries, filter, onProgress)
         if (matched.isEmpty()) {
             onProgress(PacketLogExportProgress(1, 1, PacketLogExportPhase.ASSEMBLING))
             return Computed("", 0, 0, false, 0, null)
@@ -313,7 +304,64 @@ object PacketLogExporter {
         currentCoroutineContext().ensureActive()
 
         val renderer = rendererFor(format, nowMillis, zoneOffsetMinutes, filter, entries.size, matched.size, options)
-        // 预算阶段只保留每条条目的字节数，不保留渲染结果，避免整份导出内容常驻内存。
+        val budget = budgetEntries(matched, renderer, options, onProgress)
+
+        if (budget.selectedCount == 0) {
+            onProgress(PacketLogExportProgress(1, 1, PacketLogExportPhase.ASSEMBLING))
+            return Computed(
+                text = "",
+                selectedCount = 0,
+                matchedCount = matched.size,
+                truncated = true,
+                byteSize = 0,
+                notice = "大小上限过小，无法容纳任何条目，请提高上限后重试",
+            )
+        }
+
+        onProgress(PacketLogExportProgress(1, 1, PacketLogExportPhase.ASSEMBLING))
+        yield()
+        currentCoroutineContext().ensureActive()
+
+        // 预估只走预算，不拼装文本；字节数由头部/条目/分隔符/尾部的字节数求和得出，与拼装结果一致。
+        return if (assembleOutput) {
+            assembleComputed(matched, renderer, budget)
+        } else {
+            Computed(
+                text = "",
+                selectedCount = budget.selectedCount,
+                matchedCount = matched.size,
+                truncated = budget.truncated,
+                byteSize = budget.total,
+                notice = null,
+            )
+        }
+    }
+
+    /** 按过滤条件收集条目，并按固定间隔让出线程并上报进度。 */
+    private suspend fun collectMatchedEntries(
+        entries: List<PacketLogEntry>,
+        filter: PacketLogFilter,
+        onProgress: (PacketLogExportProgress) -> Unit,
+    ): MutableList<PacketLogEntry> {
+        val matched = ArrayList<PacketLogEntry>(entries.size)
+        entries.forEachIndexed { index, entry ->
+            if (filter.matches(entry)) matched += entry
+            if (index % PROGRESS_YIELD_INTERVAL == 0 || index == entries.lastIndex) {
+                currentCoroutineContext().ensureActive()
+                onProgress(PacketLogExportProgress(index + 1, entries.size, PacketLogExportPhase.FILTERING))
+                yield()
+            }
+        }
+        return matched
+    }
+
+    /** 预算阶段只保留每条条目的字节数，不保留渲染结果，避免整份导出内容常驻内存。 */
+    private suspend fun budgetEntries(
+        matched: List<PacketLogEntry>,
+        renderer: FormatRenderer,
+        options: PacketLogExportOptions,
+        onProgress: (PacketLogExportProgress) -> Unit,
+    ): ExportBudget {
         val sizes = IntArray(minOf(matched.size, options.maxEntries))
         var selectedCount = 0
         var bodyBytes = 0
@@ -347,54 +395,49 @@ object PacketLogExporter {
             }
         }
 
-        var finalTruncated = truncated || selectedCount < matched.size
-        var total = renderer.headerBytes(selectedCount, finalTruncated) + bodyBytes + renderer.footerBytes
-        // 头部会随导出的条数/截断标记变化，极端情况下需要继续从最旧一端丢弃。
+        val finalTruncated = truncated || selectedCount < matched.size
+        val total = renderer.headerBytes(selectedCount, finalTruncated) + bodyBytes + renderer.footerBytes
+        return trimToFit(renderer, options, sizes, selectedCount, bodyBytes, total, finalTruncated)
+    }
+
+    /** 头部会随导出的条数/截断标记变化，极端情况下需要继续从最旧一端丢弃。 */
+    private suspend fun trimToFit(
+        renderer: FormatRenderer,
+        options: PacketLogExportOptions,
+        sizes: IntArray,
+        initialCount: Int,
+        initialBodyBytes: Int,
+        initialTotal: Int,
+        initialTruncated: Boolean,
+    ): ExportBudget {
+        var selectedCount = initialCount
+        var bodyBytes = initialBodyBytes
+        var total = initialTotal
+        var truncated = initialTruncated
         while (selectedCount > 0 && total > options.maxBytes) {
             val removedBytes =
                 sizes[selectedCount - 1] +
                     if (selectedCount - 1 == 0) 0 else renderer.separatorBytes
             selectedCount--
             bodyBytes -= removedBytes
-            finalTruncated = true
-            total = renderer.headerBytes(selectedCount, finalTruncated) + bodyBytes + renderer.footerBytes
+            truncated = true
+            total = renderer.headerBytes(selectedCount, truncated) + bodyBytes + renderer.footerBytes
             currentCoroutineContext().ensureActive()
         }
+        return ExportBudget(selectedCount, total, truncated)
+    }
 
-        if (selectedCount == 0) {
-            onProgress(PacketLogExportProgress(1, 1, PacketLogExportPhase.ASSEMBLING))
-            return Computed(
-                text = "",
-                selectedCount = 0,
-                matchedCount = matched.size,
-                truncated = true,
-                byteSize = 0,
-                notice = "大小上限过小，无法容纳任何条目，请提高上限后重试",
-            )
-        }
-
-        onProgress(PacketLogExportProgress(1, 1, PacketLogExportPhase.ASSEMBLING))
-        yield()
-        currentCoroutineContext().ensureActive()
-
-        // 预估只走预算，不拼装文本；字节数由头部/条目/分隔符/尾部的字节数求和得出，与拼装结果一致。
-        if (!assembleOutput) {
-            return Computed(
-                text = "",
-                selectedCount = selectedCount,
-                matchedCount = matched.size,
-                truncated = finalTruncated,
-                byteSize = total,
-                notice = null,
-            )
-        }
-
+    private suspend fun assembleComputed(
+        matched: List<PacketLogEntry>,
+        renderer: FormatRenderer,
+        budget: ExportBudget,
+    ): Computed {
         val builder = ChunkedTextBuilder()
-        builder.append(renderer.header(selectedCount, finalTruncated))
-        for (index in 0 until selectedCount) {
+        builder.append(renderer.header(budget.selectedCount, budget.truncated))
+        for (index in 0 until budget.selectedCount) {
             if (index > 0) builder.append(renderer.separator)
             builder.append(renderer.entry(matched[index]))
-            if (index % PROGRESS_YIELD_INTERVAL == 0 || index == selectedCount - 1) {
+            if (index % PROGRESS_YIELD_INTERVAL == 0 || index == budget.selectedCount - 1) {
                 currentCoroutineContext().ensureActive()
                 yield()
             }
@@ -403,14 +446,20 @@ object PacketLogExporter {
 
         return Computed(
             text = builder.assemble(),
-            selectedCount = selectedCount,
+            selectedCount = budget.selectedCount,
             matchedCount = matched.size,
-            truncated = finalTruncated,
-            byteSize = total,
+            truncated = budget.truncated,
+            byteSize = budget.total,
             notice = null,
             peakBufferChars = builder.peakBufferedChars,
         )
     }
+
+    private data class ExportBudget(
+        val selectedCount: Int,
+        val total: Int,
+        val truncated: Boolean,
+    )
 
     private fun rendererFor(
         format: PacketLogExportFormat,
@@ -879,40 +928,50 @@ fun parseLocalDateTimeMillis(
     val parts = text.split(' ', limit = 2).filter { it.isNotEmpty() }
     if (parts.size != 2) return null
 
-    val date = parts[0].split('-')
+    val date = parseDateParts(parts[0]) ?: return null
+    val millisOfDay = parseMillisOfDay(parts[1]) ?: return null
+
+    val days = daysFromCivil(date.first, date.second, date.third)
+    val roundTrip = civilFromDays(days)
+    if (roundTrip.first != date.first || roundTrip.second != date.second || roundTrip.third != date.third) return null
+
+    return days * MILLIS_PER_DAY + millisOfDay - zoneOffsetMinutes.toLong() * MILLIS_PER_MINUTE
+}
+
+/** 解析 `YYYY-MM-DD`，字段范围或日历日期非法时返回 null。 */
+private fun parseDateParts(text: String): Triple<Int, Int, Int>? {
+    val date = text.split('-')
     if (date.size != 3) return null
     val year = date[0].toIntOrNull() ?: return null
     val month = date[1].toIntOrNull() ?: return null
     val day = date[2].toIntOrNull() ?: return null
     if (month !in 1..MONTHS_PER_YEAR || day !in 1..MAX_DAYS_PER_MONTH) return null
+    return Triple(year, month, day)
+}
 
-    val time = parts[1].split(':')
+/** 解析 `HH:mm[:ss[.SSS]]` 为当日毫秒数；格式或字段非法时返回 null。 */
+private fun parseMillisOfDay(text: String): Long? {
+    val time = text.split(':')
     if (time.size !in 2..3) return null
     val hour = time[0].toIntOrNull() ?: return null
     val minute = time[1].toIntOrNull() ?: return null
     if (hour !in 0..MAX_HOUR_OF_DAY || minute !in 0..MAX_MINUTE_OF_HOUR) return null
 
-    var second = 0
-    var millis = 0
-    if (time.size == 3) {
-        val secondsPart = time[2]
-        val dot = secondsPart.indexOf('.')
-        val secondsText = if (dot >= 0) secondsPart.substring(0, dot) else secondsPart
-        second = secondsText.toIntOrNull() ?: return null
-        if (second !in 0..MAX_SECOND_OF_MINUTE) return null
-        if (dot >= 0) {
-            val fraction = secondsPart.substring(dot + 1)
-            if (fraction.isEmpty() || fraction.any { !it.isDigit() }) return null
-            millis = fraction.take(3).padEnd(3, '0').toInt()
-        }
-    }
+    val clock = parseSecondsAndMillis(time.getOrNull(2)) ?: return null
+    return hour * MILLIS_PER_HOUR + minute * MILLIS_PER_MINUTE + clock.first * MILLIS_PER_SECOND + clock.second
+}
 
-    val days = daysFromCivil(year, month, day)
-    val roundTrip = civilFromDays(days)
-    if (roundTrip.first != year || roundTrip.second != month || roundTrip.third != day) return null
-
-    val millisOfDay = hour * MILLIS_PER_HOUR + minute * MILLIS_PER_MINUTE + second * MILLIS_PER_SECOND + millis
-    return days * MILLIS_PER_DAY + millisOfDay - zoneOffsetMinutes.toLong() * MILLIS_PER_MINUTE
+/** 解析秒与可选毫秒；未提供秒时按 0 处理。 */
+private fun parseSecondsAndMillis(text: String?): Pair<Int, Int>? {
+    if (text == null) return 0 to 0
+    val dot = text.indexOf('.')
+    val secondsText = if (dot >= 0) text.substring(0, dot) else text
+    val second = secondsText.toIntOrNull() ?: return null
+    if (second !in 0..MAX_SECOND_OF_MINUTE) return null
+    if (dot < 0) return second to 0
+    val fraction = text.substring(dot + 1)
+    if (fraction.isEmpty() || fraction.any { !it.isDigit() }) return null
+    return second to fraction.take(3).padEnd(3, '0').toInt()
 }
 
 /**

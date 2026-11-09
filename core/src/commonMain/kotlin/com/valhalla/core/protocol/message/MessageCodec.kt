@@ -28,84 +28,118 @@ object MessageCodec {
         payload: ByteArray,
     ): DeviceRequest {
         val reader = PayloadReader(payload)
-        val request =
-            when (command) {
-                CommandType.AUTH ->
-                    AuthRequest(
-                        mode =
-                            AuthMode.fromCode(reader.byte())
-                                ?: throw MessageDecodeException("未知鉴权模式"),
-                        credential = reader.bytes(reader.u16()),
-                    )
-
-                CommandType.GET_DEVICE_INFO -> GetDeviceInfoRequest()
-                CommandType.GET_BATTERY -> GetBatteryRequest()
-                CommandType.GET_FIRMWARE_VERSION -> GetFirmwareVersionRequest()
-                CommandType.GET_TIME -> GetTimeRequest()
-
-                CommandType.SET_CONFIG ->
-                    SetConfigRequest(
-                        key = reader.string1(),
-                        value = reader.bytes(reader.u16()),
-                    )
-
-                CommandType.GET_CONFIG -> GetConfigRequest(reader.string1())
-
-                CommandType.SET_TIME ->
-                    SetTimeRequest(
-                        epochSeconds = reader.u32(),
-                        timezoneOffsetMinutes = reader.i16(),
-                    )
-
-                CommandType.SET_PARAM ->
-                    SetParamRequest(
-                        paramId = reader.u16(),
-                        value = reader.bytes(reader.u16()),
-                    )
-
-                CommandType.GET_PARAM -> GetParamRequest(reader.u16())
-
-                CommandType.FACTORY_RESET -> FactoryResetRequest(reader.string1())
-
-                CommandType.START_OTA -> StartOtaRequest.decode(reader)
-
-                CommandType.OTA_DATA ->
-                    OtaDataRequest(
-                        offset = reader.u32(),
-                        data = reader.bytes(reader.u16()),
-                    )
-
-                CommandType.FINISH_OTA ->
-                    FinishOtaRequest(
-                        totalBytes = reader.u32(),
-                        crc16 = reader.u16(),
-                    )
-
-                CommandType.ABORT_OTA ->
-                    AbortOtaRequest(
-                        OtaAbortReason.fromCode(reader.byte())
-                            ?: throw MessageDecodeException("未知 OTA 中止原因"),
-                    )
-
-                CommandType.REBOOT ->
-                    RebootRequest(
-                        delayMillis = reader.u16(),
-                        reason = reader.byte(),
-                    )
-
-                CommandType.LOG_DUMP ->
-                    LogDumpRequest(
-                        sinceSequence = reader.u32(),
-                        maxEntries = reader.u16(),
-                    )
-
-                CommandType.HEARTBEAT -> HeartbeatRequest(reader.u32())
-
-                else -> throw MessageDecodeException("指令 ${command.name} 没有请求模型")
-            }
+        val request = decodeRequestPayload(command, reader)
         reader.ensureExhausted()
         return request
     }
+
+    /** 按命令域分派请求体；每个子解码器只处理同一类命令。 */
+    private fun decodeRequestPayload(
+        command: CommandType,
+        reader: PayloadReader,
+    ): DeviceRequest =
+        when (command) {
+            CommandType.AUTH -> decodeAuthRequest(reader)
+            CommandType.GET_DEVICE_INFO, CommandType.GET_BATTERY,
+            CommandType.GET_FIRMWARE_VERSION, CommandType.GET_TIME,
+            -> queryRequest(command)
+            CommandType.SET_CONFIG -> decodeSetConfigRequest(reader)
+            CommandType.GET_CONFIG -> GetConfigRequest(reader.string1())
+            CommandType.SET_TIME -> decodeSetTimeRequest(reader)
+            CommandType.SET_PARAM -> decodeSetParamRequest(reader)
+            CommandType.GET_PARAM -> GetParamRequest(reader.u16())
+            CommandType.FACTORY_RESET -> FactoryResetRequest(reader.string1())
+            CommandType.START_OTA, CommandType.OTA_DATA,
+            CommandType.FINISH_OTA, CommandType.ABORT_OTA,
+            -> decodeOtaRequest(command, reader)
+            CommandType.REBOOT, CommandType.LOG_DUMP,
+            CommandType.HEARTBEAT,
+            -> decodeSystemRequest(command, reader)
+            else -> throw MessageDecodeException("指令 ${command.name} 没有请求模型")
+        }
+
+    private fun decodeAuthRequest(reader: PayloadReader): DeviceRequest =
+        AuthRequest(
+            mode =
+                AuthMode.fromCode(reader.byte())
+                    ?: throw MessageDecodeException("未知鉴权模式"),
+            credential = reader.bytes(reader.u16()),
+        )
+
+    private fun queryRequest(command: CommandType): DeviceRequest =
+        when (command) {
+            CommandType.GET_DEVICE_INFO -> GetDeviceInfoRequest()
+            CommandType.GET_BATTERY -> GetBatteryRequest()
+            CommandType.GET_FIRMWARE_VERSION -> GetFirmwareVersionRequest()
+            CommandType.GET_TIME -> GetTimeRequest()
+            else -> throw MessageDecodeException("指令 ${command.name} 没有请求模型")
+        }
+
+    private fun decodeSetConfigRequest(reader: PayloadReader): DeviceRequest =
+        SetConfigRequest(
+            key = reader.string1(),
+            value = reader.bytes(reader.u16()),
+        )
+
+    private fun decodeSetTimeRequest(reader: PayloadReader): DeviceRequest =
+        SetTimeRequest(
+            epochSeconds = reader.u32(),
+            timezoneOffsetMinutes = reader.i16(),
+        )
+
+    private fun decodeSetParamRequest(reader: PayloadReader): DeviceRequest =
+        SetParamRequest(
+            paramId = reader.u16(),
+            value = reader.bytes(reader.u16()),
+        )
+
+    private fun decodeOtaRequest(
+        command: CommandType,
+        reader: PayloadReader,
+    ): DeviceRequest =
+        when (command) {
+            CommandType.START_OTA -> StartOtaRequest.decode(reader)
+            CommandType.OTA_DATA ->
+                OtaDataRequest(
+                    offset = reader.u32(),
+                    data = reader.bytes(reader.u16()),
+                )
+
+            CommandType.FINISH_OTA ->
+                FinishOtaRequest(
+                    totalBytes = reader.u32(),
+                    crc16 = reader.u16(),
+                )
+
+            CommandType.ABORT_OTA ->
+                AbortOtaRequest(
+                    OtaAbortReason.fromCode(reader.byte())
+                        ?: throw MessageDecodeException("未知 OTA 中止原因"),
+                )
+
+            else -> throw MessageDecodeException("指令 ${command.name} 没有请求模型")
+        }
+
+    private fun decodeSystemRequest(
+        command: CommandType,
+        reader: PayloadReader,
+    ): DeviceRequest =
+        when (command) {
+            CommandType.REBOOT ->
+                RebootRequest(
+                    delayMillis = reader.u16(),
+                    reason = reader.byte(),
+                )
+
+            CommandType.LOG_DUMP ->
+                LogDumpRequest(
+                    sinceSequence = reader.u32(),
+                    maxEntries = reader.u16(),
+                )
+
+            CommandType.HEARTBEAT -> HeartbeatRequest(reader.u32())
+            else -> throw MessageDecodeException("指令 ${command.name} 没有请求模型")
+        }
 
     // ---------------------------------------------------------------------
     // 应答编码 / 解码
@@ -125,114 +159,188 @@ object MessageCodec {
         val reader = PayloadReader(payload)
         val status = DeviceStatus.fromCode(reader.byte())
         if (!status.isSuccess) {
-            val detail =
-                if (reader.remaining > 0) {
-                    reader.bytes(reader.remaining).decodeToString()
-                } else {
-                    null
-                }
-            return ErrorResponse(command, status, detail)
+            return errorResponse(command, status, reader)
         }
 
-        val response =
-            when (command) {
-                CommandType.AUTH ->
-                    AuthResponse(
-                        status = status,
-                        token = reader.string2(),
-                        expiresInSeconds = reader.u32(),
-                        challenge = reader.bytes(reader.u16()),
-                    )
-
-                CommandType.GET_DEVICE_INFO ->
-                    DeviceInfoResponse(
-                        status = status,
-                        vendor = reader.string1(),
-                        model = reader.string1(),
-                        serialNumber = reader.string1(),
-                        hardwareVersion = reader.string1(),
-                        firmwareVersion = FirmwareVersion.decode(reader),
-                    )
-
-                CommandType.SET_CONFIG -> SetConfigResponse(status)
-                CommandType.SET_PARAM -> SetParamResponse(status)
-                CommandType.FACTORY_RESET -> FactoryResetResponse(status)
-                CommandType.REBOOT -> RebootResponse(status)
-                CommandType.ABORT_OTA -> AbortOtaResponse(status)
-
-                CommandType.GET_CONFIG ->
-                    ConfigResponse(
-                        status = status,
-                        key = reader.string1(),
-                        value = reader.bytes(reader.u16()),
-                    )
-
-                CommandType.GET_BATTERY ->
-                    BatteryResponse(
-                        status = status,
-                        percent = reader.byte(),
-                        charging = readBoolean(reader, "充电状态"),
-                        voltageMillivolts = reader.u16(),
-                    )
-
-                CommandType.GET_FIRMWARE_VERSION ->
-                    FirmwareVersionResponse(
-                        status = status,
-                        version = FirmwareVersion.decode(reader),
-                    )
-
-                CommandType.SET_TIME ->
-                    SetTimeResponse(
-                        status = status,
-                        appliedEpochSeconds = reader.u32(),
-                    )
-
-                CommandType.GET_TIME ->
-                    TimeResponse(
-                        status = status,
-                        epochSeconds = reader.u32(),
-                        timezoneOffsetMinutes = reader.i16(),
-                    )
-
-                CommandType.GET_PARAM ->
-                    ParamResponse(
-                        status = status,
-                        paramId = reader.u16(),
-                        value = reader.bytes(reader.u16()),
-                    )
-
-                CommandType.START_OTA -> StartOtaResponse.decode(status, reader)
-
-                CommandType.OTA_DATA ->
-                    OtaDataResponse(
-                        status = status,
-                        receivedBytes = reader.u32(),
-                    )
-
-                CommandType.FINISH_OTA ->
-                    FinishOtaResponse(
-                        status = status,
-                        rebootRequired = readBoolean(reader, "重启标记"),
-                    )
-
-                CommandType.LOG_DUMP ->
-                    LogDumpResponse(
-                        status = status,
-                        entries = readLogEntries(reader),
-                    )
-
-                CommandType.HEARTBEAT ->
-                    HeartbeatResponse(
-                        status = status,
-                        uptimeSeconds = reader.u32(),
-                        batteryPercent = reader.byte(),
-                    )
-
-                else -> throw MessageDecodeException("指令 ${command.name} 没有应答模型")
-            }
+        val response = decodeSuccessResponse(command, status, reader)
         reader.ensureExhausted()
         return response
     }
+
+    /** 非 0 状态码：detail 为状态码之后剩余字节的 UTF-8 文本。 */
+    private fun errorResponse(
+        command: CommandType,
+        status: DeviceStatus,
+        reader: PayloadReader,
+    ): ErrorResponse {
+        val detail =
+            if (reader.remaining > 0) {
+                reader.bytes(reader.remaining).decodeToString()
+            } else {
+                null
+            }
+        return ErrorResponse(command, status, detail)
+    }
+
+    private fun decodeSuccessResponse(
+        command: CommandType,
+        status: DeviceStatus,
+        reader: PayloadReader,
+    ): DeviceResponse =
+        when (command) {
+            CommandType.AUTH -> decodeAuthResponse(status, reader)
+            CommandType.GET_DEVICE_INFO -> decodeDeviceInfoResponse(status, reader)
+            CommandType.SET_CONFIG, CommandType.SET_PARAM,
+            CommandType.FACTORY_RESET, CommandType.REBOOT,
+            CommandType.ABORT_OTA,
+            -> statusOnlyResponse(command, status)
+            CommandType.GET_CONFIG -> decodeConfigResponse(status, reader)
+            CommandType.GET_BATTERY -> decodeBatteryResponse(status, reader)
+            CommandType.GET_FIRMWARE_VERSION ->
+                FirmwareVersionResponse(
+                    status = status,
+                    version = FirmwareVersion.decode(reader),
+                )
+            CommandType.SET_TIME -> decodeSetTimeResponse(status, reader)
+            CommandType.GET_TIME -> decodeTimeResponse(status, reader)
+            CommandType.GET_PARAM -> decodeParamResponse(status, reader)
+            CommandType.START_OTA, CommandType.OTA_DATA,
+            CommandType.FINISH_OTA,
+            -> decodeOtaResponse(command, status, reader)
+            CommandType.LOG_DUMP, CommandType.HEARTBEAT -> decodeSystemResponse(command, status, reader)
+            else -> throw MessageDecodeException("指令 ${command.name} 没有应答模型")
+        }
+
+    private fun decodeAuthResponse(
+        status: DeviceStatus,
+        reader: PayloadReader,
+    ): DeviceResponse =
+        AuthResponse(
+            status = status,
+            token = reader.string2(),
+            expiresInSeconds = reader.u32(),
+            challenge = reader.bytes(reader.u16()),
+        )
+
+    private fun decodeDeviceInfoResponse(
+        status: DeviceStatus,
+        reader: PayloadReader,
+    ): DeviceResponse =
+        DeviceInfoResponse(
+            status = status,
+            vendor = reader.string1(),
+            model = reader.string1(),
+            serialNumber = reader.string1(),
+            hardwareVersion = reader.string1(),
+            firmwareVersion = FirmwareVersion.decode(reader),
+        )
+
+    private fun statusOnlyResponse(
+        command: CommandType,
+        status: DeviceStatus,
+    ): DeviceResponse =
+        when (command) {
+            CommandType.SET_CONFIG -> SetConfigResponse(status)
+            CommandType.SET_PARAM -> SetParamResponse(status)
+            CommandType.FACTORY_RESET -> FactoryResetResponse(status)
+            CommandType.REBOOT -> RebootResponse(status)
+            CommandType.ABORT_OTA -> AbortOtaResponse(status)
+            else -> throw MessageDecodeException("指令 ${command.name} 没有应答模型")
+        }
+
+    private fun decodeConfigResponse(
+        status: DeviceStatus,
+        reader: PayloadReader,
+    ): DeviceResponse =
+        ConfigResponse(
+            status = status,
+            key = reader.string1(),
+            value = reader.bytes(reader.u16()),
+        )
+
+    private fun decodeBatteryResponse(
+        status: DeviceStatus,
+        reader: PayloadReader,
+    ): DeviceResponse =
+        BatteryResponse(
+            status = status,
+            percent = reader.byte(),
+            charging = readBoolean(reader, "充电状态"),
+            voltageMillivolts = reader.u16(),
+        )
+
+    private fun decodeSetTimeResponse(
+        status: DeviceStatus,
+        reader: PayloadReader,
+    ): DeviceResponse =
+        SetTimeResponse(
+            status = status,
+            appliedEpochSeconds = reader.u32(),
+        )
+
+    private fun decodeTimeResponse(
+        status: DeviceStatus,
+        reader: PayloadReader,
+    ): DeviceResponse =
+        TimeResponse(
+            status = status,
+            epochSeconds = reader.u32(),
+            timezoneOffsetMinutes = reader.i16(),
+        )
+
+    private fun decodeParamResponse(
+        status: DeviceStatus,
+        reader: PayloadReader,
+    ): DeviceResponse =
+        ParamResponse(
+            status = status,
+            paramId = reader.u16(),
+            value = reader.bytes(reader.u16()),
+        )
+
+    private fun decodeOtaResponse(
+        command: CommandType,
+        status: DeviceStatus,
+        reader: PayloadReader,
+    ): DeviceResponse =
+        when (command) {
+            CommandType.START_OTA -> StartOtaResponse.decode(status, reader)
+            CommandType.OTA_DATA ->
+                OtaDataResponse(
+                    status = status,
+                    receivedBytes = reader.u32(),
+                )
+
+            CommandType.FINISH_OTA ->
+                FinishOtaResponse(
+                    status = status,
+                    rebootRequired = readBoolean(reader, "重启标记"),
+                )
+
+            else -> throw MessageDecodeException("指令 ${command.name} 没有应答模型")
+        }
+
+    private fun decodeSystemResponse(
+        command: CommandType,
+        status: DeviceStatus,
+        reader: PayloadReader,
+    ): DeviceResponse =
+        when (command) {
+            CommandType.LOG_DUMP ->
+                LogDumpResponse(
+                    status = status,
+                    entries = readLogEntries(reader),
+                )
+
+            CommandType.HEARTBEAT ->
+                HeartbeatResponse(
+                    status = status,
+                    uptimeSeconds = reader.u32(),
+                    batteryPercent = reader.byte(),
+                )
+
+            else -> throw MessageDecodeException("指令 ${command.name} 没有应答模型")
+        }
 
     fun decodeResponse(
         request: DeviceRequest,

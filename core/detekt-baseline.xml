@@ -2,30 +2,19 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
-    <ID>CyclomaticComplexMethod:ConnectionQualityStats.kt$ConnectionQualityAnalyzer$fun analyze( entries: List&lt;PacketLogEntry&gt;, recentFailureLimit: Int = 5, minSamples: Int = MIN_SAMPLES, ): ConnectionQualityStats</ID>
-    <ID>CyclomaticComplexMethod:DeviceStateMachine.kt$DeviceStateMachine$private fun resolve( current: DeviceState, event: DeviceEvent, ): DeviceState?</ID>
-    <ID>CyclomaticComplexMethod:FirmwareHeader.kt$FirmwareHeader.Companion$fun decode(bytes: ByteArray): FirmwareHeader</ID>
-    <ID>CyclomaticComplexMethod:MessageCodec.kt$MessageCodec$fun decodeRequest( command: CommandType, payload: ByteArray, ): DeviceRequest</ID>
-    <ID>CyclomaticComplexMethod:MessageCodec.kt$MessageCodec$fun decodeResponse( command: CommandType, payload: ByteArray, ): DeviceResponse</ID>
-    <ID>CyclomaticComplexMethod:PacketLogExport.kt$PacketLogExporter$private suspend fun compute( entries: List&lt;PacketLogEntry&gt;, filter: PacketLogFilter, nowMillis: Long, zoneOffsetMinutes: Int, format: PacketLogExportFormat, options: PacketLogExportOptions, onProgress: (PacketLogExportProgress) -&gt; Unit, assembleOutput: Boolean, ): Computed</ID>
-    <ID>CyclomaticComplexMethod:PacketLogExport.kt$fun parseLocalDateTimeMillis( input: String, zoneOffsetMinutes: Int, ): Long?</ID>
     <ID>ExplicitGarbageCollectionCall:PacketLogExportBenchmark.kt$gc()</ID>
-    <ID>LongMethod:ConnectionQualityStats.kt$ConnectionQualityAnalyzer$fun analyze( entries: List&lt;PacketLogEntry&gt;, recentFailureLimit: Int = 5, minSamples: Int = MIN_SAMPLES, ): ConnectionQualityStats</ID>
     <ID>LoopWithTooManyJumpStatements:FrameParser.kt$FrameParser$while</ID>
     <ID>LoopWithTooManyJumpStatements:PacketLogIndex.kt$PacketLogIndex$for</ID>
     <ID>ReturnCount:EcdsaP256.kt$EcdsaPublicKeyEncoding$fun extractP256PointFromSpki(spki: ByteArray): ByteArray?</ID>
     <ID>ReturnCount:FirmwareLibrary.kt$FirmwareLibraryCodec$private fun parse( parts: List&lt;String&gt;, legacy: Boolean, ): FirmwareLibraryRecord?</ID>
-    <ID>ReturnCount:PacketLogExport.kt$fun parseLocalDateTimeMillis( input: String, zoneOffsetMinutes: Int, ): Long?</ID>
     <ID>ThrowsCount:EcdsaP256.kt$EcdsaP256Verifier.Companion$fun fromPem(pem: String): EcdsaP256Verifier</ID>
     <ID>ThrowsCount:EcdsaP256.kt$EcdsaSignatureCodec$private fun parseDer(signature: ByteArray): Pair&lt;ByteArray, ByteArray&gt;</ID>
     <ID>ThrowsCount:EcdsaP256.kt$EcdsaSignatureCodec$private fun readInteger( bytes: ByteArray, offset: Int, limit: Int, ): Pair&lt;ByteArray, Int&gt;</ID>
     <ID>ThrowsCount:EcdsaP256.kt$EcdsaSignatureCodec$private fun readLength( bytes: ByteArray, offset: Int, ): Pair&lt;Int, Int&gt;</ID>
-    <ID>ThrowsCount:FirmwareHeader.kt$FirmwareHeader.Companion$fun decode(bytes: ByteArray): FirmwareHeader</ID>
     <ID>ThrowsCount:FirmwarePackage.kt$FirmwareParser$suspend fun parse( name: String, source: FirmwareSource, ): FirmwarePackage</ID>
     <ID>ThrowsCount:FirmwareSignature.kt$FirmwareSignature.Companion$fun decode( bytes: ByteArray, offset: Int, ): FirmwareSignature</ID>
     <ID>ThrowsCount:FrameCodec.kt$FrameCodec$fun decode(bytes: ByteArray): Frame</ID>
     <ID>ThrowsCount:MessageCodec.kt$MessageCodec$fun decodeNotification(frame: Frame): DeviceNotification</ID>
-    <ID>ThrowsCount:MessageCodec.kt$MessageCodec$fun decodeRequest( command: CommandType, payload: ByteArray, ): DeviceRequest</ID>
     <ID>ThrowsCount:OtaMessages.kt$StartOtaRequest.Companion$fun decode(reader: PayloadReader): StartOtaRequest</ID>
     <ID>TooGenericExceptionCaught:CommandDispatcher.kt$CommandDispatcher$error: Throwable</ID>
     <ID>TooGenericExceptionCaught:ConcurrentCommandDispatcher.kt$ConcurrentCommandDispatcher$error: Throwable</ID>

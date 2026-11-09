@@ -69,63 +69,71 @@ class DeviceStateMachine(
         event: DeviceEvent,
     ): DeviceState? =
         when (current) {
-            DeviceState.DISCONNECTED ->
-                when (event) {
-                    DeviceEvent.ConnectRequested -> DeviceState.CONNECTING
-                    is DeviceEvent.FaultRaised -> DeviceState.FAULT
-                    else -> null
-                }
+            DeviceState.DISCONNECTED -> resolveFromDisconnected(event)
+            DeviceState.CONNECTING -> resolveFromConnecting(event)
+            DeviceState.CONNECTED -> resolveFromConnected(event)
+            DeviceState.AUTHENTICATING -> resolveFromAuthenticating(event)
+            DeviceState.READY -> resolveFromReady(event)
+            DeviceState.DISCONNECTING -> resolveFromDisconnecting(event)
+            DeviceState.FAULT -> resolveFromFault(event)
+        }
 
-            DeviceState.CONNECTING ->
-                when (event) {
-                    DeviceEvent.LinkEstablished -> DeviceState.CONNECTED
-                    DeviceEvent.LinkLost -> DeviceState.DISCONNECTED
-                    DeviceEvent.DisconnectRequested -> DeviceState.DISCONNECTING
-                    is DeviceEvent.FaultRaised -> DeviceState.FAULT
-                    else -> null
-                }
+    private fun resolveFromDisconnected(event: DeviceEvent): DeviceState? =
+        when (event) {
+            DeviceEvent.ConnectRequested -> DeviceState.CONNECTING
+            is DeviceEvent.FaultRaised -> DeviceState.FAULT
+            else -> null
+        }
 
-            DeviceState.CONNECTED ->
-                when (event) {
-                    DeviceEvent.AuthenticationStarted -> DeviceState.AUTHENTICATING
-                    DeviceEvent.LinkLost -> DeviceState.DISCONNECTED
-                    DeviceEvent.DisconnectRequested -> DeviceState.DISCONNECTING
-                    is DeviceEvent.FaultRaised -> DeviceState.FAULT
-                    else -> null
-                }
+    private fun resolveFromConnecting(event: DeviceEvent): DeviceState? =
+        when (event) {
+            DeviceEvent.LinkEstablished -> DeviceState.CONNECTED
+            DeviceEvent.LinkLost -> DeviceState.DISCONNECTED
+            DeviceEvent.DisconnectRequested -> DeviceState.DISCONNECTING
+            is DeviceEvent.FaultRaised -> DeviceState.FAULT
+            else -> null
+        }
 
-            DeviceState.AUTHENTICATING ->
-                when (event) {
-                    DeviceEvent.AuthSucceeded -> DeviceState.READY
-                    is DeviceEvent.AuthFailed -> DeviceState.FAULT
-                    DeviceEvent.LinkLost -> DeviceState.DISCONNECTED
-                    DeviceEvent.DisconnectRequested -> DeviceState.DISCONNECTING
-                    is DeviceEvent.FaultRaised -> DeviceState.FAULT
-                    else -> null
-                }
+    private fun resolveFromConnected(event: DeviceEvent): DeviceState? =
+        when (event) {
+            DeviceEvent.AuthenticationStarted -> DeviceState.AUTHENTICATING
+            DeviceEvent.LinkLost -> DeviceState.DISCONNECTED
+            DeviceEvent.DisconnectRequested -> DeviceState.DISCONNECTING
+            is DeviceEvent.FaultRaised -> DeviceState.FAULT
+            else -> null
+        }
 
-            DeviceState.READY ->
-                when (event) {
-                    DeviceEvent.LinkLost -> DeviceState.DISCONNECTED
-                    DeviceEvent.DisconnectRequested -> DeviceState.DISCONNECTING
-                    is DeviceEvent.FaultRaised -> DeviceState.FAULT
-                    else -> null
-                }
+    private fun resolveFromAuthenticating(event: DeviceEvent): DeviceState? =
+        when (event) {
+            DeviceEvent.AuthSucceeded -> DeviceState.READY
+            is DeviceEvent.AuthFailed -> DeviceState.FAULT
+            DeviceEvent.LinkLost -> DeviceState.DISCONNECTED
+            DeviceEvent.DisconnectRequested -> DeviceState.DISCONNECTING
+            is DeviceEvent.FaultRaised -> DeviceState.FAULT
+            else -> null
+        }
 
-            DeviceState.DISCONNECTING ->
-                when (event) {
-                    DeviceEvent.Disconnected -> DeviceState.DISCONNECTED
-                    DeviceEvent.LinkLost -> DeviceState.DISCONNECTED
-                    is DeviceEvent.FaultRaised -> DeviceState.FAULT
-                    else -> null
-                }
+    private fun resolveFromReady(event: DeviceEvent): DeviceState? =
+        when (event) {
+            DeviceEvent.LinkLost -> DeviceState.DISCONNECTED
+            DeviceEvent.DisconnectRequested -> DeviceState.DISCONNECTING
+            is DeviceEvent.FaultRaised -> DeviceState.FAULT
+            else -> null
+        }
 
-            DeviceState.FAULT ->
-                when (event) {
-                    DeviceEvent.ResetRequested -> DeviceState.DISCONNECTED
-                    DeviceEvent.LinkLost -> DeviceState.DISCONNECTED
-                    else -> null
-                }
+    private fun resolveFromDisconnecting(event: DeviceEvent): DeviceState? =
+        when (event) {
+            DeviceEvent.Disconnected -> DeviceState.DISCONNECTED
+            DeviceEvent.LinkLost -> DeviceState.DISCONNECTED
+            is DeviceEvent.FaultRaised -> DeviceState.FAULT
+            else -> null
+        }
+
+    private fun resolveFromFault(event: DeviceEvent): DeviceState? =
+        when (event) {
+            DeviceEvent.ResetRequested -> DeviceState.DISCONNECTED
+            DeviceEvent.LinkLost -> DeviceState.DISCONNECTED
+            else -> null
         }
 
     private fun eventName(event: DeviceEvent): String =
