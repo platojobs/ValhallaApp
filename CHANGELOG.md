@@ -2,6 +2,22 @@
 
 本文件记录 ValhallaApp 的版本演进，按「阶段完成即提交 + 打 annotated tag」的节奏维护。
 
+## v3.2.0 - 复杂函数收口
+
+### 只做两件事：复杂度与长方法
+
+- **`CyclomaticComplexMethod` 18 → 0、`LongMethod` 16 → 0**：基线中按函数去重后的 25 个唯一函数
+  全部拆分到阈值内；detekt 基线总数 95 → 57，未新增 `@Suppress`、规则例外或
+  `// detekt:ignore`，也没有把逻辑挪进 Composable 规避统计。逐函数前后对照见
+  [docs/complexity-refactor.md](docs/complexity-refactor.md)。
+- **行为等价**：拆分前先补测试，既有 722 项断言未修改；全量测试 722 → 772
+  （core 385 / data 24 / feature 363），新增 50 项，主要覆盖会话编排、UI 纯逻辑与包解析。
+- **覆盖率不降**：core 94.31% → 94.17%、data 87.55% → 87.72%、feature 84.81% → 86.66%
+  （7390/8528），三模块 `koverVerifyJvm` 通过。
+- 拆分方式仅限可读性改进：`when` + 提前返回、语义命名子步骤、卫语句拍平、纯计算下沉、
+  重复分支合并；两个接近 120 行的屏幕保留原样并在文档说明理由。
+- 版本 `3.2.0`（`versionCode 32`），四项构建与 `verifyVersionConsistency` 通过。
+
 ## v3.1.0 - 细节收口
 
 ### 质量门禁与界面细节

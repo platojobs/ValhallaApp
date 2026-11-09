@@ -264,3 +264,20 @@ xcodebuild -project iosApp/iosApp.xcodeproj -scheme iosApp \
   84.81%（6566/7742），差值来自新增计入的 424 行非 Composable UI 代码；
 - 测试总数 722（core 385 / data 24 / feature 313），v3.0.0 的 688 项断言未削弱；
 - 未通过 `@Suppress`、规则例外或目录排除降低基线/抬高覆盖率。
+
+## 14. 复杂函数收口（v3.2.0）
+
+| 能力 | 实现位置 | 自动化验证 |
+| --- | --- | --- |
+| `CyclomaticComplexMethod` 18 → 0 | core/feature 25 个函数拆分 | `detekt`；`docs/complexity-refactor.md` |
+| `LongMethod` 16 → 0 | 同上 | `detekt`；`docs/complexity-refactor.md` |
+| detekt 基线 95 → 57 | 各模块 `detekt-baseline.xml`、`docs/static-analysis-baseline.md` | CI `static-analysis`；本地 `detekt` |
+| 会话编排测试 | `feature/jvmTest/.../ui/ValhallaSessionOpsTest.kt` | 18 项用例，覆盖连接/断开/重连/批量早退 |
+| UI 纯逻辑集中 | `feature/ui/ScreenLogic.kt` | `ValhallaUiLogicTest` 拆分为三个测试类 |
+
+- 全量测试 772（core 385 / data 24 / feature 363），v3.1.0 的 722 项未减少，新增 50 项；
+- 覆盖率 core 94.17% / data 87.72% / feature 86.66%（v3.1.0：94.31% / 87.55% / 84.81%），
+  三模块 `koverVerifyJvm` 通过；
+- 未使用 `@Suppress`、未新增规则例外、未用 `// detekt:ignore`、未把逻辑挪进 Composable 规避统计；
+- 四项构建与 `verifyVersionConsistency`（3.2.0 / 32）本地通过。
+
