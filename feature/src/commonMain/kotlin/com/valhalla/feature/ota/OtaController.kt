@@ -371,223 +371,336 @@ class OtaController(
         resumeFrom: OtaResumePoint?,
         read: suspend (offset: Long, length: Int) -> ByteArray,
     ): OtaState {
-        val total = totalBytes.toInt()
-        var sent = 0
-        var chunks = 0
+        val ctx = TransferContext(totalBytes, crc16, crc32, version, resumeFrom, clockMillis())
+        val progress = TransferProgress()
         var sessionId: Long? = null
-        var lastCheckpointBytes = 0
-        val startedAt = clockMillis()
-
         startProgressCollector()
         yield()
         val resumeGate = checkResumeGate(resumeFrom, totalBytes, crc16, crc32, version)
-        val requestedOffset = resumeGate.offset
-        mutableState.value = OtaState.Preparing(total, crc16, requestedOffset = requestedOffset)
+        mutableState.value = OtaState.Preparing(ctx.total, crc16, requestedOffset = resumeGate.offset)
 
         try {
-            ensureLinkAlive()
-            val session =
-                startSession(
-                    totalBytes = totalBytes,
-                    crc16 = crc16,
-                    crc32 = crc32,
-                    version = version,
-                    requestedOffset = requestedOffset,
-                    resumeSessionId = resumeFrom?.sessionId ?: 0,
-                )
+            val session = openSession(ctx, resumeGate)
             sessionId = session.response.sessionId
             activeSessionId = sessionId
-
-            val effectiveChunkSize = session.response.chunkSize.takeIf { it in 1..MAX_CHUNK_SIZE } ?: chunkSize
-            sent = resolveStartOffset(requestedOffset, session.response.acceptedOffset, total)
-            lastCheckpointBytes = sent
-            // 新会话一旦建立，旧会话的断点立即失效：按设备确认值立即落盘（或清除），
-            // 避免在下一个 4 KiB 检查点之前崩溃时续到旧的高偏移。
-            syncCheckpointAfterStart(sessionId, sent, total, crc16, crc32, version)
-            val fallbackReason =
-                fallbackNote(
-                    requestedOffset = requestedOffset,
-                    acceptedOffset = sent,
-                    deviceFallbackReason = session.fallbackReason,
-                ) ?: resumeGate.reason
-            if (sent > 0 || fallbackReason != null) {
-                mutableState.value =
-                    OtaState.Transferring(
-                        sentBytes = sent,
-                        totalBytes = total,
-                        crc16 = crc16,
-                        sessionId = sessionId,
-                        initialOffset = sent,
-                        resumeFallbackReason = fallbackReason,
-                    )
-            }
-
-            while (sent < total) {
-                checkAborted()
-                ensureLinkAlive()
-                val length = minOf(effectiveChunkSize, total - sent)
-                val chunk = read(sent.toLong(), length)
-                if (chunk.size != length) {
-                    throw FirmwareException.ReadFailure(sent.toLong(), length)
-                }
-                sendChunk(sent, chunk)
-                sent += length
-                chunks++
-                val current = mutableState.value
-                mutableState.value =
-                    if (current is OtaState.Transferring) {
-                        current.copy(
-                            sentBytes = sent,
-                            sessionId = sessionId,
-                            retransmissions = retransmissions,
-                        )
-                    } else {
-                        OtaState.Transferring(
-                            sentBytes = sent,
-                            totalBytes = total,
-                            crc16 = crc16,
-                            sessionId = sessionId,
-                            retransmissions = retransmissions,
-                        )
-                    }
-
-                if (sent < total && sent - lastCheckpointBytes >= CHECKPOINT_INTERVAL_BYTES) {
-                    saveCheckpoint(sessionId, sent, total, crc16, crc32, version)
-                    lastCheckpointBytes = sent
-                }
-
-                // 队列暂停/取消只在分片边界生效，避免把设备停在半片状态。
-                if (cancelSignalProvider()) {
-                    throw OtaAbortedException(OtaAbortReason.USER_CANCELLED)
-                }
-                if (pauseSignalProvider()) {
-                    throw OtaPausedException(sent)
-                }
-            }
-
-            checkAborted()
-            ensureLinkAlive()
-            mutableState.value =
-                OtaState.Verifying(
-                    totalBytes = total,
-                    crc16 = crc16,
-                    sessionId = sessionId,
-                    retransmissions = retransmissions,
-                )
-            val finishResponse =
-                dispatcher.execute(
-                    FinishOtaRequest(totalBytes = totalBytes, crc16 = crc16),
-                )
-            if (finishResponse !is FinishOtaResponse) {
-                error("unexpected OTA finish response: ${finishResponse::class.simpleName}")
-            }
-
-            clearCheckpointStore()
-            val done =
-                OtaState.Succeeded(
-                    totalBytes = total,
-                    crc16 = crc16,
-                    chunks = chunks,
-                    retransmissions = retransmissions,
-                    rebootRequired = finishResponse.rebootRequired,
-                )
-            mutableState.value = done
-            recordOtaHistory(version, startedAt, OtaOutcome.SUCCEEDED, total, total)
-            return done
+            progress.sent = resolveStartOffset(resumeGate.offset, session.response.acceptedOffset, ctx.total)
+            val setup = finalizeSessionStart(ctx, resumeGate, session, progress.sent)
+            publishTransferringIfNeeded(setup, ctx)
+            transferChunks(ctx, setup, progress, sessionId, read)
+            return finishTransfer(ctx, progress, sessionId)
         } catch (cancellation: CancellationException) {
-            persistInterruptedCheckpoint(sessionId, sent, total, crc16, crc32, version, resumeFrom)
-            mutableState.value = OtaState.Aborted(OtaAbortReason.USER_CANCELLED.name, sent, total)
-            recordOtaHistory(
-                version = version,
-                startedAt = startedAt,
-                outcome = OtaOutcome.ABORTED,
-                sentBytes = sent,
-                totalBytes = total,
-                detail = "cancelled",
-            )
-            throw cancellation
+            handleCancellation(ctx, progress, sessionId, cancellation)
         } catch (aborted: OtaAbortedException) {
-            clearCheckpointStore()
-            val state = OtaState.Aborted(aborted.reason.name, sent, total)
-            mutableState.value = state
-            recordOtaHistory(
-                version = version,
-                startedAt = startedAt,
-                outcome = OtaOutcome.ABORTED,
-                sentBytes = sent,
-                totalBytes = total,
-                detail = aborted.reason.name,
-            )
-            return state
+            return handleAborted(ctx, progress, aborted)
         } catch (paused: OtaPausedException) {
-            val resumePoint =
-                persistInterruptedCheckpoint(
-                    sessionId = sessionId,
-                    sentBytes = paused.sentBytes,
-                    totalBytes = total,
-                    crc16 = crc16,
-                    crc32 = crc32,
-                    version = version,
-                    previous = resumeFrom,
-                )
-            lastResumePoint = resumePoint
-            val state =
-                OtaState.Paused(
-                    sentBytes = paused.sentBytes,
-                    totalBytes = total,
-                    crc16 = crc16,
-                    sessionId = sessionId,
-                    checkpointSaved = resumePoint != null,
-                )
-            mutableState.value = state
-            recordOtaHistory(
-                version = version,
-                startedAt = startedAt,
-                outcome = OtaOutcome.ABORTED,
-                sentBytes = paused.sentBytes,
-                totalBytes = total,
-                detail = "queue.paused",
-            )
-            return state
+            return handlePaused(ctx, sessionId, paused)
         } catch (error: Throwable) {
-            val info = error.toFailureInfo()
-            val failureMessage = error.toOtaFailureMessage(info)
-            val resumePoint =
-                persistInterruptedCheckpoint(
-                    sessionId = sessionId,
-                    sentBytes = sent,
-                    totalBytes = total,
-                    crc16 = crc16,
-                    crc32 = crc32,
-                    version = version,
-                    previous = resumeFrom,
-                )
-            lastResumePoint = resumePoint
-            val state =
-                OtaState.Failed(
-                    reason = failureMessage,
-                    sentBytes = sent,
-                    totalBytes = total,
-                    status = info.status,
-                    resumePoint = resumePoint,
-                )
-            mutableState.value = state
-            recordOtaHistory(
-                version = version,
-                startedAt = startedAt,
-                outcome = OtaOutcome.FAILED,
-                sentBytes = sent,
-                totalBytes = total,
-                errorCode = info.status?.describe(),
-                detail = failureMessage.key.name,
-            )
-            return state
+            return handleFailure(ctx, progress, sessionId, error)
         } finally {
             progressJob?.cancel()
             progressJob = null
             activeSessionId = null
         }
     }
+
+    /** 建立传输会话；会话一旦建立，后续偏移校验失败也必须保留 sessionId 供清理分支使用。 */
+    private suspend fun openSession(
+        ctx: TransferContext,
+        resumeGate: ResumeGate,
+    ): StartSession {
+        ensureLinkAlive()
+        return startSession(
+            totalBytes = ctx.totalBytes,
+            crc16 = ctx.crc16,
+            crc32 = ctx.crc32,
+            version = ctx.version,
+            requestedOffset = resumeGate.offset,
+            resumeSessionId = ctx.resumeFrom?.sessionId ?: 0,
+        )
+    }
+
+    /** 落盘起始断点并计算续传回退原因。 */
+    private suspend fun finalizeSessionStart(
+        ctx: TransferContext,
+        resumeGate: ResumeGate,
+        session: StartSession,
+        sent: Int,
+    ): TransferSetup {
+        // 新会话一旦建立，旧会话的断点立即失效：按设备确认值立即落盘（或清除），
+        // 避免在下一个 4 KiB 检查点之前崩溃时续到旧的高偏移。
+        syncCheckpointAfterStart(session.response.sessionId, sent, ctx.total, ctx.crc16, ctx.crc32, ctx.version)
+        val fallbackReason =
+            fallbackNote(
+                requestedOffset = resumeGate.offset,
+                acceptedOffset = sent,
+                deviceFallbackReason = session.fallbackReason,
+            ) ?: resumeGate.reason
+        val effectiveChunkSize = session.response.chunkSize.takeIf { it in 1..MAX_CHUNK_SIZE } ?: chunkSize
+        return TransferSetup(session.response.sessionId, sent, effectiveChunkSize, fallbackReason)
+    }
+
+    private fun publishTransferringIfNeeded(
+        setup: TransferSetup,
+        ctx: TransferContext,
+    ) {
+        if (setup.sent > 0 || setup.fallbackReason != null) {
+            mutableState.value =
+                OtaState.Transferring(
+                    sentBytes = setup.sent,
+                    totalBytes = ctx.total,
+                    crc16 = ctx.crc16,
+                    sessionId = setup.sessionId,
+                    initialOffset = setup.sent,
+                    resumeFallbackReason = setup.fallbackReason,
+                )
+        }
+    }
+
+    /** 分片传输循环；暂停/取消只在分片边界生效，避免把设备停在半片状态。 */
+    private suspend fun transferChunks(
+        ctx: TransferContext,
+        setup: TransferSetup,
+        progress: TransferProgress,
+        sessionId: Long,
+        read: suspend (offset: Long, length: Int) -> ByteArray,
+    ) {
+        var lastCheckpointBytes = setup.sent
+        while (progress.sent < ctx.total) {
+            checkAborted()
+            ensureLinkAlive()
+            val length = minOf(setup.effectiveChunkSize, ctx.total - progress.sent)
+            val chunk = read(progress.sent.toLong(), length)
+            if (chunk.size != length) {
+                throw FirmwareException.ReadFailure(progress.sent.toLong(), length)
+            }
+            sendChunk(progress.sent, chunk)
+            progress.sent += length
+            progress.chunks++
+            publishChunkProgress(ctx, progress, sessionId)
+
+            if (progress.sent < ctx.total && progress.sent - lastCheckpointBytes >= CHECKPOINT_INTERVAL_BYTES) {
+                saveCheckpoint(sessionId, progress.sent, ctx.total, ctx.crc16, ctx.crc32, ctx.version)
+                lastCheckpointBytes = progress.sent
+            }
+
+            checkPauseOrCancel(progress.sent)
+        }
+    }
+
+    /** 队列暂停/取消只在分片边界生效。 */
+    private fun checkPauseOrCancel(sent: Int) {
+        if (cancelSignalProvider()) {
+            throw OtaAbortedException(OtaAbortReason.USER_CANCELLED)
+        }
+        if (pauseSignalProvider()) {
+            throw OtaPausedException(sent)
+        }
+    }
+
+    private fun publishChunkProgress(
+        ctx: TransferContext,
+        progress: TransferProgress,
+        sessionId: Long?,
+    ) {
+        val current = mutableState.value
+        mutableState.value =
+            if (current is OtaState.Transferring) {
+                current.copy(
+                    sentBytes = progress.sent,
+                    sessionId = sessionId,
+                    retransmissions = retransmissions,
+                )
+            } else {
+                OtaState.Transferring(
+                    sentBytes = progress.sent,
+                    totalBytes = ctx.total,
+                    crc16 = ctx.crc16,
+                    sessionId = sessionId,
+                    retransmissions = retransmissions,
+                )
+            }
+    }
+
+    private suspend fun finishTransfer(
+        ctx: TransferContext,
+        progress: TransferProgress,
+        sessionId: Long?,
+    ): OtaState {
+        checkAborted()
+        ensureLinkAlive()
+        mutableState.value =
+            OtaState.Verifying(
+                totalBytes = ctx.total,
+                crc16 = ctx.crc16,
+                sessionId = sessionId,
+                retransmissions = retransmissions,
+            )
+        val finishResponse =
+            dispatcher.execute(
+                FinishOtaRequest(totalBytes = ctx.totalBytes, crc16 = ctx.crc16),
+            )
+        if (finishResponse !is FinishOtaResponse) {
+            error("unexpected OTA finish response: ${finishResponse::class.simpleName}")
+        }
+
+        clearCheckpointStore()
+        val done =
+            OtaState.Succeeded(
+                totalBytes = ctx.total,
+                crc16 = ctx.crc16,
+                chunks = progress.chunks,
+                retransmissions = retransmissions,
+                rebootRequired = finishResponse.rebootRequired,
+            )
+        mutableState.value = done
+        recordOtaHistory(ctx.version, ctx.startedAt, OtaOutcome.SUCCEEDED, ctx.total, ctx.total)
+        return done
+    }
+
+    private suspend fun handleCancellation(
+        ctx: TransferContext,
+        progress: TransferProgress,
+        sessionId: Long?,
+        cancellation: CancellationException,
+    ): Nothing {
+        persistInterruptedCheckpoint(
+            sessionId,
+            progress.sent,
+            ctx.total,
+            ctx.crc16,
+            ctx.crc32,
+            ctx.version,
+            ctx.resumeFrom,
+        )
+        mutableState.value = OtaState.Aborted(OtaAbortReason.USER_CANCELLED.name, progress.sent, ctx.total)
+        recordOtaHistory(
+            version = ctx.version,
+            startedAt = ctx.startedAt,
+            outcome = OtaOutcome.ABORTED,
+            sentBytes = progress.sent,
+            totalBytes = ctx.total,
+            detail = "cancelled",
+        )
+        throw cancellation
+    }
+
+    private suspend fun handleAborted(
+        ctx: TransferContext,
+        progress: TransferProgress,
+        aborted: OtaAbortedException,
+    ): OtaState {
+        clearCheckpointStore()
+        val state = OtaState.Aborted(aborted.reason.name, progress.sent, ctx.total)
+        mutableState.value = state
+        recordOtaHistory(
+            version = ctx.version,
+            startedAt = ctx.startedAt,
+            outcome = OtaOutcome.ABORTED,
+            sentBytes = progress.sent,
+            totalBytes = ctx.total,
+            detail = aborted.reason.name,
+        )
+        return state
+    }
+
+    private suspend fun handlePaused(
+        ctx: TransferContext,
+        sessionId: Long?,
+        paused: OtaPausedException,
+    ): OtaState {
+        val resumePoint =
+            persistInterruptedCheckpoint(
+                sessionId = sessionId,
+                sentBytes = paused.sentBytes,
+                totalBytes = ctx.total,
+                crc16 = ctx.crc16,
+                crc32 = ctx.crc32,
+                version = ctx.version,
+                previous = ctx.resumeFrom,
+            )
+        lastResumePoint = resumePoint
+        val state =
+            OtaState.Paused(
+                sentBytes = paused.sentBytes,
+                totalBytes = ctx.total,
+                crc16 = ctx.crc16,
+                sessionId = sessionId,
+                checkpointSaved = resumePoint != null,
+            )
+        mutableState.value = state
+        recordOtaHistory(
+            version = ctx.version,
+            startedAt = ctx.startedAt,
+            outcome = OtaOutcome.ABORTED,
+            sentBytes = paused.sentBytes,
+            totalBytes = ctx.total,
+            detail = "queue.paused",
+        )
+        return state
+    }
+
+    private suspend fun handleFailure(
+        ctx: TransferContext,
+        progress: TransferProgress,
+        sessionId: Long?,
+        error: Throwable,
+    ): OtaState {
+        val info = error.toFailureInfo()
+        val failureMessage = error.toOtaFailureMessage(info)
+        val resumePoint =
+            persistInterruptedCheckpoint(
+                sessionId = sessionId,
+                sentBytes = progress.sent,
+                totalBytes = ctx.total,
+                crc16 = ctx.crc16,
+                crc32 = ctx.crc32,
+                version = ctx.version,
+                previous = ctx.resumeFrom,
+            )
+        lastResumePoint = resumePoint
+        val state =
+            OtaState.Failed(
+                reason = failureMessage,
+                sentBytes = progress.sent,
+                totalBytes = ctx.total,
+                status = info.status,
+                resumePoint = resumePoint,
+            )
+        mutableState.value = state
+        recordOtaHistory(
+            version = ctx.version,
+            startedAt = ctx.startedAt,
+            outcome = OtaOutcome.FAILED,
+            sentBytes = progress.sent,
+            totalBytes = ctx.total,
+            errorCode = info.status?.describe(),
+            detail = failureMessage.key.name,
+        )
+        return state
+    }
+
+    private class TransferProgress {
+        var sent: Int = 0
+        var chunks: Int = 0
+    }
+
+    private class TransferContext(
+        val totalBytes: Long,
+        val crc16: Int,
+        val crc32: Long,
+        val version: FirmwareVersion,
+        val resumeFrom: OtaResumePoint?,
+        val startedAt: Long,
+    ) {
+        val total: Int = totalBytes.toInt()
+    }
+
+    private class TransferSetup(
+        val sessionId: Long,
+        val sent: Int,
+        val effectiveChunkSize: Int,
+        val fallbackReason: UiMessage?,
+    )
 
     private suspend fun sendChunk(
         offset: Int,

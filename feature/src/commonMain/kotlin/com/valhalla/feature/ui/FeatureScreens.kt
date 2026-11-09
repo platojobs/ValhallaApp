@@ -37,11 +37,14 @@ import com.valhalla.core.config.ConfigCatalog
 import com.valhalla.core.config.ConfigPreset
 import com.valhalla.core.config.ConfigPresetDiffer
 import com.valhalla.core.config.ConfigPresetRepository
+import com.valhalla.core.config.PresetFieldDiff
 import com.valhalla.core.config.PresetFieldStatus
 import com.valhalla.core.event.DeviceEventResult
 import com.valhalla.core.event.DeviceEventTimeline
 import com.valhalla.core.event.DeviceEventType
+import com.valhalla.core.metrics.DeviceUsage
 import com.valhalla.core.metrics.UsageRange
+import com.valhalla.core.metrics.UsageStatistics
 import com.valhalla.core.metrics.UsageStatisticsCalculator
 import com.valhalla.core.profile.DeviceProfileRepository
 import com.valhalla.data.event.createDeviceEventStore
@@ -51,11 +54,13 @@ import com.valhalla.feature.config.ConfigEditorController
 import com.valhalla.feature.config.ConfigPresetApplier
 import com.valhalla.feature.config.PresetApplyReport
 import com.valhalla.feature.config.PresetApplyStatus
+import com.valhalla.feature.export.FileSaveStatus
 import com.valhalla.feature.export.SaveableFile
 import com.valhalla.feature.export.rememberFileSaver
 import com.valhalla.feature.i18n.LocalStrings
 import com.valhalla.feature.i18n.LocaleFormat
 import com.valhalla.feature.i18n.StringKey
+import com.valhalla.feature.i18n.StringResolver
 import com.valhalla.feature.i18n.render
 import com.valhalla.feature.settings.BackupParseResult
 import com.valhalla.feature.settings.BackupPlanItem
@@ -65,6 +70,9 @@ import com.valhalla.feature.settings.PreferencesBackupService
 import com.valhalla.feature.settings.PreferencesReset
 import com.valhalla.feature.theme.DesignTokens
 import com.valhalla.feature.uilogic.editableLoadedConfigFields
+import com.valhalla.feature.uilogic.labelKey
+import com.valhalla.feature.uilogic.usageCountText
+import com.valhalla.feature.uilogic.usageDurationText
 import kotlinx.coroutines.launch
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
@@ -115,116 +123,50 @@ internal fun PresetSection(
     val now = remember { Clock.System.now().toEpochMilliseconds() }
     var version by remember { mutableIntStateOf(0) }
     val items = remember(version, configState.fields) { presets.list() }
-    val currentValues =
-        remember(configState) {
-            editableLoadedConfigFields(configState.visibleFields)
-                .associate { it.spec.key to it.text }
-        }
+    val currentValues = remember(configState) { editableLoadedConfigFields(configState.visibleFields).associate { it.spec.key to it.text } }
     var nameDialog by remember { mutableStateOf<PresetNameDialog?>(null) }
     var deleteTarget by remember { mutableStateOf<ConfigPreset?>(null) }
-    var applyTarget by remember { mutableStateOf<Pair<ConfigPreset, List<com.valhalla.core.config.PresetFieldDiff>>?>(null) }
+    var applyTarget by remember { mutableStateOf<Pair<ConfigPreset, List<PresetFieldDiff>>?>(null) }
     var applyReport by remember { mutableStateOf<Pair<ConfigPreset, PresetApplyReport>?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
     val configError = configState.error
 
     Column(verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm)) {
-        Text(strings.t(StringKey.PRESET_SECTION_TITLE), style = MaterialTheme.typography.titleMedium)
-        Text(
-            strings.t(StringKey.PRESET_KEY_COUNT, "count" to currentValues.size.toString()),
-            style = MaterialTheme.typography.bodySmall,
+        PresetStatusSection(
+            loading = configState.loading,
+            errorText = configError?.let { strings.render(it) },
+            currentValueCount = currentValues.size,
+            writeLocked = writeLocked,
+            presetsEmpty = items.isEmpty(),
+            onRetry = { scope.launch { config.load() } },
         )
-        if (configState.loading) {
-            LoadingStatePanel()
-        }
-        configError?.let { error ->
-            ErrorStatePanel(
-                detail = strings.render(error),
-                onRetry = { scope.launch { config.load() } },
-            )
-        }
-        if (currentValues.isEmpty() && !configState.loading) {
-            Text(strings.t(StringKey.PRESET_NOT_LOADED), style = MaterialTheme.typography.bodySmall)
-        }
-        if (writeLocked) {
-            Text(
-                strings.t(StringKey.BATCH_LOCKED_HINT),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.secondary,
-            )
-            DisabledStatePanel(StringKey.STATE_DISABLED_READ_ONLY)
-        }
-        if (items.isEmpty() && !configState.loading && configError == null) {
-            EmptyStatePanel(body = strings.t(StringKey.PRESET_EMPTY))
-        }
-        items.forEach { preset ->
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(
-                    modifier = Modifier.padding(DesignTokens.Spacing.md),
-                    verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs),
-                ) {
-                    Text(preset.name, style = MaterialTheme.typography.bodyMedium)
-                    Text(
-                        strings.t(StringKey.PRESET_KEY_COUNT, "count" to preset.values.size.toString()) +
-                            " · " + format.relativeTime(preset.lastUsedAtMillis, now),
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs),
-                    ) {
-                        TextButton(
-                            enabled = currentValues.isNotEmpty() && !writeLocked,
-                            onClick = {
-                                val diffs =
-                                    ConfigPresetDiffer.diff(
-                                        preset,
-                                        configState.target,
-                                        currentValues,
-                                    )
-                                if (diffs.none { it.status == PresetFieldStatus.WILL_CHANGE }) {
-                                    message = strings.t(StringKey.PRESET_NO_DIFF)
-                                } else {
-                                    applyTarget = preset to diffs
-                                }
-                            },
-                        ) { Text(strings.t(StringKey.PRESET_APPLY)) }
-                        TextButton(onClick = { nameDialog = PresetNameDialog.Rename(preset) }) {
-                            Text(strings.t(StringKey.PRESET_RENAME))
-                        }
-                        TextButton(onClick = {
-                            if (presets.duplicate(preset.id) != null) {
-                                version++
-                                message = strings.t(StringKey.PRESET_DUPLICATED_TOAST)
-                            }
-                        }) { Text(strings.t(StringKey.PRESET_DUPLICATE)) }
-                        TextButton(onClick = { deleteTarget = preset }) {
-                            Text(strings.t(StringKey.PRESET_DELETE))
-                        }
-                    }
+        PresetListSection(
+            items = items,
+            canApply = currentValues.isNotEmpty() && !writeLocked,
+            now = now,
+            format = format,
+            onApplyClick = { preset ->
+                val diffs = ConfigPresetDiffer.diff(preset, configState.target, currentValues)
+                if (diffs.none { it.status == PresetFieldStatus.WILL_CHANGE }) {
+                    message = strings.t(StringKey.PRESET_NO_DIFF)
+                } else {
+                    applyTarget = preset to diffs
                 }
-            }
-        }
-        Button(
-            enabled = currentValues.isNotEmpty(),
-            onClick = {
-                nameDialog =
-                    PresetNameDialog.Save(
-                        suggested =
-                            strings.t(
-                                StringKey.PRESET_DEFAULT_NAME,
-                                "index" to (items.size + 1).toString(),
-                            ),
-                    )
             },
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text(strings.t(StringKey.PRESET_SAVE_CURRENT)) }
-        message?.let {
-            Text(
-                it,
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
-            )
-        }
+            onRename = { nameDialog = PresetNameDialog.Rename(it) },
+            onDuplicate = { preset ->
+                if (presets.duplicate(preset.id) != null) {
+                    version++
+                    message = strings.t(StringKey.PRESET_DUPLICATED_TOAST)
+                }
+            },
+            onDelete = { deleteTarget = it },
+        )
+        PresetSaveButton(
+            enabled = currentValues.isNotEmpty(),
+            onClick = { nameDialog = newPresetSaveDialog(items.size, strings) },
+        )
+        PresetMessageText(message = message)
     }
 
     nameDialog?.let { dialog ->
@@ -242,30 +184,15 @@ internal fun PresetSection(
     }
 
     deleteTarget?.let { preset ->
-        AlertDialog(
-            onDismissRequest = { deleteTarget = null },
-            title = { Text(strings.t(StringKey.PRESET_DELETE_TITLE)) },
-            text = {
-                Text(
-                    strings.t(
-                        StringKey.PRESET_DELETE_MESSAGE,
-                        "name" to preset.name,
-                    ),
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        if (presets.delete(preset.id)) {
-                            version++
-                            message = strings.t(StringKey.PRESET_DELETED_TOAST)
-                        }
-                        deleteTarget = null
-                    },
-                ) { Text(strings.t(StringKey.PRESET_DELETE)) }
-            },
-            dismissButton = {
-                TextButton(onClick = { deleteTarget = null }) { Text(strings.t(StringKey.CANCEL)) }
+        PresetDeleteDialog(
+            preset = preset,
+            onDismiss = { deleteTarget = null },
+            onConfirm = {
+                if (presets.delete(preset.id)) {
+                    version++
+                    message = strings.t(StringKey.PRESET_DELETED_TOAST)
+                }
+                deleteTarget = null
             },
         )
     }
@@ -278,41 +205,8 @@ internal fun PresetSection(
             onConfirm = {
                 applyTarget = null
                 scope.launch {
-                    val report = applier.apply(diffs)
-                    presets.markUsed(preset.id)
-                    val resultText =
-                        strings.t(
-                            StringKey.PRESET_RESULT_SUMMARY,
-                            "written" to report.writtenCount.toString(),
-                            "already" to report.alreadyCount.toString(),
-                            "skipped" to report.skippedCount.toString(),
-                            "failed" to report.failedCount.toString(),
-                        )
-                    report.results.forEach { result ->
-                        when (result.status) {
-                            PresetApplyStatus.WRITTEN ->
-                                events.record(
-                                    deviceId = deviceId,
-                                    type = DeviceEventType.CONFIG_CHANGE,
-                                    summary = strings.t(StringKey.TIMELINE_EVENT_CONFIG_SAVED),
-                                    result = DeviceEventResult.SUCCESS,
-                                    detail = "${preset.name}: ${result.key}",
-                                )
-
-                            PresetApplyStatus.FAILED ->
-                                events.record(
-                                    deviceId = deviceId,
-                                    type = DeviceEventType.CONFIG_CHANGE,
-                                    summary = strings.t(StringKey.TIMELINE_EVENT_CONFIG_SAVED),
-                                    result = DeviceEventResult.FAILURE,
-                                    detail = "${preset.name}: ${result.key} ${result.detail.orEmpty()}",
-                                    errorCode = result.errorCode,
-                                )
-
-                            else -> Unit
-                        }
-                    }
-                    config.load()
+                    val (report, resultText) =
+                        applyPreset(applier, presets, config, events, deviceId, preset, diffs, strings)
                     applyReport = preset to report
                     version++
                     message = resultText
@@ -322,59 +216,271 @@ internal fun PresetSection(
     }
 
     applyReport?.let { (preset, report) ->
-        AlertDialog(
-            onDismissRequest = { applyReport = null },
-            title = { Text(strings.t(StringKey.PRESET_RESULT_TITLE)) },
-            text = {
-                Column(
-                    modifier =
-                        Modifier.semantics {
-                            liveRegion =
-                                if (report.failedCount > 0) {
-                                    LiveRegionMode.Assertive
-                                } else {
-                                    LiveRegionMode.Polite
-                                }
-                        },
-                    verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs),
+        PresetApplyReportDialog(
+            preset = preset,
+            report = report,
+            onDismiss = { applyReport = null },
+        )
+    }
+}
+
+@Composable
+private fun PresetStatusSection(
+    loading: Boolean,
+    errorText: String?,
+    currentValueCount: Int,
+    writeLocked: Boolean,
+    presetsEmpty: Boolean,
+    onRetry: () -> Unit,
+) {
+    val strings = LocalStrings.current
+    Text(strings.t(StringKey.PRESET_SECTION_TITLE), style = MaterialTheme.typography.titleMedium)
+    Text(
+        strings.t(StringKey.PRESET_KEY_COUNT, "count" to currentValueCount.toString()),
+        style = MaterialTheme.typography.bodySmall,
+    )
+    if (loading) {
+        LoadingStatePanel()
+    }
+    errorText?.let { error ->
+        ErrorStatePanel(detail = error, onRetry = onRetry)
+    }
+    if (currentValueCount == 0 && !loading) {
+        Text(strings.t(StringKey.PRESET_NOT_LOADED), style = MaterialTheme.typography.bodySmall)
+    }
+    if (writeLocked) {
+        Text(
+            strings.t(StringKey.BATCH_LOCKED_HINT),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.secondary,
+        )
+        DisabledStatePanel(StringKey.STATE_DISABLED_READ_ONLY)
+    }
+    if (presetsEmpty && !loading && errorText == null) {
+        EmptyStatePanel(body = strings.t(StringKey.PRESET_EMPTY))
+    }
+}
+
+@Composable
+private fun PresetListSection(
+    items: List<ConfigPreset>,
+    canApply: Boolean,
+    now: Long,
+    format: LocaleFormat,
+    onApplyClick: (ConfigPreset) -> Unit,
+    onRename: (ConfigPreset) -> Unit,
+    onDuplicate: (ConfigPreset) -> Unit,
+    onDelete: (ConfigPreset) -> Unit,
+) {
+    val strings = LocalStrings.current
+    items.forEach { preset ->
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(DesignTokens.Spacing.md),
+                verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs),
+            ) {
+                Text(preset.name, style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    strings.t(StringKey.PRESET_KEY_COUNT, "count" to preset.values.size.toString()) +
+                        " · " + format.relativeTime(preset.lastUsedAtMillis, now),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs),
                 ) {
-                    Text(
-                        strings.t(
-                            StringKey.PRESET_RESULT_SUMMARY,
-                            "written" to report.writtenCount.toString(),
-                            "already" to report.alreadyCount.toString(),
-                            "skipped" to report.skippedCount.toString(),
-                            "failed" to report.failedCount.toString(),
-                        ),
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    Text(preset.name, style = MaterialTheme.typography.bodySmall)
-                    report.results.forEach { result ->
-                        val statusKey =
-                            when (result.status) {
-                                PresetApplyStatus.WRITTEN -> StringKey.PRESET_RESULT_WRITTEN
-                                PresetApplyStatus.ALREADY_TARGET -> StringKey.PRESET_RESULT_ALREADY
-                                PresetApplyStatus.SKIPPED -> StringKey.PRESET_RESULT_SKIPPED
-                                PresetApplyStatus.FAILED -> StringKey.PRESET_RESULT_FAILED_LABEL
-                            }
-                        Text(
-                            ConfigCatalog
-                                .find(result.key)
-                                ?.displayName
-                                .orEmpty()
-                                .ifEmpty { result.key } +
-                                " · " + strings.t(statusKey) +
-                                result.errorCode?.let { " · $it" }.orEmpty() +
-                                " " + result.detail.orEmpty(),
-                            style = MaterialTheme.typography.bodySmall,
-                        )
+                    TextButton(
+                        enabled = canApply,
+                        onClick = { onApplyClick(preset) },
+                    ) { Text(strings.t(StringKey.PRESET_APPLY)) }
+                    TextButton(onClick = { onRename(preset) }) {
+                        Text(strings.t(StringKey.PRESET_RENAME))
+                    }
+                    TextButton(onClick = { onDuplicate(preset) }) {
+                        Text(strings.t(StringKey.PRESET_DUPLICATE))
+                    }
+                    TextButton(onClick = { onDelete(preset) }) {
+                        Text(strings.t(StringKey.PRESET_DELETE))
                     }
                 }
-            },
-            confirmButton = {
-                TextButton(onClick = { applyReport = null }) { Text(strings.t(StringKey.CLOSE)) }
-            },
+            }
+        }
+    }
+}
+
+@Composable
+private fun PresetDeleteDialog(
+    preset: ConfigPreset,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    val strings = LocalStrings.current
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(strings.t(StringKey.PRESET_DELETE_TITLE)) },
+        text = {
+            Text(
+                strings.t(
+                    StringKey.PRESET_DELETE_MESSAGE,
+                    "name" to preset.name,
+                ),
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm) { Text(strings.t(StringKey.PRESET_DELETE)) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(strings.t(StringKey.CANCEL)) }
+        },
+    )
+}
+
+@Composable
+private fun PresetApplyReportDialog(
+    preset: ConfigPreset,
+    report: PresetApplyReport,
+    onDismiss: () -> Unit,
+) {
+    val strings = LocalStrings.current
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(strings.t(StringKey.PRESET_RESULT_TITLE)) },
+        text = {
+            Column(
+                modifier =
+                    Modifier.semantics {
+                        liveRegion =
+                            if (report.failedCount > 0) {
+                                LiveRegionMode.Assertive
+                            } else {
+                                LiveRegionMode.Polite
+                            }
+                    },
+                verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs),
+            ) {
+                Text(
+                    strings.t(
+                        StringKey.PRESET_RESULT_SUMMARY,
+                        "written" to report.writtenCount.toString(),
+                        "already" to report.alreadyCount.toString(),
+                        "skipped" to report.skippedCount.toString(),
+                        "failed" to report.failedCount.toString(),
+                    ),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Text(preset.name, style = MaterialTheme.typography.bodySmall)
+                report.results.forEach { result ->
+                    val statusKey =
+                        when (result.status) {
+                            PresetApplyStatus.WRITTEN -> StringKey.PRESET_RESULT_WRITTEN
+                            PresetApplyStatus.ALREADY_TARGET -> StringKey.PRESET_RESULT_ALREADY
+                            PresetApplyStatus.SKIPPED -> StringKey.PRESET_RESULT_SKIPPED
+                            PresetApplyStatus.FAILED -> StringKey.PRESET_RESULT_FAILED_LABEL
+                        }
+                    Text(
+                        ConfigCatalog
+                            .find(result.key)
+                            ?.displayName
+                            .orEmpty()
+                            .ifEmpty { result.key } +
+                            " · " + strings.t(statusKey) +
+                            result.errorCode?.let { " · $it" }.orEmpty() +
+                            " " + result.detail.orEmpty(),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(strings.t(StringKey.CLOSE)) }
+        },
+    )
+}
+
+@Composable
+private fun PresetSaveButton(
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    val strings = LocalStrings.current
+    Button(enabled = enabled, onClick = onClick, modifier = Modifier.fillMaxWidth()) {
+        Text(strings.t(StringKey.PRESET_SAVE_CURRENT))
+    }
+}
+
+private fun newPresetSaveDialog(
+    itemCount: Int,
+    strings: StringResolver,
+): PresetNameDialog =
+    PresetNameDialog.Save(
+        suggested = strings.t(StringKey.PRESET_DEFAULT_NAME, "index" to (itemCount + 1).toString()),
+    )
+
+@Composable
+private fun PresetMessageText(message: String?) {
+    val text = message ?: return
+    Text(
+        text,
+        style = MaterialTheme.typography.bodySmall,
+        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+    )
+}
+
+private suspend fun applyPreset(
+    applier: ConfigPresetApplier,
+    presets: ConfigPresetRepository,
+    config: ConfigEditorController,
+    events: DeviceEventTimeline,
+    deviceId: String,
+    preset: ConfigPreset,
+    diffs: List<PresetFieldDiff>,
+    strings: StringResolver,
+): Pair<PresetApplyReport, String> {
+    val report = applier.apply(diffs)
+    presets.markUsed(preset.id)
+    val resultText =
+        strings.t(
+            StringKey.PRESET_RESULT_SUMMARY,
+            "written" to report.writtenCount.toString(),
+            "already" to report.alreadyCount.toString(),
+            "skipped" to report.skippedCount.toString(),
+            "failed" to report.failedCount.toString(),
         )
+    recordPresetApplyEvents(events, deviceId, preset, report, strings)
+    config.load()
+    return report to resultText
+}
+
+private fun recordPresetApplyEvents(
+    events: DeviceEventTimeline,
+    deviceId: String,
+    preset: ConfigPreset,
+    report: PresetApplyReport,
+    strings: StringResolver,
+) {
+    report.results.forEach { result ->
+        when (result.status) {
+            PresetApplyStatus.WRITTEN ->
+                events.record(
+                    deviceId = deviceId,
+                    type = DeviceEventType.CONFIG_CHANGE,
+                    summary = strings.t(StringKey.TIMELINE_EVENT_CONFIG_SAVED),
+                    result = DeviceEventResult.SUCCESS,
+                    detail = "${preset.name}: ${result.key}",
+                )
+
+            PresetApplyStatus.FAILED ->
+                events.record(
+                    deviceId = deviceId,
+                    type = DeviceEventType.CONFIG_CHANGE,
+                    summary = strings.t(StringKey.TIMELINE_EVENT_CONFIG_SAVED),
+                    result = DeviceEventResult.FAILURE,
+                    detail = "${preset.name}: ${result.key} ${result.detail.orEmpty()}",
+                    errorCode = result.errorCode,
+                )
+
+            else -> Unit
+        }
     }
 }
 
@@ -738,133 +844,93 @@ fun UsageStatsScreen(
 
     InfoScreen(title = strings.t(StringKey.STATS_TITLE), onBack = onBack) {
         Text(strings.t(StringKey.STATS_LOCAL_ONLY), style = MaterialTheme.typography.bodySmall)
-        Row(horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs)) {
-            UsageRange.entries.forEach { entry ->
-                FilterChip(
-                    selected = range == entry,
-                    onClick = { range = entry },
-                    label = {
-                        Text(
-                            strings.t(
-                                when (entry) {
-                                    UsageRange.LAST_7_DAYS -> StringKey.STATS_RANGE_7
-                                    UsageRange.LAST_30_DAYS -> StringKey.STATS_RANGE_30
-                                    UsageRange.ALL -> StringKey.STATS_RANGE_ALL
-                                },
-                            ),
-                        )
-                    },
-                )
-            }
-        }
+        UsageRangeSelector(range = range, onRangeChange = { range = it })
         TextButton(onClick = { refreshKey++ }) { Text(strings.t(StringKey.REFRESH)) }
-
-        StatRow(
-            strings.t(StringKey.STATS_CONNECTIONS),
-            if (stats.connectionCount == 0) {
-                null
-            } else {
-                strings.t(
-                    StringKey.STATS_COUNT_UNIT,
-                    "count" to format.number(stats.connectionCount),
-                )
-            },
-        )
-        StatRow(
-            strings.t(StringKey.STATS_CONNECTION_AVG),
-            stats.connectionAverageMillis?.let {
-                strings.t(StringKey.STATS_DURATION_UNIT, "seconds" to format.number(it / 1000L))
-            },
-        )
-        StatRow(
-            strings.t(StringKey.STATS_OTA),
-            if (stats.otaAttempts == 0) {
-                null
-            } else {
-                strings.t(
-                    StringKey.STATS_COUNT_UNIT,
-                    "count" to format.number(stats.otaAttempts),
-                )
-            },
-        )
-        StatRow(
-            strings.t(StringKey.STATS_OTA_SUCCESS_RATE),
-            stats.otaSuccessRate?.let { format.percent((it * 100.0).toLong(), 100L) },
-        )
-        StatRow(
-            strings.t(StringKey.STATS_OTA_AVG),
-            stats.otaAverageMillis?.let {
-                strings.t(StringKey.STATS_DURATION_UNIT, "seconds" to format.number(it / 1000L))
-            },
-        )
-        StatRow(
-            strings.t(StringKey.STATS_CONFIG_WRITES),
-            if (stats.configWrites == 0) {
-                null
-            } else {
-                strings.t(
-                    StringKey.STATS_COUNT_UNIT,
-                    "count" to format.number(stats.configWrites),
-                )
-            },
-        )
-        StatRow(
-            strings.t(StringKey.STATS_PARAM_WRITES),
-            if (stats.paramWrites == 0) {
-                null
-            } else {
-                strings.t(
-                    StringKey.STATS_COUNT_UNIT,
-                    "count" to format.number(stats.paramWrites),
-                )
-            },
-        )
-        StatRow(
-            strings.t(StringKey.STATS_HEALTH),
-            if (stats.healthChecks == 0) {
-                null
-            } else {
-                strings.t(
-                    StringKey.STATS_COUNT_UNIT,
-                    "count" to format.number(stats.healthChecks),
-                )
-            },
-        )
-
+        UsageStatsCards(stats = stats, format = format)
         Text(strings.t(StringKey.STATS_DEVICES), style = MaterialTheme.typography.titleMedium)
         if (stats.devices.isEmpty()) {
             EmptyStatePanel(body = strings.t(StringKey.STATS_NO_DATA))
         } else {
-            stats.devices.forEach { device ->
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(
-                        modifier = Modifier.padding(DesignTokens.Spacing.md),
-                        verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs),
-                    ) {
-                        Text(
-                            device.displayName ?: device.deviceId,
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                        Text(
-                            strings.t(
-                                StringKey.STATS_DEVICE_ROW,
-                                "connections" to format.number(device.connections),
-                                "ota" to format.number(device.otaAttempts),
-                                "writes" to format.number(device.configWrites + device.paramWrites),
-                                "health" to format.number(device.healthChecks),
-                            ),
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                        device.lastConnectedAtEpochMillis?.let { last ->
-                            Text(
-                                strings.t(
-                                    StringKey.STATS_LAST_CONNECTED,
-                                    "time" to format.absoluteTime(last, zoneOffsetMinutes),
-                                ),
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                        }
-                    }
+            UsageStatsDeviceList(
+                devices = stats.devices,
+                format = format,
+                zoneOffsetMinutes = zoneOffsetMinutes,
+            )
+        }
+    }
+}
+
+@Composable
+private fun UsageRangeSelector(
+    range: UsageRange,
+    onRangeChange: (UsageRange) -> Unit,
+) {
+    val strings = LocalStrings.current
+    Row(horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs)) {
+        UsageRange.entries.forEach { entry ->
+            FilterChip(
+                selected = range == entry,
+                onClick = { onRangeChange(entry) },
+                label = { Text(strings.t(entry.labelKey())) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun UsageStatsCards(
+    stats: UsageStatistics,
+    format: LocaleFormat,
+) {
+    val strings = LocalStrings.current
+    StatRow(strings.t(StringKey.STATS_CONNECTIONS), usageCountText(stats.connectionCount, strings, format))
+    StatRow(strings.t(StringKey.STATS_CONNECTION_AVG), usageDurationText(stats.connectionAverageMillis, strings, format))
+    StatRow(strings.t(StringKey.STATS_OTA), usageCountText(stats.otaAttempts, strings, format))
+    StatRow(
+        strings.t(StringKey.STATS_OTA_SUCCESS_RATE),
+        stats.otaSuccessRate?.let { format.percent((it * 100.0).toLong(), 100L) },
+    )
+    StatRow(strings.t(StringKey.STATS_OTA_AVG), usageDurationText(stats.otaAverageMillis, strings, format))
+    StatRow(strings.t(StringKey.STATS_CONFIG_WRITES), usageCountText(stats.configWrites, strings, format))
+    StatRow(strings.t(StringKey.STATS_PARAM_WRITES), usageCountText(stats.paramWrites, strings, format))
+    StatRow(strings.t(StringKey.STATS_HEALTH), usageCountText(stats.healthChecks, strings, format))
+}
+
+@Composable
+private fun UsageStatsDeviceList(
+    devices: List<DeviceUsage>,
+    format: LocaleFormat,
+    zoneOffsetMinutes: Int,
+) {
+    val strings = LocalStrings.current
+    devices.forEach { device ->
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(DesignTokens.Spacing.md),
+                verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs),
+            ) {
+                Text(
+                    device.displayName ?: device.deviceId,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Text(
+                    strings.t(
+                        StringKey.STATS_DEVICE_ROW,
+                        "connections" to format.number(device.connections),
+                        "ota" to format.number(device.otaAttempts),
+                        "writes" to format.number(device.configWrites + device.paramWrites),
+                        "health" to format.number(device.healthChecks),
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                device.lastConnectedAtEpochMillis?.let { last ->
+                    Text(
+                        strings.t(
+                            StringKey.STATS_LAST_CONNECTED,
+                            "time" to format.absoluteTime(last, zoneOffsetMinutes),
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
                 }
             }
         }
@@ -909,35 +975,17 @@ fun BackupScreen(
     var resetConfirm by remember { mutableStateOf(false) }
 
     InfoScreen(title = strings.t(StringKey.BACKUP_TITLE), onBack = onBack) {
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(
-                modifier = Modifier.padding(DesignTokens.Spacing.md),
-                verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs),
-            ) {
-                Text(strings.t(StringKey.BACKUP_FIELDS_TITLE), style = MaterialTheme.typography.titleMedium)
-                Text(strings.t(StringKey.BACKUP_FIELD_LIST), style = MaterialTheme.typography.bodySmall)
-                Text(strings.t(StringKey.BACKUP_EXCLUDED_TITLE), style = MaterialTheme.typography.titleMedium)
-                Text(strings.t(StringKey.BACKUP_EXCLUDED_LIST), style = MaterialTheme.typography.bodySmall)
-                Text(strings.t(StringKey.BACKUP_EXCLUDED_CONTENT), style = MaterialTheme.typography.bodySmall)
-            }
-        }
-
-        Text(strings.t(StringKey.BACKUP_EXPORT), style = MaterialTheme.typography.titleMedium)
-        Text(strings.t(StringKey.BACKUP_EXPORT_DESC), style = MaterialTheme.typography.bodySmall)
-        OutlinedButton(
-            onClick = {
+        BackupOverviewCard()
+        BackupExportSection(
+            onExport = {
                 val snapshot = PreferencesBackupService.snapshot(store, presets, rules)
                 val fileName = "valhalla-preferences-${Clock.System.now().toEpochMilliseconds()}.json"
                 scope.launch {
                     val result = fileSaver.save(SaveableFile(fileName, snapshot.toJson(), "application/json"))
                     message =
                         when (result.status) {
-                            com.valhalla.feature.export.FileSaveStatus.SAVED ->
-                                strings.t(StringKey.LOGS_SAVE_SUCCESS)
-
-                            com.valhalla.feature.export.FileSaveStatus.CANCELLED ->
-                                strings.t(StringKey.LOGS_SAVE_CANCELLED)
-
+                            FileSaveStatus.SAVED -> strings.t(StringKey.LOGS_SAVE_SUCCESS)
+                            FileSaveStatus.CANCELLED -> strings.t(StringKey.LOGS_SAVE_CANCELLED)
                             else ->
                                 strings.t(
                                     StringKey.LOGS_SAVE_FAILED,
@@ -946,25 +994,15 @@ fun BackupScreen(
                         }
                 }
             },
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text(strings.t(StringKey.BACKUP_EXPORT)) }
-
-        Text(strings.t(StringKey.BACKUP_IMPORT), style = MaterialTheme.typography.titleMedium)
-        Text(strings.t(StringKey.BACKUP_IMPORT_DESC), style = MaterialTheme.typography.bodySmall)
-        OutlinedTextField(
-            value = jsonText,
-            onValueChange = {
+        )
+        BackupImportSection(
+            jsonText = jsonText,
+            onJsonChange = {
                 jsonText = it
                 parseResult = null
                 plan = emptyList()
             },
-            label = { Text(strings.t(StringKey.BACKUP_JSON_LABEL)) },
-            placeholder = { Text(strings.t(StringKey.BACKUP_PASTE_HINT)) },
-            minLines = 6,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Button(
-            onClick = {
+            onValidate = {
                 when (val parsed = PreferencesBackupParser.parse(jsonText)) {
                     is BackupParseResult.Failure -> {
                         parseResult = parsed
@@ -976,20 +1014,14 @@ fun BackupScreen(
                         message = parsed.warning
                         plan =
                             if (parsed.canApply) {
-                                PreferencesBackupService.plan(
-                                    parsed.backup,
-                                    store,
-                                    presets,
-                                    rules,
-                                )
+                                PreferencesBackupService.plan(parsed.backup, store, presets, rules)
                             } else {
                                 emptyList()
                             }
                     }
                 }
             },
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text(strings.t(StringKey.BACKUP_VALIDATE)) }
+        )
 
         val parsed = parseResult
         if (parsed is BackupParseResult.Failure) {
@@ -1006,52 +1038,124 @@ fun BackupScreen(
             }
         }
 
-        message?.let {
-            val isError = parseResult is BackupParseResult.Failure
-            Text(
-                it,
-                style = MaterialTheme.typography.bodySmall,
-                modifier =
-                    Modifier.semantics {
-                        liveRegion =
-                            if (isError) LiveRegionMode.Assertive else LiveRegionMode.Polite
-                    },
-            )
-        }
-
-        Text(strings.t(StringKey.BACKUP_FACTORY_RESET), style = MaterialTheme.typography.titleMedium)
-        Text(strings.t(StringKey.BACKUP_FACTORY_RESET_DESC), style = MaterialTheme.typography.bodySmall)
-        OutlinedButton(
-            onClick = { resetConfirm = true },
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text(strings.t(StringKey.BACKUP_FACTORY_RESET)) }
+        BackupMessageText(message = message, isError = parseResult is BackupParseResult.Failure)
+        BackupFactoryResetSection(onReset = { resetConfirm = true })
     }
 
     if (resetConfirm) {
-        AlertDialog(
-            onDismissRequest = { resetConfirm = false },
-            title = { Text(strings.t(StringKey.BACKUP_FACTORY_RESET_TITLE)) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs)) {
-                    Text(strings.t(StringKey.BACKUP_FACTORY_RESET_MESSAGE))
-                    Text(strings.t(StringKey.BACKUP_FACTORY_RESET_KEEP))
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        PreferencesReset.clearAll(store, presets, rules)
-                        onReloadPersisted()
-                        resetConfirm = false
-                        message = strings.t(StringKey.BACKUP_FACTORY_RESET_DONE)
-                    },
-                ) { Text(strings.t(StringKey.CONFIRM)) }
-            },
-            dismissButton = {
-                TextButton(onClick = { resetConfirm = false }) { Text(strings.t(StringKey.CANCEL)) }
+        BackupFactoryResetDialog(
+            onDismiss = { resetConfirm = false },
+            onConfirm = {
+                PreferencesReset.clearAll(store, presets, rules)
+                onReloadPersisted()
+                resetConfirm = false
+                message = strings.t(StringKey.BACKUP_FACTORY_RESET_DONE)
             },
         )
     }
+}
+
+@Composable
+private fun BackupOverviewCard() {
+    val strings = LocalStrings.current
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(DesignTokens.Spacing.md),
+            verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs),
+        ) {
+            Text(strings.t(StringKey.BACKUP_FIELDS_TITLE), style = MaterialTheme.typography.titleMedium)
+            Text(strings.t(StringKey.BACKUP_FIELD_LIST), style = MaterialTheme.typography.bodySmall)
+            Text(strings.t(StringKey.BACKUP_EXCLUDED_TITLE), style = MaterialTheme.typography.titleMedium)
+            Text(strings.t(StringKey.BACKUP_EXCLUDED_LIST), style = MaterialTheme.typography.bodySmall)
+            Text(strings.t(StringKey.BACKUP_EXCLUDED_CONTENT), style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}
+
+@Composable
+private fun BackupExportSection(onExport: () -> Unit) {
+    val strings = LocalStrings.current
+    Text(strings.t(StringKey.BACKUP_EXPORT), style = MaterialTheme.typography.titleMedium)
+    Text(strings.t(StringKey.BACKUP_EXPORT_DESC), style = MaterialTheme.typography.bodySmall)
+    OutlinedButton(
+        onClick = onExport,
+        modifier = Modifier.fillMaxWidth(),
+    ) { Text(strings.t(StringKey.BACKUP_EXPORT)) }
+}
+
+@Composable
+private fun BackupImportSection(
+    jsonText: String,
+    onJsonChange: (String) -> Unit,
+    onValidate: () -> Unit,
+) {
+    val strings = LocalStrings.current
+    Text(strings.t(StringKey.BACKUP_IMPORT), style = MaterialTheme.typography.titleMedium)
+    Text(strings.t(StringKey.BACKUP_IMPORT_DESC), style = MaterialTheme.typography.bodySmall)
+    OutlinedTextField(
+        value = jsonText,
+        onValueChange = onJsonChange,
+        label = { Text(strings.t(StringKey.BACKUP_JSON_LABEL)) },
+        placeholder = { Text(strings.t(StringKey.BACKUP_PASTE_HINT)) },
+        minLines = 6,
+        modifier = Modifier.fillMaxWidth(),
+    )
+    Button(
+        onClick = onValidate,
+        modifier = Modifier.fillMaxWidth(),
+    ) { Text(strings.t(StringKey.BACKUP_VALIDATE)) }
+}
+
+@Composable
+private fun BackupMessageText(
+    message: String?,
+    isError: Boolean,
+) {
+    val text = message ?: return
+    Text(
+        text,
+        style = MaterialTheme.typography.bodySmall,
+        modifier =
+            Modifier.semantics {
+                liveRegion =
+                    if (isError) LiveRegionMode.Assertive else LiveRegionMode.Polite
+            },
+    )
+}
+
+@Composable
+private fun BackupFactoryResetSection(onReset: () -> Unit) {
+    val strings = LocalStrings.current
+    Text(strings.t(StringKey.BACKUP_FACTORY_RESET), style = MaterialTheme.typography.titleMedium)
+    Text(strings.t(StringKey.BACKUP_FACTORY_RESET_DESC), style = MaterialTheme.typography.bodySmall)
+    OutlinedButton(
+        onClick = onReset,
+        modifier = Modifier.fillMaxWidth(),
+    ) { Text(strings.t(StringKey.BACKUP_FACTORY_RESET)) }
+}
+
+@Composable
+private fun BackupFactoryResetDialog(
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    val strings = LocalStrings.current
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(strings.t(StringKey.BACKUP_FACTORY_RESET_TITLE)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs)) {
+                Text(strings.t(StringKey.BACKUP_FACTORY_RESET_MESSAGE))
+                Text(strings.t(StringKey.BACKUP_FACTORY_RESET_KEEP))
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm) { Text(strings.t(StringKey.CONFIRM)) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(strings.t(StringKey.CANCEL)) }
+        },
+    )
 }
 
 @Composable

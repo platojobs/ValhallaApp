@@ -141,70 +141,96 @@ class DeviceHealthCheckController(
                 currentCoroutineContext().ensureActive()
                 if (!isLinkAlive()) {
                     aborted = true
-                    items +=
-                        HealthCheckItem(
-                            type = type,
-                            status = HealthCheckStatus.FAILED,
-                            detail = UiMessage.of(StringKey.HEALTH_FAIL_LINK),
-                            suggestion = UiMessage.of(StringKey.HEALTH_SUGGEST_LINK),
-                        )
+                    items += linkLostItem(type)
                     publish(items, type)
                     break
                 }
                 mutableState.update { it.copy(current = type) }
-                val item =
-                    try {
-                        when (type) {
-                            HealthCheckItemType.DEVICE_INFO -> checkDeviceInfo()
-                            HealthCheckItemType.BATTERY -> checkBattery().also { batteryPercent = it.second }.first
-                            HealthCheckItemType.FIRMWARE -> checkFirmware()
-                            HealthCheckItemType.HEARTBEAT -> checkHeartbeat(batteryPercent)
-                            HealthCheckItemType.CONFIG -> checkConfig()
-                            HealthCheckItemType.PARAM -> checkParam()
-                            HealthCheckItemType.OTA_HISTORY -> checkOtaHistory()
-                        }
-                    } catch (cancellation: CancellationException) {
-                        throw cancellation
-                    } catch (error: Throwable) {
-                        failureItem(type, error)
-                    }
-                items += item
+                val outcome = runItemSafely(type, batteryPercent)
+                outcome.batteryPercent?.let { batteryPercent = it }
+                items += outcome.item
                 publish(items, type)
-                if (item.status == HealthCheckStatus.FAILED && !isLinkAlive()) {
+                if (outcome.item.status == HealthCheckStatus.FAILED && !isLinkAlive()) {
                     aborted = true
                     break
                 }
             }
 
-            val result =
-                HealthCheckResult(
-                    items = items.toList(),
-                    completedAtMillis = clockMillis(),
-                    abortedByLinkLoss = aborted,
-                )
-            mutableState.update {
-                it.copy(running = false, current = null, completed = items.size, result = result)
-            }
+            val result = completeRun(items, aborted)
             return result
         } catch (cancellation: CancellationException) {
-            mutableState.update {
-                it.copy(
-                    running = false,
-                    current = null,
-                    completed = items.size,
-                    result =
-                        HealthCheckResult(
-                            items = items.toList(),
-                            completedAtMillis = clockMillis(),
-                        ),
-                )
-            }
+            publishInterrupted(items)
             throw cancellation
         } catch (error: Throwable) {
             mutableState.update { it.copy(running = false, current = null) }
             throw error
         }
     }
+
+    /** 执行单项体检，把单项异常转换为失败项；协程取消照常抛出。 */
+    private suspend fun runItemSafely(
+        type: HealthCheckItemType,
+        batteryPercent: Int?,
+    ): ItemOutcome =
+        try {
+            when (type) {
+                HealthCheckItemType.DEVICE_INFO -> ItemOutcome(checkDeviceInfo(), null)
+                HealthCheckItemType.BATTERY -> checkBattery().let { ItemOutcome(it.first, it.second) }
+                HealthCheckItemType.FIRMWARE -> ItemOutcome(checkFirmware(), null)
+                HealthCheckItemType.HEARTBEAT -> ItemOutcome(checkHeartbeat(batteryPercent), null)
+                HealthCheckItemType.CONFIG -> ItemOutcome(checkConfig(), null)
+                HealthCheckItemType.PARAM -> ItemOutcome(checkParam(), null)
+                HealthCheckItemType.OTA_HISTORY -> ItemOutcome(checkOtaHistory(), null)
+            }
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (error: Throwable) {
+            ItemOutcome(failureItem(type, error), null)
+        }
+
+    private fun linkLostItem(type: HealthCheckItemType): HealthCheckItem =
+        HealthCheckItem(
+            type = type,
+            status = HealthCheckStatus.FAILED,
+            detail = UiMessage.of(StringKey.HEALTH_FAIL_LINK),
+            suggestion = UiMessage.of(StringKey.HEALTH_SUGGEST_LINK),
+        )
+
+    private fun completeRun(
+        items: List<HealthCheckItem>,
+        aborted: Boolean,
+    ): HealthCheckResult {
+        val result =
+            HealthCheckResult(
+                items = items.toList(),
+                completedAtMillis = clockMillis(),
+                abortedByLinkLoss = aborted,
+            )
+        mutableState.update {
+            it.copy(running = false, current = null, completed = items.size, result = result)
+        }
+        return result
+    }
+
+    private fun publishInterrupted(items: List<HealthCheckItem>) {
+        mutableState.update {
+            it.copy(
+                running = false,
+                current = null,
+                completed = items.size,
+                result =
+                    HealthCheckResult(
+                        items = items.toList(),
+                        completedAtMillis = clockMillis(),
+                    ),
+            )
+        }
+    }
+
+    private data class ItemOutcome(
+        val item: HealthCheckItem,
+        val batteryPercent: Int?,
+    )
 
     fun clearResult() {
         mutableState.value = HealthCheckState()

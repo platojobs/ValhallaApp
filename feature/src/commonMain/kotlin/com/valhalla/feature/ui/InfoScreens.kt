@@ -33,20 +33,19 @@ import com.valhalla.core.AppBuildInfo
 import com.valhalla.core.AppDependencyInfo
 import com.valhalla.core.logging.PacketLogExportOptions
 import com.valhalla.data.settings.StorageInventory
-import com.valhalla.data.settings.StorageItem
-import com.valhalla.data.settings.StorageLocation
 import com.valhalla.data.settings.StoragePlatform
 import com.valhalla.data.settings.currentStoragePlatform
 import com.valhalla.feature.ble.BlePermissionState
 import com.valhalla.feature.firmware.rememberFirmwareSigningKeyPem
 import com.valhalla.feature.i18n.AppLanguageMode
 import com.valhalla.feature.i18n.LocalStrings
-import com.valhalla.feature.i18n.ResolvedLanguage
 import com.valhalla.feature.i18n.StringKey
 import com.valhalla.feature.notification.NotificationPresenter
 import com.valhalla.feature.settings.AppSettings
 import com.valhalla.feature.theme.DesignTokens
 import com.valhalla.feature.theme.ThemeMode
+import com.valhalla.feature.uilogic.parseSettingInt
+import com.valhalla.feature.uilogic.settingsValueDraft
 
 /** 统一的信息页头部：返回 + 标题，与主界面层级保持一致。 */
 @Composable
@@ -205,80 +204,124 @@ private fun SettingsValuesSection(
     }
     var status by remember(settings) { mutableStateOf<StringKey?>(null) }
 
-    val attemptsValue =
-        parseSettingInt(
-            attempts,
-            AppSettings.MIN_RECONNECT_ATTEMPTS,
-            AppSettings.MAX_RECONNECT_ATTEMPTS,
-        )
-    val delayValue =
-        parseSettingInt(
-            delay,
-            AppSettings.MIN_RECONNECT_MAX_DELAY_SECONDS,
-            AppSettings.MAX_RECONNECT_MAX_DELAY_SECONDS,
-        )
-    val capacityValue =
-        parseSettingInt(
-            capacity,
-            AppSettings.MIN_LOG_CAPACITY,
-            AppSettings.MAX_LOG_CAPACITY,
-        )
-    val entriesValue =
-        parseSettingInt(
-            entries,
-            PacketLogExportOptions.MIN_ENTRIES,
-            PacketLogExportOptions.MAX_ENTRIES,
-        )
-    val bytesValue =
-        parseSettingInt(
-            bytes,
-            AppSettings.MIN_EXPORT_BYTES_KB,
-            AppSettings.MAX_EXPORT_BYTES_KB,
-        )
-    val hexValue =
-        parseSettingInt(
-            hex,
-            1,
-            PacketLogExportOptions.MAX_HEX_CHARS,
-        )
-    val rssiPeriodValue =
-        parseSettingInt(
-            rssiPeriod,
-            AppSettings.MIN_RSSI_SAMPLE_PERIOD_SECONDS,
-            AppSettings.MAX_RSSI_SAMPLE_PERIOD_SECONDS,
-        )
-    val allValid =
-        listOf(
-            attemptsValue,
-            delayValue,
-            capacityValue,
-            entriesValue,
-            bytesValue,
-            hexValue,
-            rssiPeriodValue,
-        ).all { it != null }
+    val draft = settingsValueDraft(attempts, delay, capacity, entries, bytes, hex, rssiPeriod)
 
+    ReconnectSettingsFields(
+        attempts = attempts,
+        delay = delay,
+        onAttemptsChange = {
+            attempts = it
+            status = null
+        },
+        onDelayChange = {
+            delay = it
+            status = null
+        },
+    )
+    LogCapacitySettingsSection(
+        capacity = capacity,
+        onCapacityChange = {
+            capacity = it
+            status = null
+        },
+    )
+    ExportSettingsFields(
+        entries = entries,
+        bytes = bytes,
+        hex = hex,
+        onEntriesChange = {
+            entries = it
+            status = null
+        },
+        onBytesChange = {
+            bytes = it
+            status = null
+        },
+        onHexChange = {
+            hex = it
+            status = null
+        },
+    )
+    RssiSettingsSection(
+        settings = settings,
+        rssiPeriod = rssiPeriod,
+        onSettingsChange = onSettingsChange,
+        onRssiPeriodChange = {
+            rssiPeriod = it
+            status = null
+        },
+    )
+    SettingsApplyActions(
+        allValid = draft != null,
+        onApply = {
+            draft?.let {
+                onSettingsChange(
+                    settings.copy(
+                        reconnectMaxAttempts = it.reconnectMaxAttempts,
+                        reconnectMaxDelaySeconds = it.reconnectMaxDelaySeconds,
+                        logCapacity = it.logCapacity,
+                        exportEntries = it.exportEntries,
+                        exportBytesKb = it.exportBytesKb,
+                        exportHexChars = it.exportHexChars,
+                        rssiSamplePeriodSeconds = it.rssiSamplePeriodSeconds,
+                    ),
+                )
+                status = StringKey.SETTINGS_APPLIED
+            }
+        },
+        onReset = {
+            attempts = AppSettings.DEFAULTS.reconnectMaxAttempts.toString()
+            delay = AppSettings.DEFAULTS.reconnectMaxDelaySeconds.toString()
+            capacity = AppSettings.DEFAULTS.logCapacity.toString()
+            entries = AppSettings.DEFAULTS.exportEntries.toString()
+            bytes = AppSettings.DEFAULTS.exportBytesKb.toString()
+            hex = AppSettings.DEFAULTS.exportHexChars.toString()
+            rssiPeriod = AppSettings.DEFAULTS.rssiSamplePeriodSeconds.toString()
+            onSettingsChange(AppSettings.DEFAULTS)
+            status = StringKey.SETTINGS_RESET_DONE
+        },
+    )
+    status?.let {
+        Text(
+            strings.t(it),
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+        )
+    }
+    Text(strings.t(StringKey.SETTINGS_RESTART_NOTE), style = MaterialTheme.typography.bodySmall)
+}
+
+@Composable
+private fun ReconnectSettingsFields(
+    attempts: String,
+    delay: String,
+    onAttemptsChange: (String) -> Unit,
+    onDelayChange: (String) -> Unit,
+) {
+    val strings = LocalStrings.current
     SectionTitle(strings.t(StringKey.SETTINGS_RECONNECT_SECTION))
     SettingNumberField(
         label = strings.t(StringKey.SETTINGS_RECONNECT_ATTEMPTS),
         value = attempts,
         min = AppSettings.MIN_RECONNECT_ATTEMPTS,
         max = AppSettings.MAX_RECONNECT_ATTEMPTS,
-        onValueChange = {
-            attempts = it
-            status = null
-        },
+        onValueChange = onAttemptsChange,
     )
     SettingNumberField(
         label = strings.t(StringKey.SETTINGS_RECONNECT_DELAY),
         value = delay,
         min = AppSettings.MIN_RECONNECT_MAX_DELAY_SECONDS,
         max = AppSettings.MAX_RECONNECT_MAX_DELAY_SECONDS,
-        onValueChange = {
-            delay = it
-            status = null
-        },
+        onValueChange = onDelayChange,
     )
+}
+
+@Composable
+private fun LogCapacitySettingsSection(
+    capacity: String,
+    onCapacityChange: (String) -> Unit,
+) {
+    val strings = LocalStrings.current
     SectionTitle(strings.t(StringKey.SETTINGS_LOG_CAPACITY))
     Text(
         strings.t(StringKey.SETTINGS_LOG_CAPACITY_NOTE),
@@ -289,12 +332,20 @@ private fun SettingsValuesSection(
         value = capacity,
         min = AppSettings.MIN_LOG_CAPACITY,
         max = AppSettings.MAX_LOG_CAPACITY,
-        onValueChange = {
-            capacity = it
-            status = null
-        },
+        onValueChange = onCapacityChange,
     )
+}
 
+@Composable
+private fun ExportSettingsFields(
+    entries: String,
+    bytes: String,
+    hex: String,
+    onEntriesChange: (String) -> Unit,
+    onBytesChange: (String) -> Unit,
+    onHexChange: (String) -> Unit,
+) {
+    val strings = LocalStrings.current
     SectionTitle(strings.t(StringKey.SETTINGS_EXPORT_SECTION))
     Text(strings.t(StringKey.SETTINGS_EXPORT_NOTE), style = MaterialTheme.typography.bodySmall)
     SettingNumberField(
@@ -302,32 +353,32 @@ private fun SettingsValuesSection(
         value = entries,
         min = PacketLogExportOptions.MIN_ENTRIES,
         max = PacketLogExportOptions.MAX_ENTRIES,
-        onValueChange = {
-            entries = it
-            status = null
-        },
+        onValueChange = onEntriesChange,
     )
     SettingNumberField(
         label = strings.t(StringKey.SETTINGS_EXPORT_BYTES),
         value = bytes,
         min = AppSettings.MIN_EXPORT_BYTES_KB,
         max = AppSettings.MAX_EXPORT_BYTES_KB,
-        onValueChange = {
-            bytes = it
-            status = null
-        },
+        onValueChange = onBytesChange,
     )
     SettingNumberField(
         label = strings.t(StringKey.SETTINGS_EXPORT_HEX),
         value = hex,
         min = 1,
         max = PacketLogExportOptions.MAX_HEX_CHARS,
-        onValueChange = {
-            hex = it
-            status = null
-        },
+        onValueChange = onHexChange,
     )
+}
 
+@Composable
+private fun RssiSettingsSection(
+    settings: AppSettings,
+    rssiPeriod: String,
+    onSettingsChange: (AppSettings) -> Unit,
+    onRssiPeriodChange: (String) -> Unit,
+) {
+    val strings = LocalStrings.current
     SectionTitle(strings.t(StringKey.SETTINGS_RSSI_SECTION))
     NotificationToggleRow(
         label = strings.t(StringKey.SETTINGS_RSSI_ENABLED),
@@ -343,62 +394,25 @@ private fun SettingsValuesSection(
         value = rssiPeriod,
         min = AppSettings.MIN_RSSI_SAMPLE_PERIOD_SECONDS,
         max = AppSettings.MAX_RSSI_SAMPLE_PERIOD_SECONDS,
-        onValueChange = {
-            rssiPeriod = it
-            status = null
-        },
+        onValueChange = onRssiPeriodChange,
     )
+}
 
+@Composable
+private fun SettingsApplyActions(
+    allValid: Boolean,
+    onApply: () -> Unit,
+    onReset: () -> Unit,
+) {
+    val strings = LocalStrings.current
     Row(horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm)) {
-        Button(
-            enabled = allValid,
-            onClick = {
-                if (allValid) {
-                    onSettingsChange(
-                        AppSettings(
-                            reconnectMaxAttempts = attemptsValue!!,
-                            reconnectMaxDelaySeconds = delayValue!!,
-                            logCapacity = capacityValue!!,
-                            exportEntries = entriesValue!!,
-                            exportBytesKb = bytesValue!!,
-                            exportHexChars = hexValue!!,
-                            notifyMasterEnabled = settings.notifyMasterEnabled,
-                            notifyOtaEnabled = settings.notifyOtaEnabled,
-                            notifyDisconnectEnabled = settings.notifyDisconnectEnabled,
-                            notifyLowBatteryEnabled = settings.notifyLowBatteryEnabled,
-                            notifyReconnectEnabled = settings.notifyReconnectEnabled,
-                            notifyHealthEnabled = settings.notifyHealthEnabled,
-                            lowBatteryThreshold = settings.lowBatteryThreshold,
-                            rssiSubscriptionEnabled = settings.rssiSubscriptionEnabled,
-                            rssiSamplePeriodSeconds = rssiPeriodValue!!,
-                        ),
-                    )
-                    status = StringKey.SETTINGS_APPLIED
-                }
-            },
-        ) { Text(strings.t(StringKey.SETTINGS_APPLY)) }
-        OutlinedButton(
-            onClick = {
-                attempts = AppSettings.DEFAULTS.reconnectMaxAttempts.toString()
-                delay = AppSettings.DEFAULTS.reconnectMaxDelaySeconds.toString()
-                capacity = AppSettings.DEFAULTS.logCapacity.toString()
-                entries = AppSettings.DEFAULTS.exportEntries.toString()
-                bytes = AppSettings.DEFAULTS.exportBytesKb.toString()
-                hex = AppSettings.DEFAULTS.exportHexChars.toString()
-                rssiPeriod = AppSettings.DEFAULTS.rssiSamplePeriodSeconds.toString()
-                onSettingsChange(AppSettings.DEFAULTS)
-                status = StringKey.SETTINGS_RESET_DONE
-            },
-        ) { Text(strings.t(StringKey.SETTINGS_RESET_DEFAULTS)) }
+        Button(enabled = allValid, onClick = onApply) {
+            Text(strings.t(StringKey.SETTINGS_APPLY))
+        }
+        OutlinedButton(onClick = onReset) {
+            Text(strings.t(StringKey.SETTINGS_RESET_DEFAULTS))
+        }
     }
-    status?.let {
-        Text(
-            strings.t(it),
-            style = MaterialTheme.typography.bodySmall,
-            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
-        )
-    }
-    Text(strings.t(StringKey.SETTINGS_RESTART_NOTE), style = MaterialTheme.typography.bodySmall)
 }
 
 /** 本地提醒设置：逐项开关默认全部关闭，只有打开开关时才请求系统权限。 */
@@ -545,13 +559,6 @@ private fun NotificationToggleRow(
         )
     }
 }
-
-/** 解析 1..max 的整数设置；非法返回 null。 */
-private fun parseSettingInt(
-    text: String,
-    min: Int,
-    max: Int,
-): Int? = text.trim().toIntOrNull()?.takeIf { it in min..max }
 
 @Composable
 private fun SettingNumberField(
@@ -738,28 +745,6 @@ fun PrivacyScreen(onBack: () -> Unit) {
     }
 }
 
-private fun storageDescriptionKey(item: StorageItem): StringKey =
-    when (item) {
-        StorageItem.DEVICE_PROFILES -> StringKey.PRIVACY_ITEM_PROFILES
-        StorageItem.OTA_CHECKPOINT -> StringKey.PRIVACY_ITEM_OTA
-        StorageItem.AUTH_TOKEN -> StringKey.PRIVACY_ITEM_TOKEN
-        StorageItem.PACKET_LOG -> StringKey.PRIVACY_ITEM_LOGS
-        StorageItem.APP_SETTINGS -> StringKey.PRIVACY_ITEM_SETTINGS
-        StorageItem.BLE_PERMISSION_FLAG -> StringKey.PRIVACY_ITEM_PERMISSION_FLAG
-        StorageItem.FIRMWARE_LIBRARY -> StringKey.PRIVACY_ITEM_FIRMWARE_LIBRARY
-        StorageItem.DEVICE_EVENTS -> StringKey.PRIVACY_ITEM_EVENTS
-        StorageItem.DEVICE_METRICS -> StringKey.PRIVACY_ITEM_METRICS
-        StorageItem.CONFIG_PRESETS -> StringKey.PRIVACY_ITEM_PRESETS
-        StorageItem.AUTOMATION_RULES -> StringKey.PRIVACY_ITEM_AUTOMATION
-    }
-
-internal fun platformDisplayName(): String =
-    when (currentStoragePlatform()) {
-        StoragePlatform.ANDROID -> "Android"
-        StoragePlatform.IOS -> "iOS"
-        StoragePlatform.JVM -> "JVM"
-    }
-
 private fun dependencyScopeKey(scope: String): StringKey =
     when (scope) {
         "android" -> StringKey.ABOUT_SCOPE_ANDROID
@@ -767,14 +752,3 @@ private fun dependencyScopeKey(scope: String): StringKey =
         "build" -> StringKey.ABOUT_SCOPE_BUILD
         else -> StringKey.ABOUT_SCOPE_RUNTIME
     }
-
-/** 供测试断言：界面展示的存储位置必须覆盖 [StorageInventory] 的全部条目。 */
-fun storageLocationItems(platform: StoragePlatform): List<StorageLocation> = StorageInventory.forPlatform(platform)
-
-/** 供测试断言：隐私页文案键与存储类别一一对应。 */
-fun privacyKeysForAllItems(): Map<StorageItem, StringKey> = StorageItem.entries.associateWith { storageDescriptionKey(it) }
-
-/** 供测试读取当前语言下隐私声明的实际文本。 */
-fun privacyNetworkDisclosure(language: ResolvedLanguage): String =
-    com.valhalla.feature.i18n.AppStrings
-        .get(language, StringKey.PRIVACY_NETWORK_BODY)

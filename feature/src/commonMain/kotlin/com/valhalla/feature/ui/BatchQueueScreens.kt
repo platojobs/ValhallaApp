@@ -36,6 +36,7 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
+import com.valhalla.core.batch.BatchItemState
 import com.valhalla.core.batch.BatchItemStatus
 import com.valhalla.core.batch.BatchOperationKind
 import com.valhalla.core.batch.BatchSummary
@@ -45,18 +46,22 @@ import com.valhalla.core.firmware.FirmwareLibraryRecord
 import com.valhalla.core.ota.OtaQueueItem
 import com.valhalla.core.ota.OtaQueueItemStatus
 import com.valhalla.core.ota.OtaQueueStage
+import com.valhalla.core.ota.OtaQueueSummary
 import com.valhalla.core.ota.OtaQueueTarget
 import com.valhalla.feature.batch.BatchDeviceOutcome
 import com.valhalla.feature.batch.BatchOperationController
 import com.valhalla.feature.error.LocalErrorReporter
 import com.valhalla.feature.error.launchSafely
-import com.valhalla.feature.export.FileSaveStatus
 import com.valhalla.feature.export.SaveableFile
 import com.valhalla.feature.export.rememberFileSaver
 import com.valhalla.feature.i18n.LocalStrings
 import com.valhalla.feature.i18n.StringKey
 import com.valhalla.feature.ota.OtaQueueController
 import com.valhalla.feature.theme.DesignTokens
+import com.valhalla.feature.uilogic.OtaQueueActions
+import com.valhalla.feature.uilogic.batchStartEnabled
+import com.valhalla.feature.uilogic.fileSaveMessage
+import com.valhalla.feature.uilogic.otaQueueActions
 import com.valhalla.feature.uilogic.selectedById
 import kotlinx.coroutines.launch
 
@@ -132,9 +137,12 @@ internal fun BatchScreen(
 
     val selectedPreset = presets.firstOrNull { it.id == selectedPresetId }
     val canStart =
-        !running &&
-            selectedIds.isNotEmpty() &&
-            (kind == BatchOperationKind.HEALTH_CHECK || selectedPreset != null)
+        batchStartEnabled(
+            running = running,
+            selectedCount = selectedIds.size,
+            applyingPreset = kind == BatchOperationKind.APPLY_PRESET,
+            hasSelectedPreset = selectedPreset != null,
+        )
 
     Column(
         modifier =
@@ -144,262 +152,339 @@ internal fun BatchScreen(
                 .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm),
     ) {
-        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                strings.t(StringKey.BATCH_TITLE),
-                style = MaterialTheme.typography.headlineSmall,
-                modifier = Modifier.weight(1f),
-            )
-            TextButton(onClick = onBack) { Text(strings.t(StringKey.BACK)) }
-        }
-        Text(strings.t(StringKey.BATCH_HINT), style = MaterialTheme.typography.bodySmall)
-        Text(strings.t(StringKey.BATCH_LOCK_NOTE), style = MaterialTheme.typography.bodySmall)
-
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm),
-            modifier = Modifier.horizontalScroll(rememberScrollState()),
-        ) {
-            FilterChip(
-                selected = kind == BatchOperationKind.HEALTH_CHECK,
-                onClick = { kind = BatchOperationKind.HEALTH_CHECK },
-                label = { Text(strings.t(StringKey.BATCH_KIND_HEALTH)) },
-                enabled = !running,
-            )
-            FilterChip(
-                selected = kind == BatchOperationKind.APPLY_PRESET,
-                onClick = { kind = BatchOperationKind.APPLY_PRESET },
-                label = { Text(strings.t(StringKey.BATCH_KIND_PRESET)) },
-                enabled = !running,
-            )
-        }
-
-        if (kind == BatchOperationKind.APPLY_PRESET) {
-            Text(strings.t(StringKey.BATCH_PRESET_LABEL), style = MaterialTheme.typography.titleSmall)
-            if (presets.isEmpty()) {
-                EmptyStatePanel(body = strings.t(StringKey.BATCH_PRESET_EMPTY))
-            } else {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm),
-                    modifier = Modifier.horizontalScroll(rememberScrollState()),
-                ) {
-                    presets.forEach { preset ->
-                        FilterChip(
-                            selected = selectedPresetId == preset.id,
-                            onClick = { selectedPresetId = preset.id },
-                            label = { Text(preset.name) },
-                            enabled = !running,
-                        )
-                    }
-                }
-            }
-        }
-
-        Text(strings.t(StringKey.BATCH_TARGETS), style = MaterialTheme.typography.titleSmall)
-        if (devices.isEmpty()) {
-            EmptyStatePanel(body = strings.t(StringKey.DEVICES_EMPTY))
-        } else {
-            devices.forEach { device ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(
-                        checked = device.deviceId in selectedIds,
-                        onCheckedChange = { checked ->
-                            selectedIds =
-                                if (checked) {
-                                    selectedIds + device.deviceId
-                                } else {
-                                    selectedIds - device.deviceId
-                                }
-                        },
-                        enabled = !running,
-                        modifier =
-                            Modifier.semantics {
-                                contentDescription =
-                                    strings.t(StringKey.BATCH_TARGETS) + ": " + device.displayName
-                            },
-                    )
-                    Text(device.displayName, style = MaterialTheme.typography.bodyMedium)
-                }
-            }
-        }
-
-        Row(horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm)) {
-            Button(
-                enabled = canStart,
-                onClick = {
-                    message = null
-                    lastSummary = null
-                    scope.launchSafely(errorReporter, "batch-run") {
-                        val summary =
-                            controller.run(
-                                kind = kind,
-                                targets =
-                                    selectedById(devices, selectedIds) { it.deviceId }
-                                        .map { BatchTarget(it.deviceId, it.displayName) },
-                            ) { target, step ->
-                                execute(kind, selectedPreset, target, step)
-                            }
-                        lastSummary = summary
-                    }
-                },
-            ) { Text(strings.t(StringKey.BATCH_START)) }
-
-            if (running) {
-                OutlinedButton(onClick = { controller.cancelRemaining() }) {
-                    Text(strings.t(StringKey.BATCH_CANCEL_REMAINING))
-                }
-            }
-        }
-
-        when {
-            devices.isEmpty() -> DisabledStatePanel(StringKey.STATE_DISABLED_NOT_CONNECTED)
-            running -> DisabledStatePanel(StringKey.STATE_DISABLED_BUSY)
-        }
-
-        if (running) {
-            LoadingStatePanel(body = strings.t(StringKey.BATCH_RUNNING))
-        }
-        if (cancelRequested) {
-            Text(
-                strings.t(StringKey.BATCH_CANCEL_REQUESTED),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.secondary,
-                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
-            )
-        }
-
-        Column(verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm)) {
-            items.forEach { item ->
-                var expanded by remember(item.target.deviceId) { mutableStateOf(false) }
-                Card(
-                    modifier =
-                        Modifier
-                            .fillMaxWidth()
-                            .clickable { expanded = !expanded }
-                            .semantics {
-                                contentDescription =
-                                    item.target.displayName + " " + strings.t(item.status.labelKey())
-                            },
-                ) {
-                    Column(
-                        modifier = Modifier.padding(DesignTokens.Spacing.md),
-                        verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xxs),
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                item.target.displayName,
-                                style = MaterialTheme.typography.bodyMedium,
-                                modifier = Modifier.weight(1f),
-                            )
-                            Text(
-                                strings.t(item.status.labelKey()),
-                                style = MaterialTheme.typography.labelMedium,
-                                color =
-                                    if (item.status == BatchItemStatus.FAILED) {
-                                        MaterialTheme.colorScheme.error
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurfaceVariant
-                                    },
-                                modifier =
-                                    Modifier.semantics {
-                                        liveRegion =
-                                            if (item.status == BatchItemStatus.FAILED) {
-                                                LiveRegionMode.Assertive
-                                            } else {
-                                                LiveRegionMode.Polite
-                                            }
-                                    },
-                            )
+        BatchHeader(onBack = onBack)
+        BatchKindSection(
+            kind = kind,
+            presets = presets,
+            selectedPresetId = selectedPresetId,
+            running = running,
+            onKindChange = { kind = it },
+            onPresetSelect = { selectedPresetId = it },
+        )
+        BatchTargetsSection(
+            devices = devices,
+            selectedIds = selectedIds,
+            running = running,
+            onSelectedIdsChange = { selectedIds = it },
+        )
+        BatchActionSection(
+            canStart = canStart,
+            running = running,
+            onStart = {
+                message = null
+                lastSummary = null
+                scope.launchSafely(errorReporter, "batch-run") {
+                    lastSummary =
+                        controller.run(
+                            kind = kind,
+                            targets =
+                                selectedById(devices, selectedIds) { it.deviceId }
+                                    .map { BatchTarget(it.deviceId, it.displayName) },
+                        ) { target, step ->
+                            execute(kind, selectedPreset, target, step)
                         }
-                        if (expanded) {
-                            item.step?.let { step ->
-                                val key = batchStepLabelKey(step)
-                                Text(
-                                    key?.let { strings.t(it) } ?: step,
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
-                            }
-                            item.reason?.let { reason ->
-                                val key = batchReasonLabelKey(reason)
-                                Text(
-                                    key?.let { strings.t(it) } ?: reason,
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
-                            }
-                            item.detail?.let { detail ->
-                                Text(
-                                    strings.t(StringKey.TECHNICAL_DETAIL, "detail" to detail),
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
-                            }
-                        }
-                    }
                 }
-            }
-        }
-
+            },
+            onCancel = { controller.cancelRemaining() },
+        )
+        BatchStatusSection(
+            devicesEmpty = devices.isEmpty(),
+            running = running,
+            cancelRequested = cancelRequested,
+        )
+        BatchItemList(items = items)
         lastSummary?.let { summary ->
-            Text(strings.t(StringKey.BATCH_SUMMARY_TITLE), style = MaterialTheme.typography.titleMedium)
-            Text(
-                strings.t(
-                    StringKey.BATCH_SUMMARY_COUNTS,
-                    "total" to summary.total.toString(),
-                    "succeeded" to summary.succeeded.toString(),
-                    "skipped" to summary.skipped.toString(),
-                    "failed" to summary.failed.toString(),
-                    "cancelled" to summary.cancelled.toString(),
-                    "removed" to summary.removed.toString(),
-                ),
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm)) {
-                TextButton(onClick = {
+            BatchSummarySection(
+                summary = summary,
+                onCopy = {
                     clipboard.setText(AnnotatedString(summary.toText()))
                     message = strings.t(StringKey.BATCH_COPIED)
-                }) { Text(strings.t(StringKey.BATCH_COPY)) }
-                TextButton(onClick = {
+                },
+                onSave = {
                     scope.launch {
+                        val fileName = "valhalla-batch-summary.txt"
                         val result =
                             fileSaver.save(
                                 SaveableFile(
-                                    fileName = "valhalla-batch-summary.txt",
+                                    fileName = fileName,
                                     content = summary.toText(),
                                     mimeType = "text/plain",
                                 ),
                             )
-                        message =
-                            when (result.status) {
-                                FileSaveStatus.SAVED ->
-                                    strings.t(
-                                        StringKey.BATCH_SAVED,
-                                        "name" to "valhalla-batch-summary.txt",
-                                    )
-
-                                FileSaveStatus.CANCELLED -> strings.t(StringKey.BATCH_SAVE_CANCELLED)
-                                FileSaveStatus.UNAVAILABLE -> strings.t(StringKey.BATCH_SAVE_UNAVAILABLE)
-                                FileSaveStatus.FAILED ->
-                                    strings.t(
-                                        StringKey.BATCH_SAVE_FAILED,
-                                        "detail" to (result.message ?: strings.t(StringKey.UNKNOWN)),
-                                    )
-                            }
+                        message = fileSaveMessage(strings, result, fileName)
                     }
-                }) { Text(strings.t(StringKey.BATCH_SAVE)) }
-            }
-        }
-
-        message?.let {
-            Text(
-                it,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.secondary,
-                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                },
             )
         }
+        BatchMessageText(message = message)
         if (!running && items.isEmpty() && devices.isNotEmpty()) {
             EmptyStatePanel(body = strings.t(StringKey.BATCH_NO_TARGET))
         }
     }
+}
+
+@Composable
+private fun BatchHeader(onBack: () -> Unit) {
+    val strings = LocalStrings.current
+    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            strings.t(StringKey.BATCH_TITLE),
+            style = MaterialTheme.typography.headlineSmall,
+            modifier = Modifier.weight(1f),
+        )
+        TextButton(onClick = onBack) { Text(strings.t(StringKey.BACK)) }
+    }
+    Text(strings.t(StringKey.BATCH_HINT), style = MaterialTheme.typography.bodySmall)
+    Text(strings.t(StringKey.BATCH_LOCK_NOTE), style = MaterialTheme.typography.bodySmall)
+}
+
+@Composable
+private fun BatchKindSection(
+    kind: BatchOperationKind,
+    presets: List<ConfigPreset>,
+    selectedPresetId: String?,
+    running: Boolean,
+    onKindChange: (BatchOperationKind) -> Unit,
+    onPresetSelect: (String) -> Unit,
+) {
+    val strings = LocalStrings.current
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm),
+        modifier = Modifier.horizontalScroll(rememberScrollState()),
+    ) {
+        FilterChip(
+            selected = kind == BatchOperationKind.HEALTH_CHECK,
+            onClick = { onKindChange(BatchOperationKind.HEALTH_CHECK) },
+            label = { Text(strings.t(StringKey.BATCH_KIND_HEALTH)) },
+            enabled = !running,
+        )
+        FilterChip(
+            selected = kind == BatchOperationKind.APPLY_PRESET,
+            onClick = { onKindChange(BatchOperationKind.APPLY_PRESET) },
+            label = { Text(strings.t(StringKey.BATCH_KIND_PRESET)) },
+            enabled = !running,
+        )
+    }
+
+    if (kind != BatchOperationKind.APPLY_PRESET) return
+
+    Text(strings.t(StringKey.BATCH_PRESET_LABEL), style = MaterialTheme.typography.titleSmall)
+    if (presets.isEmpty()) {
+        EmptyStatePanel(body = strings.t(StringKey.BATCH_PRESET_EMPTY))
+        return
+    }
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm),
+        modifier = Modifier.horizontalScroll(rememberScrollState()),
+    ) {
+        presets.forEach { preset ->
+            FilterChip(
+                selected = selectedPresetId == preset.id,
+                onClick = { onPresetSelect(preset.id) },
+                label = { Text(preset.name) },
+                enabled = !running,
+            )
+        }
+    }
+}
+
+@Composable
+private fun BatchTargetsSection(
+    devices: List<BatchDeviceOption>,
+    selectedIds: Set<String>,
+    running: Boolean,
+    onSelectedIdsChange: (Set<String>) -> Unit,
+) {
+    val strings = LocalStrings.current
+    Text(strings.t(StringKey.BATCH_TARGETS), style = MaterialTheme.typography.titleSmall)
+    if (devices.isEmpty()) {
+        EmptyStatePanel(body = strings.t(StringKey.DEVICES_EMPTY))
+        return
+    }
+    devices.forEach { device ->
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Checkbox(
+                checked = device.deviceId in selectedIds,
+                onCheckedChange = { checked ->
+                    onSelectedIdsChange(
+                        if (checked) {
+                            selectedIds + device.deviceId
+                        } else {
+                            selectedIds - device.deviceId
+                        },
+                    )
+                },
+                enabled = !running,
+                modifier =
+                    Modifier.semantics {
+                        contentDescription =
+                            strings.t(StringKey.BATCH_TARGETS) + ": " + device.displayName
+                    },
+            )
+            Text(device.displayName, style = MaterialTheme.typography.bodyMedium)
+        }
+    }
+}
+
+@Composable
+private fun BatchActionSection(
+    canStart: Boolean,
+    running: Boolean,
+    onStart: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    val strings = LocalStrings.current
+    Row(horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm)) {
+        Button(enabled = canStart, onClick = onStart) {
+            Text(strings.t(StringKey.BATCH_START))
+        }
+        if (running) {
+            OutlinedButton(onClick = onCancel) {
+                Text(strings.t(StringKey.BATCH_CANCEL_REMAINING))
+            }
+        }
+    }
+}
+
+@Composable
+private fun BatchStatusSection(
+    devicesEmpty: Boolean,
+    running: Boolean,
+    cancelRequested: Boolean,
+) {
+    val strings = LocalStrings.current
+    when {
+        devicesEmpty -> DisabledStatePanel(StringKey.STATE_DISABLED_NOT_CONNECTED)
+        running -> DisabledStatePanel(StringKey.STATE_DISABLED_BUSY)
+    }
+    if (running) {
+        LoadingStatePanel(body = strings.t(StringKey.BATCH_RUNNING))
+    }
+    if (cancelRequested) {
+        Text(
+            strings.t(StringKey.BATCH_CANCEL_REQUESTED),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.secondary,
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+        )
+    }
+}
+
+@Composable
+private fun BatchItemList(items: List<BatchItemState>) {
+    Column(verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm)) {
+        items.forEach { item ->
+            BatchItemCard(item = item)
+        }
+    }
+}
+
+@Composable
+private fun BatchItemCard(item: BatchItemState) {
+    val strings = LocalStrings.current
+    var expanded by remember(item.target.deviceId) { mutableStateOf(false) }
+    Card(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .clickable { expanded = !expanded }
+                .semantics {
+                    contentDescription =
+                        item.target.displayName + " " + strings.t(item.status.labelKey())
+                },
+    ) {
+        Column(
+            modifier = Modifier.padding(DesignTokens.Spacing.md),
+            verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xxs),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    item.target.displayName,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    strings.t(item.status.labelKey()),
+                    style = MaterialTheme.typography.labelMedium,
+                    color =
+                        if (item.status == BatchItemStatus.FAILED) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    modifier =
+                        Modifier.semantics {
+                            liveRegion =
+                                if (item.status == BatchItemStatus.FAILED) {
+                                    LiveRegionMode.Assertive
+                                } else {
+                                    LiveRegionMode.Polite
+                                }
+                        },
+                )
+            }
+            if (expanded) {
+                item.step?.let { step ->
+                    val key = batchStepLabelKey(step)
+                    Text(
+                        key?.let { strings.t(it) } ?: step,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                item.reason?.let { reason ->
+                    val key = batchReasonLabelKey(reason)
+                    Text(
+                        key?.let { strings.t(it) } ?: reason,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                item.detail?.let { detail ->
+                    Text(
+                        strings.t(StringKey.TECHNICAL_DETAIL, "detail" to detail),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BatchSummarySection(
+    summary: BatchSummary,
+    onCopy: () -> Unit,
+    onSave: () -> Unit,
+) {
+    val strings = LocalStrings.current
+    Text(strings.t(StringKey.BATCH_SUMMARY_TITLE), style = MaterialTheme.typography.titleMedium)
+    Text(
+        strings.t(
+            StringKey.BATCH_SUMMARY_COUNTS,
+            "total" to summary.total.toString(),
+            "succeeded" to summary.succeeded.toString(),
+            "skipped" to summary.skipped.toString(),
+            "failed" to summary.failed.toString(),
+            "cancelled" to summary.cancelled.toString(),
+            "removed" to summary.removed.toString(),
+        ),
+        style = MaterialTheme.typography.bodySmall,
+        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+    )
+    Row(horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm)) {
+        TextButton(onClick = onCopy) { Text(strings.t(StringKey.BATCH_COPY)) }
+        TextButton(onClick = onSave) { Text(strings.t(StringKey.BATCH_SAVE)) }
+    }
+}
+
+@Composable
+private fun BatchMessageText(message: String?) {
+    val text = message ?: return
+    Text(
+        text,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.secondary,
+        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+    )
 }
 
 internal fun batchReasonLabelKey(reason: String): StringKey? =
@@ -447,6 +532,14 @@ internal fun OtaQueueScreen(
                     ?.target
                     ?.displayName
             }
+    val actions =
+        otaQueueActions(
+            running = snapshot.running,
+            hasFirmware = selectedFirmware != null,
+            selectedCount = selectedIds.size,
+            hasQueued = hasQueued,
+            hasPaused = hasPaused,
+        )
 
     Column(
         modifier =
@@ -456,213 +549,280 @@ internal fun OtaQueueScreen(
                 .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm),
     ) {
-        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                strings.t(StringKey.QUEUE_TITLE),
-                style = MaterialTheme.typography.headlineSmall,
-                modifier = Modifier.weight(1f),
-            )
-            TextButton(onClick = onBack) { Text(strings.t(StringKey.BACK)) }
-        }
-        Text(strings.t(StringKey.QUEUE_HINT), style = MaterialTheme.typography.bodySmall)
-        Text(strings.t(StringKey.QUEUE_MEMORY_ONLY), style = MaterialTheme.typography.bodySmall)
+        OtaQueueHeader(onBack = onBack)
+        OtaQueueTargets(
+            devices = devices,
+            selectedIds = selectedIds,
+            running = snapshot.running,
+            onSelectedIdsChange = { selectedIds = it },
+        )
+        OtaFirmwareSection(
+            firmwareRecords = firmwareRecords,
+            firmwareId = firmwareId,
+            running = snapshot.running,
+            onFirmwareSelect = { firmwareId = it },
+        )
+        OtaQueueControls(
+            actions = actions,
+            onEnqueue = {
+                val firmware = selectedFirmware ?: return@OtaQueueControls
+                var added = 0
+                selectedById(devices, selectedIds) { it.deviceId }.forEach { device ->
+                    val ok =
+                        controller.enqueue(
+                            OtaQueueTarget(
+                                deviceId = device.deviceId,
+                                displayName = device.displayName,
+                                firmwareId = firmware.id,
+                                firmwareLabel = firmware.displayName,
+                            ),
+                        )
+                    if (ok) added++
+                }
+                message = if (added == 0) strings.t(StringKey.QUEUE_DUPLICATE) else null
+            },
+            onStart = { controller.start() },
+            onPause = { controller.pause() },
+            onResume = { controller.resume() },
+            onCancel = { controller.cancelCurrent() },
+        )
+        OtaQueueStatusSection(
+            running = snapshot.running,
+            pauseRequested = snapshot.pauseRequested,
+            devicesEmpty = devices.isEmpty(),
+            firmwareEmpty = firmwareRecords.isEmpty(),
+            currentDevice = currentDevice,
+        )
+        OtaQueueItemList(
+            items = snapshot.items,
+            onSkipFailed = { controller.skipFailed(it) },
+            onRemove = { controller.removeQueued(it) },
+        )
+        OtaQueueSummarySection(
+            items = snapshot.items,
+            summary = snapshot.summary,
+            onCopy = {
+                clipboard.setText(AnnotatedString(snapshot.summary.toText()))
+                message = strings.t(StringKey.BATCH_COPIED)
+            },
+            onSave = {
+                scope.launch {
+                    val fileName = "valhalla-ota-queue-summary.txt"
+                    val result =
+                        fileSaver.save(
+                            SaveableFile(
+                                fileName = fileName,
+                                content = snapshot.summary.toText(),
+                                mimeType = "text/plain",
+                            ),
+                        )
+                    message = fileSaveMessage(strings, result, fileName)
+                }
+            },
+        )
+        BatchMessageText(message = message)
+    }
+}
 
-        Text(strings.t(StringKey.QUEUE_TARGETS), style = MaterialTheme.typography.titleSmall)
-        if (devices.isEmpty()) {
-            EmptyStatePanel(body = strings.t(StringKey.DEVICES_EMPTY))
-        } else {
-            devices.forEach { device ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(
-                        checked = device.deviceId in selectedIds,
-                        onCheckedChange = { checked ->
-                            selectedIds =
-                                if (checked) {
-                                    selectedIds + device.deviceId
-                                } else {
-                                    selectedIds - device.deviceId
-                                }
+@Composable
+private fun OtaQueueHeader(onBack: () -> Unit) {
+    val strings = LocalStrings.current
+    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            strings.t(StringKey.QUEUE_TITLE),
+            style = MaterialTheme.typography.headlineSmall,
+            modifier = Modifier.weight(1f),
+        )
+        TextButton(onClick = onBack) { Text(strings.t(StringKey.BACK)) }
+    }
+    Text(strings.t(StringKey.QUEUE_HINT), style = MaterialTheme.typography.bodySmall)
+    Text(strings.t(StringKey.QUEUE_MEMORY_ONLY), style = MaterialTheme.typography.bodySmall)
+}
+
+@Composable
+private fun OtaQueueTargets(
+    devices: List<BatchDeviceOption>,
+    selectedIds: Set<String>,
+    running: Boolean,
+    onSelectedIdsChange: (Set<String>) -> Unit,
+) {
+    val strings = LocalStrings.current
+    Text(strings.t(StringKey.QUEUE_TARGETS), style = MaterialTheme.typography.titleSmall)
+    if (devices.isEmpty()) {
+        EmptyStatePanel(body = strings.t(StringKey.DEVICES_EMPTY))
+        return
+    }
+    devices.forEach { device ->
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Checkbox(
+                checked = device.deviceId in selectedIds,
+                onCheckedChange = { checked ->
+                    onSelectedIdsChange(
+                        if (checked) {
+                            selectedIds + device.deviceId
+                        } else {
+                            selectedIds - device.deviceId
                         },
-                        enabled = !snapshot.running,
-                        modifier =
-                            Modifier.semantics {
-                                contentDescription =
-                                    strings.t(StringKey.QUEUE_TARGETS) + ": " + device.displayName
-                            },
                     )
-                    Text(device.displayName, style = MaterialTheme.typography.bodyMedium)
-                }
-            }
-        }
-
-        Text(strings.t(StringKey.QUEUE_FIRMWARE), style = MaterialTheme.typography.titleSmall)
-        if (firmwareRecords.isEmpty()) {
-            EmptyStatePanel(body = strings.t(StringKey.QUEUE_FIRMWARE_EMPTY))
-        } else {
-            Column(verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xxs)) {
-                firmwareRecords.forEach { record ->
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        FilterChip(
-                            selected = firmwareId == record.id,
-                            onClick = { firmwareId = record.id },
-                            label = { Text(record.displayName) },
-                            enabled = !snapshot.running,
-                        )
-                        Text(
-                            record.version,
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.padding(start = DesignTokens.Spacing.sm),
-                        )
-                    }
-                }
-            }
-        }
-
-        Row(horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm)) {
-            OutlinedButton(
-                enabled = !snapshot.running && selectedFirmware != null && selectedIds.isNotEmpty(),
-                onClick = {
-                    val firmware = selectedFirmware ?: return@OutlinedButton
-                    var added = 0
-                    selectedById(devices, selectedIds) { it.deviceId }.forEach { device ->
-                        val ok =
-                            controller.enqueue(
-                                OtaQueueTarget(
-                                    deviceId = device.deviceId,
-                                    displayName = device.displayName,
-                                    firmwareId = firmware.id,
-                                    firmwareLabel = firmware.displayName,
-                                ),
-                            )
-                        if (ok) added++
-                    }
-                    message = if (added == 0) strings.t(StringKey.QUEUE_DUPLICATE) else null
                 },
-            ) { Text(strings.t(StringKey.QUEUE_ENQUEUE)) }
-
-            Button(
-                enabled = !snapshot.running && hasQueued,
-                onClick = { controller.start() },
-            ) { Text(strings.t(StringKey.QUEUE_START)) }
-
-            OutlinedButton(
-                enabled = snapshot.running,
-                onClick = { controller.pause() },
-            ) { Text(strings.t(StringKey.QUEUE_PAUSE)) }
-
-            OutlinedButton(
-                enabled = !snapshot.running && hasPaused,
-                onClick = { controller.resume() },
-            ) { Text(strings.t(StringKey.QUEUE_RESUME)) }
-
-            OutlinedButton(
-                enabled = snapshot.running,
-                onClick = { controller.cancelCurrent() },
-            ) { Text(strings.t(StringKey.QUEUE_CANCEL_CURRENT)) }
-        }
-
-        when {
-            snapshot.running -> DisabledStatePanel(StringKey.STATE_DISABLED_BUSY)
-            devices.isEmpty() -> DisabledStatePanel(StringKey.STATE_DISABLED_NOT_CONNECTED)
-            firmwareRecords.isEmpty() -> DisabledStatePanel(StringKey.STATE_UNAVAILABLE_HINT)
-        }
-
-        if (snapshot.pauseRequested) {
-            Text(
-                strings.t(StringKey.QUEUE_PAUSE_REQUESTED),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.secondary,
-                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                enabled = !running,
+                modifier =
+                    Modifier.semantics {
+                        contentDescription =
+                            strings.t(StringKey.QUEUE_TARGETS) + ": " + device.displayName
+                    },
             )
+            Text(device.displayName, style = MaterialTheme.typography.bodyMedium)
         }
-        if (snapshot.running) {
-            LoadingStatePanel(
-                body = currentDevice?.let { name -> strings.t(StringKey.QUEUE_CURRENT, "device" to name) },
-            )
-        }
+    }
+}
 
-        Column(verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm)) {
-            snapshot.items.forEach { item ->
-                QueueItemCard(
-                    item = item,
-                    onSkipFailed = { controller.skipFailed(item.target.deviceId) },
-                    onRemove = { controller.removeQueued(item.target.deviceId) },
+@Composable
+private fun OtaFirmwareSection(
+    firmwareRecords: List<FirmwareLibraryRecord>,
+    firmwareId: String?,
+    running: Boolean,
+    onFirmwareSelect: (String) -> Unit,
+) {
+    val strings = LocalStrings.current
+    Text(strings.t(StringKey.QUEUE_FIRMWARE), style = MaterialTheme.typography.titleSmall)
+    if (firmwareRecords.isEmpty()) {
+        EmptyStatePanel(body = strings.t(StringKey.QUEUE_FIRMWARE_EMPTY))
+        return
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xxs)) {
+        firmwareRecords.forEach { record ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                FilterChip(
+                    selected = firmwareId == record.id,
+                    onClick = { onFirmwareSelect(record.id) },
+                    label = { Text(record.displayName) },
+                    enabled = !running,
                 )
-            }
-        }
-
-        if (snapshot.items.isNotEmpty()) {
-            val summary = snapshot.summary
-            Text(strings.t(StringKey.QUEUE_SUMMARY_TITLE), style = MaterialTheme.typography.titleMedium)
-            Text(
-                strings.t(
-                    StringKey.QUEUE_SUMMARY_COUNTS,
-                    "total" to summary.total.toString(),
-                    "succeeded" to summary.succeeded.toString(),
-                    "failed" to summary.failed.toString(),
-                    "skipped" to summary.skipped.toString(),
-                    "aborted" to summary.aborted.toString(),
-                    "removed" to summary.removed.toString(),
-                    "pending" to summary.pending.toString(),
-                ),
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
-            )
-            if (summary.checkpointRetained > 0) {
                 Text(
-                    strings.t(
-                        StringKey.QUEUE_CHECKPOINT_RETAINED,
-                        "count" to summary.checkpointRetained.toString(),
-                    ),
+                    record.version,
                     style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(start = DesignTokens.Spacing.sm),
                 )
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm)) {
-                TextButton(onClick = {
-                    clipboard.setText(AnnotatedString(summary.toText()))
-                    message = strings.t(StringKey.BATCH_COPIED)
-                }) { Text(strings.t(StringKey.BATCH_COPY)) }
-                TextButton(onClick = {
-                    scope.launch {
-                        val result =
-                            fileSaver.save(
-                                SaveableFile(
-                                    fileName = "valhalla-ota-queue-summary.txt",
-                                    content = summary.toText(),
-                                    mimeType = "text/plain",
-                                ),
-                            )
-                        message =
-                            when (result.status) {
-                                FileSaveStatus.SAVED ->
-                                    strings.t(
-                                        StringKey.BATCH_SAVED,
-                                        "name" to "valhalla-ota-queue-summary.txt",
-                                    )
-
-                                FileSaveStatus.CANCELLED -> strings.t(StringKey.BATCH_SAVE_CANCELLED)
-                                FileSaveStatus.UNAVAILABLE -> strings.t(StringKey.BATCH_SAVE_UNAVAILABLE)
-                                FileSaveStatus.FAILED ->
-                                    strings.t(
-                                        StringKey.BATCH_SAVE_FAILED,
-                                        "detail" to (result.message ?: strings.t(StringKey.UNKNOWN)),
-                                    )
-                            }
-                    }
-                }) { Text(strings.t(StringKey.BATCH_SAVE)) }
-            }
-        } else {
-            EmptyStatePanel(body = strings.t(StringKey.QUEUE_EMPTY))
         }
+    }
+}
 
-        message?.let {
-            Text(
-                it,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.secondary,
-                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+@Composable
+private fun OtaQueueControls(
+    actions: OtaQueueActions,
+    onEnqueue: () -> Unit,
+    onStart: () -> Unit,
+    onPause: () -> Unit,
+    onResume: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    val strings = LocalStrings.current
+    Row(horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm)) {
+        OutlinedButton(enabled = actions.canEnqueue, onClick = onEnqueue) {
+            Text(strings.t(StringKey.QUEUE_ENQUEUE))
+        }
+        Button(enabled = actions.canStart, onClick = onStart) {
+            Text(strings.t(StringKey.QUEUE_START))
+        }
+        OutlinedButton(enabled = actions.canPause, onClick = onPause) {
+            Text(strings.t(StringKey.QUEUE_PAUSE))
+        }
+        OutlinedButton(enabled = actions.canResume, onClick = onResume) {
+            Text(strings.t(StringKey.QUEUE_RESUME))
+        }
+        OutlinedButton(enabled = actions.canCancel, onClick = onCancel) {
+            Text(strings.t(StringKey.QUEUE_CANCEL_CURRENT))
+        }
+    }
+}
+
+@Composable
+private fun OtaQueueStatusSection(
+    running: Boolean,
+    pauseRequested: Boolean,
+    devicesEmpty: Boolean,
+    firmwareEmpty: Boolean,
+    currentDevice: String?,
+) {
+    val strings = LocalStrings.current
+    when {
+        running -> DisabledStatePanel(StringKey.STATE_DISABLED_BUSY)
+        devicesEmpty -> DisabledStatePanel(StringKey.STATE_DISABLED_NOT_CONNECTED)
+        firmwareEmpty -> DisabledStatePanel(StringKey.STATE_UNAVAILABLE_HINT)
+    }
+    if (pauseRequested) {
+        Text(
+            strings.t(StringKey.QUEUE_PAUSE_REQUESTED),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.secondary,
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+        )
+    }
+    if (running) {
+        LoadingStatePanel(
+            body = currentDevice?.let { name -> strings.t(StringKey.QUEUE_CURRENT, "device" to name) },
+        )
+    }
+}
+
+@Composable
+private fun OtaQueueItemList(
+    items: List<OtaQueueItem>,
+    onSkipFailed: (String) -> Unit,
+    onRemove: (String) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm)) {
+        items.forEach { item ->
+            QueueItemCard(
+                item = item,
+                onSkipFailed = { onSkipFailed(item.target.deviceId) },
+                onRemove = { onRemove(item.target.deviceId) },
             )
         }
+    }
+}
+
+@Composable
+private fun OtaQueueSummarySection(
+    items: List<OtaQueueItem>,
+    summary: OtaQueueSummary,
+    onCopy: () -> Unit,
+    onSave: () -> Unit,
+) {
+    val strings = LocalStrings.current
+    if (items.isEmpty()) {
+        EmptyStatePanel(body = strings.t(StringKey.QUEUE_EMPTY))
+        return
+    }
+    Text(strings.t(StringKey.QUEUE_SUMMARY_TITLE), style = MaterialTheme.typography.titleMedium)
+    Text(
+        strings.t(
+            StringKey.QUEUE_SUMMARY_COUNTS,
+            "total" to summary.total.toString(),
+            "succeeded" to summary.succeeded.toString(),
+            "failed" to summary.failed.toString(),
+            "skipped" to summary.skipped.toString(),
+            "aborted" to summary.aborted.toString(),
+            "removed" to summary.removed.toString(),
+            "pending" to summary.pending.toString(),
+        ),
+        style = MaterialTheme.typography.bodySmall,
+        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+    )
+    if (summary.checkpointRetained > 0) {
+        Text(
+            strings.t(
+                StringKey.QUEUE_CHECKPOINT_RETAINED,
+                "count" to summary.checkpointRetained.toString(),
+            ),
+            style = MaterialTheme.typography.bodySmall,
+        )
+    }
+    Row(horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm)) {
+        TextButton(onClick = onCopy) { Text(strings.t(StringKey.BATCH_COPY)) }
+        TextButton(onClick = onSave) { Text(strings.t(StringKey.BATCH_SAVE)) }
     }
 }
 
