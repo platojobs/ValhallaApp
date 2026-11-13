@@ -13,6 +13,7 @@ import com.valhalla.core.profile.OtaHistoryRecord
 import com.valhalla.core.profile.OtaOutcome
 import com.valhalla.core.protocol.Crc16
 import com.valhalla.core.protocol.message.AbortOtaRequest
+import com.valhalla.core.protocol.message.DeviceResponse
 import com.valhalla.core.protocol.message.DeviceStatus
 import com.valhalla.core.protocol.message.FinishOtaRequest
 import com.valhalla.core.protocol.message.FinishOtaResponse
@@ -712,17 +713,7 @@ class OtaController(
             ensureLinkAlive()
             try {
                 val response = dispatcher.execute(OtaDataRequest(offset = offset.toLong(), data = chunk))
-                if (response !is OtaDataResponse) {
-                    throw CommandFailure.InvalidResponse(
-                        "unexpected OTA chunk response: ${response::class.simpleName}",
-                    )
-                }
-                val expected = offset + chunk.size
-                if (response.receivedBytes < expected) {
-                    throw CommandFailure.InvalidResponse(
-                        "device acknowledged fewer bytes: ${response.receivedBytes} < $expected",
-                    )
-                }
+                validateChunkAck(response, offset, chunk.size)?.let { throw CommandFailure.InvalidResponse(it) }
                 return
             } catch (cancellation: CancellationException) {
                 throw cancellation
@@ -735,6 +726,25 @@ class OtaController(
                     mutableState.value = current.copy(retransmissions = retransmissions)
                 }
             }
+        }
+    }
+
+    /**
+     * 分片应答校验：返回第一条不满足的规则说明，`null` 表示设备已确认该分片。
+     *
+     * 两类失败（应答类型不符、确认字节数不足）本质是同一条规则「设备确认了本分片」，
+     * 放在一处判断比两个独立 `throw` 更容易看出重试语义。
+     */
+    private fun validateChunkAck(
+        response: DeviceResponse,
+        offset: Int,
+        chunkSize: Int,
+    ): String? {
+        val expected = offset + chunkSize
+        return when {
+            response !is OtaDataResponse -> "unexpected OTA chunk response: ${response::class.simpleName}"
+            response.receivedBytes < expected -> "device acknowledged fewer bytes: ${response.receivedBytes} < $expected"
+            else -> null
         }
     }
 
@@ -883,37 +893,39 @@ class OtaController(
         acceptedOffset: Long,
         totalBytes: Int,
     ): Int {
-        if (acceptedOffset >= totalBytes) {
-            throw OtaValidationException(
+        validateStartOffset(requestedOffset, acceptedOffset, totalBytes)?.let { throw OtaValidationException(it) }
+        return if (requestedOffset <= 0) 0 else acceptedOffset.toInt()
+    }
+
+    /** 续传偏移规则：返回第一条不满足的说明，`null` 表示设备接受的偏移可用。 */
+    private fun validateStartOffset(
+        requestedOffset: Int,
+        acceptedOffset: Long,
+        totalBytes: Int,
+    ): UiMessage? =
+        when {
+            acceptedOffset >= totalBytes ->
                 UiMessage.of(
                     StringKey.OTA_REASON_OFFSET_TOO_LARGE,
                     "offset" to acceptedOffset.toString(),
                     "total" to totalBytes.toString(),
-                ),
-            )
-        }
-        if (requestedOffset <= 0) {
-            if (acceptedOffset > 0) {
-                throw OtaValidationException(
-                    UiMessage.of(
-                        StringKey.OTA_REASON_OFFSET_UNEXPECTED,
-                        "offset" to acceptedOffset.toString(),
-                    ),
                 )
-            }
-            return 0
-        }
-        if (acceptedOffset > requestedOffset.toLong()) {
-            throw OtaValidationException(
+
+            requestedOffset <= 0 && acceptedOffset > 0 ->
+                UiMessage.of(
+                    StringKey.OTA_REASON_OFFSET_UNEXPECTED,
+                    "offset" to acceptedOffset.toString(),
+                )
+
+            acceptedOffset > requestedOffset.toLong() ->
                 UiMessage.of(
                     StringKey.OTA_REASON_OFFSET_GREATER_THAN_REQUESTED,
                     "accepted" to acceptedOffset.toString(),
                     "requested" to requestedOffset.toString(),
-                ),
-            )
+                )
+
+            else -> null
         }
-        return acceptedOffset.toInt()
-    }
 
     private fun fallbackNote(
         requestedOffset: Int,

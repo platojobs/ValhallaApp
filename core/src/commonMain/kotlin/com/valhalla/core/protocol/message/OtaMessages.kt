@@ -103,16 +103,8 @@ class StartOtaRequest(
                 0 -> StartOtaRequest(totalBytes, crc16, chunkSize, firmwareVersion)
                 EXTENSION_SIZE -> {
                     val extensionVersion = reader.byte()
-                    if (extensionVersion != EXTENSION_VERSION) {
-                        throw MessageDecodeException("不支持的 OTA 续传扩展版本: $extensionVersion")
-                    }
                     val flags = reader.byte()
-                    if ((flags and FLAG_RESUME) == 0) {
-                        throw MessageDecodeException("OTA 续传扩展缺少续传标志")
-                    }
-                    if ((flags and FLAG_RESUME.inv() and UINT8_MAX) != 0) {
-                        throw MessageDecodeException("OTA 续传扩展包含未知标志位: 0x${flags.toString(16)}")
-                    }
+                    validateResumeExtension(extensionVersion, flags)?.let { throw MessageDecodeException(it) }
                     StartOtaRequest(
                         totalBytes = totalBytes,
                         crc16 = crc16,
@@ -127,6 +119,18 @@ class StartOtaRequest(
                 else -> throw MessageDecodeException("START_OTA payload 尾部长度非法: ${reader.remaining}")
             }
         }
+
+        /** 续传扩展头校验：返回第一条不满足的规则说明，`null` 表示扩展头可用。 */
+        private fun validateResumeExtension(
+            version: Int,
+            flags: Int,
+        ): String? =
+            when {
+                version != EXTENSION_VERSION -> "不支持的 OTA 续传扩展版本: $version"
+                flags and FLAG_RESUME == 0 -> "OTA 续传扩展缺少续传标志"
+                flags and FLAG_RESUME.inv() and UINT8_MAX != 0 -> "OTA 续传扩展包含未知标志位: 0x${flags.toString(16)}"
+                else -> null
+            }
     }
 }
 

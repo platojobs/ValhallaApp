@@ -70,50 +70,53 @@ object FrameCodec {
     }
 
     fun decode(bytes: ByteArray): Frame {
-        if (bytes.size < MIN_FRAME_SIZE) {
-            throw FrameDecodeException("帧长度不足: ${bytes.size} < $MIN_FRAME_SIZE")
-        }
-        if (bytes[0] != SOF_FIRST || bytes[1] != SOF_SECOND) {
-            throw FrameDecodeException("SOF 不匹配: ${Hex.encode(bytes.copyOfRange(0, 2))}")
-        }
+        validateFrame(bytes)?.let { reason -> throw FrameDecodeException(reason) }
 
-        val version = bytes[2]
-        if (version != PROTOCOL_VERSION) {
-            throw FrameDecodeException("不支持的协议版本: $version")
-        }
-
-        val type = CommandType.fromCode(bytes[3])
         val flags = bytes[4].toInt() and UINT8_MAX
-        if (flags and FLAG_RESPONSE != 0 && flags and FLAG_NOTIFICATION != 0) {
-            throw FrameDecodeException("flags 同时标记应答与通知: 0x${flags.toString(16)}")
-        }
-        val sequence = readUInt16(bytes, SEQUENCE_OFFSET)
         val payloadLength = readUInt16(bytes, LENGTH_OFFSET)
-
-        if (payloadLength > MAX_PAYLOAD_SIZE) {
-            throw FrameDecodeException("payload 长度非法: $payloadLength > $MAX_PAYLOAD_SIZE")
-        }
-
-        val expectedSize = HEADER_SIZE + payloadLength + CRC_SIZE
-        if (bytes.size != expectedSize) {
-            throw FrameDecodeException("帧长度不一致: 实际 ${bytes.size}，期望 $expectedSize")
-        }
-
-        val actualCrc = readUInt16(bytes, HEADER_SIZE + payloadLength)
-        val expectedCrc = Crc16.ccittFalse(bytes, startIndex = 2, endIndex = HEADER_SIZE + payloadLength)
-        if (actualCrc != expectedCrc) {
-            throw FrameDecodeException(
-                "CRC 校验失败: 报文 0x${actualCrc.toString(16)}，计算 0x${expectedCrc.toString(16)}",
-            )
-        }
-
         return Frame(
-            type = type,
-            sequence = sequence,
+            type = CommandType.fromCode(bytes[3]),
+            sequence = readUInt16(bytes, SEQUENCE_OFFSET),
             payload = bytes.copyOfRange(HEADER_SIZE, HEADER_SIZE + payloadLength),
             isResponse = flags and FLAG_RESPONSE != 0,
             isNotification = flags and FLAG_NOTIFICATION != 0,
-            version = version,
+            version = bytes[2],
         )
+    }
+
+    /**
+     * 帧结构校验：返回第一条不满足的规则说明，`null` 表示可以安全解析。
+     *
+     * 校验与解析分开后，[decode] 只保留一个抛错点，读起来是一条直线；
+     * 校验规则本身是纯函数，不依赖解析结果。
+     */
+    private fun validateFrame(bytes: ByteArray): String? {
+        if (bytes.size < MIN_FRAME_SIZE) {
+            return "帧长度不足: ${bytes.size} < $MIN_FRAME_SIZE"
+        }
+        if (bytes[0] != SOF_FIRST || bytes[1] != SOF_SECOND) {
+            return "SOF 不匹配: ${Hex.encode(bytes.copyOfRange(0, 2))}"
+        }
+        if (bytes[2] != PROTOCOL_VERSION) {
+            return "不支持的协议版本: ${bytes[2]}"
+        }
+        val flags = bytes[4].toInt() and UINT8_MAX
+        if (flags and FLAG_RESPONSE != 0 && flags and FLAG_NOTIFICATION != 0) {
+            return "flags 同时标记应答与通知: 0x${flags.toString(16)}"
+        }
+        val payloadLength = readUInt16(bytes, LENGTH_OFFSET)
+        if (payloadLength > MAX_PAYLOAD_SIZE) {
+            return "payload 长度非法: $payloadLength > $MAX_PAYLOAD_SIZE"
+        }
+        val expectedSize = HEADER_SIZE + payloadLength + CRC_SIZE
+        if (bytes.size != expectedSize) {
+            return "帧长度不一致: 实际 ${bytes.size}，期望 $expectedSize"
+        }
+        val actualCrc = readUInt16(bytes, HEADER_SIZE + payloadLength)
+        val expectedCrc = Crc16.ccittFalse(bytes, startIndex = 2, endIndex = HEADER_SIZE + payloadLength)
+        if (actualCrc != expectedCrc) {
+            return "CRC 校验失败: 报文 0x${actualCrc.toString(16)}，计算 0x${expectedCrc.toString(16)}"
+        }
+        return null
     }
 }
