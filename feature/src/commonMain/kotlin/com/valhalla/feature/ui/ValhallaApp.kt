@@ -87,7 +87,6 @@ import com.valhalla.feature.error.ErrorReporter
 import com.valhalla.feature.error.LocalErrorReporter
 import com.valhalla.feature.error.installUncaughtExceptionBridge
 import com.valhalla.feature.error.launchSafely
-import com.valhalla.feature.i18n.AppLanguageMode
 import com.valhalla.feature.i18n.LocalStrings
 import com.valhalla.feature.i18n.LocaleFormat
 import com.valhalla.feature.i18n.StringKey
@@ -118,7 +117,6 @@ import com.valhalla.feature.settings.AppSettings
 import com.valhalla.feature.settings.AppSettingsRepository
 import com.valhalla.feature.theme.AppPreferenceStore
 import com.valhalla.feature.theme.DesignTokens
-import com.valhalla.feature.theme.ThemeMode
 import com.valhalla.feature.theme.ValhallaTheme
 import com.valhalla.feature.theme.statusColors
 import com.valhalla.feature.uilogic.ConfigFieldStatusKind
@@ -158,72 +156,77 @@ fun ValhallaApp(startRoute: String? = null) {
             ErrorReporter().also { installUncaughtExceptionBridge(it) }
         }
 
+    val uiCallbacks =
+        ValhallaUiCallbacks(
+            preferences = preferences,
+            onLanguageChange = { mode ->
+                preferences = preferences.copy(language = mode)
+                AppPreferenceStore.saveLanguage(settingsStore, mode)
+            },
+            onThemeChange = { mode ->
+                preferences = preferences.copy(theme = mode)
+                AppPreferenceStore.saveTheme(settingsStore, mode)
+            },
+            onSettingsChange = { updated ->
+                AppSettingsRepository.saveReconnectMaxAttempts(settingsStore, updated.reconnectMaxAttempts)
+                AppSettingsRepository.saveReconnectMaxDelaySeconds(
+                    settingsStore,
+                    updated.reconnectMaxDelaySeconds,
+                )
+                AppSettingsRepository.saveLogCapacity(settingsStore, updated.logCapacity)
+                AppSettingsRepository.saveExportEntries(settingsStore, updated.exportEntries)
+                AppSettingsRepository.saveExportBytesKb(settingsStore, updated.exportBytesKb)
+                AppSettingsRepository.saveExportHexChars(settingsStore, updated.exportHexChars)
+                AppSettingsRepository.saveNotifyMasterEnabled(
+                    settingsStore,
+                    updated.notifyMasterEnabled,
+                )
+                AppSettingsRepository.saveNotifyOtaEnabled(settingsStore, updated.notifyOtaEnabled)
+                AppSettingsRepository.saveNotifyDisconnectEnabled(
+                    settingsStore,
+                    updated.notifyDisconnectEnabled,
+                )
+                AppSettingsRepository.saveNotifyLowBatteryEnabled(
+                    settingsStore,
+                    updated.notifyLowBatteryEnabled,
+                )
+                AppSettingsRepository.saveNotifyReconnectEnabled(
+                    settingsStore,
+                    updated.notifyReconnectEnabled,
+                )
+                AppSettingsRepository.saveNotifyHealthEnabled(
+                    settingsStore,
+                    updated.notifyHealthEnabled,
+                )
+                AppSettingsRepository.saveLowBatteryThreshold(settingsStore, updated.lowBatteryThreshold)
+                AppSettingsRepository.saveRssiSubscriptionEnabled(
+                    settingsStore,
+                    updated.rssiSubscriptionEnabled,
+                )
+                AppSettingsRepository.saveRssiSamplePeriodSeconds(
+                    settingsStore,
+                    updated.rssiSamplePeriodSeconds,
+                )
+                appSettings = AppSettingsRepository.load(settingsStore)
+            },
+            onReloadPersisted = {
+                preferences = AppPreferenceStore.load(settingsStore)
+                appSettings = AppSettingsRepository.load(settingsStore)
+            },
+        )
+
     CompositionLocalProvider(
         LocalStrings provides strings,
         LocalErrorReporter provides errorReporter,
     ) {
         ValhallaTheme(preferences.theme) {
             ValhallaContent(
-                preferences = preferences,
+                callbacks = uiCallbacks,
                 settings = appSettings,
                 showOnboardingOnLaunch = showOnboardingOnLaunch,
                 startRoute = startRoute,
-                onLanguageChange = { mode ->
-                    preferences = preferences.copy(language = mode)
-                    AppPreferenceStore.saveLanguage(settingsStore, mode)
-                },
-                onThemeChange = { mode ->
-                    preferences = preferences.copy(theme = mode)
-                    AppPreferenceStore.saveTheme(settingsStore, mode)
-                },
-                onSettingsChange = { updated ->
-                    AppSettingsRepository.saveReconnectMaxAttempts(settingsStore, updated.reconnectMaxAttempts)
-                    AppSettingsRepository.saveReconnectMaxDelaySeconds(
-                        settingsStore,
-                        updated.reconnectMaxDelaySeconds,
-                    )
-                    AppSettingsRepository.saveLogCapacity(settingsStore, updated.logCapacity)
-                    AppSettingsRepository.saveExportEntries(settingsStore, updated.exportEntries)
-                    AppSettingsRepository.saveExportBytesKb(settingsStore, updated.exportBytesKb)
-                    AppSettingsRepository.saveExportHexChars(settingsStore, updated.exportHexChars)
-                    AppSettingsRepository.saveNotifyMasterEnabled(
-                        settingsStore,
-                        updated.notifyMasterEnabled,
-                    )
-                    AppSettingsRepository.saveNotifyOtaEnabled(settingsStore, updated.notifyOtaEnabled)
-                    AppSettingsRepository.saveNotifyDisconnectEnabled(
-                        settingsStore,
-                        updated.notifyDisconnectEnabled,
-                    )
-                    AppSettingsRepository.saveNotifyLowBatteryEnabled(
-                        settingsStore,
-                        updated.notifyLowBatteryEnabled,
-                    )
-                    AppSettingsRepository.saveNotifyReconnectEnabled(
-                        settingsStore,
-                        updated.notifyReconnectEnabled,
-                    )
-                    AppSettingsRepository.saveNotifyHealthEnabled(
-                        settingsStore,
-                        updated.notifyHealthEnabled,
-                    )
-                    AppSettingsRepository.saveLowBatteryThreshold(settingsStore, updated.lowBatteryThreshold)
-                    AppSettingsRepository.saveRssiSubscriptionEnabled(
-                        settingsStore,
-                        updated.rssiSubscriptionEnabled,
-                    )
-                    AppSettingsRepository.saveRssiSamplePeriodSeconds(
-                        settingsStore,
-                        updated.rssiSamplePeriodSeconds,
-                    )
-                    appSettings = AppSettingsRepository.load(settingsStore)
-                },
                 onboardingStore = settingsStore,
                 preferencesMigrationStatus = preferencesMigrationStatus,
-                onReloadPersisted = {
-                    preferences = AppPreferenceStore.load(settingsStore)
-                    appSettings = AppSettingsRepository.load(settingsStore)
-                },
             )
         }
     }
@@ -232,16 +235,12 @@ fun ValhallaApp(startRoute: String? = null) {
 @OptIn(ExperimentalTime::class)
 @Composable
 private fun ValhallaContent(
-    preferences: com.valhalla.feature.theme.AppPreferences,
+    callbacks: ValhallaUiCallbacks,
     settings: AppSettings,
     showOnboardingOnLaunch: Boolean,
     startRoute: String?,
     onboardingStore: com.valhalla.data.settings.AppSettingsStore,
     preferencesMigrationStatus: com.valhalla.core.storage.StorageMigrationStatus,
-    onLanguageChange: (AppLanguageMode) -> Unit,
-    onThemeChange: (ThemeMode) -> Unit,
-    onSettingsChange: (AppSettings) -> Unit,
-    onReloadPersisted: () -> Unit,
 ) {
     val bleClient = remember { createBleClient() }
     val permissionController = rememberBlePermissionController(bleClient)
@@ -296,14 +295,6 @@ private fun ValhallaContent(
             NotificationCenter(nowMillis = { Clock.System.now().toEpochMilliseconds() })
         }
     val notificationEnv = ValhallaNotificationEnv(notificationPresenter, notificationCenter)
-    val callbacks =
-        ValhallaUiCallbacks(
-            preferences,
-            onLanguageChange,
-            onThemeChange,
-            onSettingsChange,
-            onReloadPersisted,
-        )
     LaunchedEffect(startRoute) {
         val target = NotificationTarget.fromWire(startRoute) ?: return@LaunchedEffect
         notificationTargetRoute(target, ui.sessions.keys)?.let { ui.route = it }
@@ -478,13 +469,16 @@ private fun ValhallaScanRoute(
         errorMessage = ui.errorMessage,
         deviceCount = deviceState.occupied,
         profileLookup = { id -> repositories.profileRepository.get(id) },
-        onStart = { ops.requestStartScan(bleEnv.availability, controllers.scanController) },
-        onStop = { controllers.scanController.stopScan() },
-        onSortChange = { controllers.scanController.setSortMode(it) },
-        onOpenDevices = { ui.route = Route.Devices },
-        onSelect = { ops.connectFromScan(it, bleEnv.availability, controllers.scanController) },
-        onBleAction = { ops.handleBleAction(it, bleEnv.permissionController) },
-        onOpenSettings = { ui.route = Route.Settings },
+        actions =
+            ScanScreenActions(
+                onStart = { ops.requestStartScan(bleEnv.availability, controllers.scanController) },
+                onStop = { controllers.scanController.stopScan() },
+                onSortChange = { controllers.scanController.setSortMode(it) },
+                onOpenDevices = { ui.route = Route.Devices },
+                onSelect = { ops.connectFromScan(it, bleEnv.availability, controllers.scanController) },
+                onBleAction = { ops.handleBleAction(it, bleEnv.permissionController) },
+                onOpenSettings = { ui.route = Route.Settings },
+            ),
     )
 }
 
@@ -521,17 +515,20 @@ private fun ValhallaSettingsRoute(
         theme = callbacks.preferences.theme,
         settings = settings,
         notificationPresenter = notificationEnv.presenter,
-        onLanguageChange = callbacks.onLanguageChange,
-        onThemeChange = callbacks.onThemeChange,
-        onSettingsChange = callbacks.onSettingsChange,
-        onBack = { ui.route = Route.Scan },
-        onAbout = { ui.route = Route.About },
-        onHelp = { ui.route = Route.Help },
-        onPrivacy = { ui.route = Route.Privacy },
-        onOnboardingReview = { ui.route = Route.Onboarding(review = true) },
-        onOpenAutomation = { ui.route = Route.Automation },
-        onOpenStats = { ui.route = Route.Stats },
-        onOpenBackup = { ui.route = Route.Backup },
+        actions =
+            SettingsScreenActions(
+                onLanguageChange = callbacks.onLanguageChange,
+                onThemeChange = callbacks.onThemeChange,
+                onSettingsChange = callbacks.onSettingsChange,
+                onBack = { ui.route = Route.Scan },
+                onAbout = { ui.route = Route.About },
+                onHelp = { ui.route = Route.Help },
+                onPrivacy = { ui.route = Route.Privacy },
+                onOnboardingReview = { ui.route = Route.Onboarding(review = true) },
+                onOpenAutomation = { ui.route = Route.Automation },
+                onOpenStats = { ui.route = Route.Stats },
+                onOpenBackup = { ui.route = Route.Backup },
+            ),
     )
 }
 
@@ -823,6 +820,17 @@ private fun BoxScope.ValhallaNotificationBanner(ui: ValhallaUiState) {
     }
 }
 
+/** 扫描页的动作集合：扫描启停、排序、跳转与设备选择。 */
+private class ScanScreenActions(
+    val onStart: () -> Unit,
+    val onStop: () -> Unit,
+    val onSortChange: (ScanSortMode) -> Unit,
+    val onOpenDevices: () -> Unit,
+    val onSelect: (BleDevice) -> Unit,
+    val onBleAction: (BleGuidanceAction) -> Unit,
+    val onOpenSettings: () -> Unit,
+)
+
 @Composable
 private fun ScanScreen(
     state: ScanUiState,
@@ -831,13 +839,7 @@ private fun ScanScreen(
     errorMessage: UiMessage?,
     deviceCount: Int,
     profileLookup: (String) -> DeviceProfile?,
-    onStart: () -> Unit,
-    onStop: () -> Unit,
-    onSortChange: (ScanSortMode) -> Unit,
-    onOpenDevices: () -> Unit,
-    onSelect: (BleDevice) -> Unit,
-    onBleAction: (BleGuidanceAction) -> Unit,
-    onOpenSettings: () -> Unit,
+    actions: ScanScreenActions,
 ) {
     val strings = LocalStrings.current
     val format = remember(strings.language) { LocaleFormat(strings.language) }
@@ -857,23 +859,23 @@ private fun ScanScreen(
         modifier = Modifier.fillMaxSize().padding(DesignTokens.Spacing.lg),
         verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.md),
     ) {
-        ScanHeaderRow(strings, deviceCount, onOpenDevices, onOpenSettings)
+        ScanHeaderRow(strings, deviceCount, actions.onOpenDevices, actions.onOpenSettings)
         Text(
             strings.t(StringKey.SCAN_HINT),
             style = MaterialTheme.typography.bodySmall,
         )
 
         guidance?.let { guide ->
-            ScanGuidanceCard(strings, guide, onBleAction)
+            ScanGuidanceCard(strings, guide, actions.onBleAction)
         }
 
-        ScanActionsRow(strings, canScan, state.scanning, onStart, onStop)
+        ScanActionsRow(strings, canScan, state.scanning, actions.onStart, actions.onStop)
 
         if (!canScan) {
             DisabledStatePanel(reason = StringKey.STATE_UNAVAILABLE_HINT)
         }
 
-        ScanSortRow(strings, state.sortMode, onSortChange)
+        ScanSortRow(strings, state.sortMode, actions.onSortChange)
 
         if (state.scanning) {
             LoadingStatePanel(body = strings.t(StringKey.SCAN_EMPTY_SCANNING))
@@ -903,7 +905,7 @@ private fun ScanScreen(
                 zoneOffsetMinutes = zoneOffsetMinutes,
                 profileLookup = profileLookup,
                 canScan = canScan,
-                onSelect = onSelect,
+                onSelect = actions.onSelect,
             )
         }
 

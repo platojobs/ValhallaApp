@@ -94,26 +94,36 @@ private fun ChoiceRow(
     }
 }
 
+/**
+ * 设置页的回调集合。
+ *
+ * 设置页有 11 个入口/变更回调，平铺在签名里既难读也容易接错；
+ * 按「设置页能触发的动作」收成一个语义对象，调用点一眼能看出这是一组 UI 事件。
+ */
+class SettingsScreenActions(
+    val onLanguageChange: (AppLanguageMode) -> Unit,
+    val onThemeChange: (ThemeMode) -> Unit,
+    val onSettingsChange: (AppSettings) -> Unit,
+    val onBack: () -> Unit,
+    val onAbout: () -> Unit,
+    val onHelp: () -> Unit,
+    val onPrivacy: () -> Unit,
+    val onOnboardingReview: () -> Unit,
+    val onOpenAutomation: () -> Unit,
+    val onOpenStats: () -> Unit,
+    val onOpenBackup: () -> Unit,
+)
+
 @Composable
 fun SettingsScreen(
     language: AppLanguageMode,
     theme: ThemeMode,
     settings: AppSettings,
     notificationPresenter: NotificationPresenter,
-    onLanguageChange: (AppLanguageMode) -> Unit,
-    onThemeChange: (ThemeMode) -> Unit,
-    onSettingsChange: (AppSettings) -> Unit,
-    onBack: () -> Unit,
-    onAbout: () -> Unit,
-    onHelp: () -> Unit,
-    onPrivacy: () -> Unit,
-    onOnboardingReview: () -> Unit,
-    onOpenAutomation: () -> Unit,
-    onOpenStats: () -> Unit,
-    onOpenBackup: () -> Unit,
+    actions: SettingsScreenActions,
 ) {
     val strings = LocalStrings.current
-    InfoScreen(title = strings.t(StringKey.SETTINGS_TITLE), onBack = onBack) {
+    InfoScreen(title = strings.t(StringKey.SETTINGS_TITLE), onBack = actions.onBack) {
         SectionTitle(strings.t(StringKey.LANGUAGE_SECTION))
         ChoiceRow(
             options =
@@ -123,7 +133,7 @@ fun SettingsScreen(
                     strings.t(StringKey.LANGUAGE_ENGLISH) to (language == AppLanguageMode.ENGLISH),
                 ),
             onSelect = { index ->
-                onLanguageChange(
+                actions.onLanguageChange(
                     when (index) {
                         1 -> AppLanguageMode.CHINESE
                         2 -> AppLanguageMode.ENGLISH
@@ -141,7 +151,7 @@ fun SettingsScreen(
                     strings.t(StringKey.THEME_DARK) to (theme == ThemeMode.DARK),
                 ),
             onSelect = { index ->
-                onThemeChange(
+                actions.onThemeChange(
                     when (index) {
                         1 -> ThemeMode.LIGHT
                         2 -> ThemeMode.DARK
@@ -150,32 +160,32 @@ fun SettingsScreen(
                 )
             },
         )
-        SettingsValuesSection(settings = settings, onSettingsChange = onSettingsChange)
+        SettingsValuesSection(settings = settings, onSettingsChange = actions.onSettingsChange)
         NotificationSettingsSection(
             settings = settings,
             presenter = notificationPresenter,
-            onSettingsChange = onSettingsChange,
+            onSettingsChange = actions.onSettingsChange,
         )
         Column(verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.xs)) {
-            OutlinedButton(onClick = onOpenAutomation, modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(onClick = actions.onOpenAutomation, modifier = Modifier.fillMaxWidth()) {
                 Text(strings.t(StringKey.SETTINGS_AUTOMATION_ENTRY))
             }
-            OutlinedButton(onClick = onOpenStats, modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(onClick = actions.onOpenStats, modifier = Modifier.fillMaxWidth()) {
                 Text(strings.t(StringKey.SETTINGS_STATS_ENTRY))
             }
-            OutlinedButton(onClick = onOpenBackup, modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(onClick = actions.onOpenBackup, modifier = Modifier.fillMaxWidth()) {
                 Text(strings.t(StringKey.SETTINGS_BACKUP_ENTRY))
             }
-            OutlinedButton(onClick = onOnboardingReview, modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(onClick = actions.onOnboardingReview, modifier = Modifier.fillMaxWidth()) {
                 Text(strings.t(StringKey.ONBOARDING_REVIEW_ENTRY))
             }
-            OutlinedButton(onClick = onAbout, modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(onClick = actions.onAbout, modifier = Modifier.fillMaxWidth()) {
                 Text(strings.t(StringKey.ABOUT_ENTRY))
             }
-            OutlinedButton(onClick = onHelp, modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(onClick = actions.onHelp, modifier = Modifier.fillMaxWidth()) {
                 Text(strings.t(StringKey.HELP_ENTRY))
             }
-            OutlinedButton(onClick = onPrivacy, modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(onClick = actions.onPrivacy, modifier = Modifier.fillMaxWidth()) {
                 Text(strings.t(StringKey.PRIVACY_ENTRY))
             }
         }
