@@ -2,6 +2,28 @@
 
 本文件记录 ValhallaApp 的版本演进，按「阶段完成即提交 + 打 annotated tag」的节奏维护。
 
+## v3.3.0 - 存量静态分析收口
+
+### 逐条研判，不做报表归零
+
+- **detekt 基线 57 → 50**（core 19→17 / data 5 / feature 33→28），`config/detekt/detekt.yml`
+  零 diff，无新增条目、无 `@Suppress`、无规则例外、无目录排除。
+- **ThrowsCount 11 → 7**：`FrameCodec.decode` 拆为 `validateFrame()` 纯校验 + 单点抛错；
+  `StartOtaRequest.decode` 的三条续传扩展规则合并为 `validateResumeExtension()`；
+  `OtaController.sendChunk` / `resolveStartOffset` 分别合并为 `validateChunkAck()` /
+  `validateStartOffset()`，并删掉 `sendChunk` 里与 `isRetryable` 重复的取消分支。
+- **LongParameterList 4 → 1**：`SettingsScreen`（15→5）、`ScanScreen`（13→7）回调收入语义对象；
+  `ValhallaContent`（10→6）复用既有 `ValhallaUiCallbacks`；`DetailScreen` 判断改动风险大于收益，保留。
+- **不动的 50 条**：`TooGenericExceptionCaught` 29 条是控制器/平台回调边界的兜底（收窄成
+  `Exception` 仍被规则命中，改名成 `_` 属于凑数）；`ThrowsCount` 剩余 7 条是带诊断消息的解析器；
+  `LargeClass` 4 条拆分不产生独立职责；`ReturnCount` 为卫语句链；其余为算法结构与基准测量。
+  逐条理由见 [docs/static-analysis-baseline.md](docs/static-analysis-baseline.md)。
+- 行为等价：全量测试 **772** 项（core 385 / data 24 / feature 363）全部通过，与 v3.2.0 持平，
+  **未新增测试**（改动点均被既有用例覆盖），断言未修改（仅版本号期望同步 3.3.0 / 33）。
+- 覆盖率：core 94.32% / data 87.55% / feature 86.29%，三模块 `koverVerifyJvm` 通过，
+  下降均未超过 0.5pp。
+- 版本 `3.3.0`（`versionCode 33`），四项构建与 `verifyVersionConsistency` 通过。
+
 ## v3.2.0 - 复杂函数收口
 
 ### 只做两件事：复杂度与长方法

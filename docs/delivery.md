@@ -1,7 +1,7 @@
 # 交付说明
 
 本文汇总 ValhallaApp 的可交付内容、构建方式、产物路径与完成度对照。最新发布说明见
-[release-notes/v3.0.0.md](release-notes/v3.0.0.md)，历史版本见
+[release-notes/v3.3.0.md](release-notes/v3.3.0.md)，历史版本见
 [release-notes/v2.0.0.md](release-notes/v2.0.0.md)，全部文档入口见 [README.md](README.md)。
 
 ## 1. 交付物清单
@@ -117,13 +117,15 @@ xcodebuild -project iosApp/iosApp.xcodeproj -scheme iosApp \
 | [static-analysis-baseline.md](static-analysis-baseline.md) | detekt 基线逐条清单与保留原因、实修/剩余统计 |
 | [ui-state-matrix.md](ui-state-matrix.md) | 16 个界面的空/加载/错误/禁用四态实现位置与不适用原因 |
 | [delivery.md](delivery.md) | 本文：交付物、构建命令、产物路径、完成度对照 |
+| [release-notes/v3.3.0.md](release-notes/v3.3.0.md) | v3.3.0 存量 detekt 收口、规则研判与行为等价验证 |
+| [release-notes/v3.2.0.md](release-notes/v3.2.0.md) | v3.2.0 复杂函数与长方法收口、行为等价验证与覆盖率 |
 | [release-notes/v3.1.0.md](release-notes/v3.1.0.md) | v3.1.0 基线瘦身、UI 逻辑下沉、四态与无障碍收口 |
 | [release-notes/v3.0.0.md](release-notes/v3.0.0.md) | v3.0.0 静态分析、覆盖率、存储迁移、真实资源与进程恢复 |
 | [release-notes/v2.5.0.md](release-notes/v2.5.0.md) | v2.5.0 固件库、诊断报告、事件时间线与本地提醒 |
 | [release-notes/v2.4.0.md](release-notes/v2.4.0.md) | v2.4.0 参数面板、连接质量、引导与设置扩展 |
 | [release-notes/v2.3.0.md](release-notes/v2.3.0.md) | v2.3.0 多设备管理、扫描增强、快捷操作与 OTA 历史 |
 | [release-notes/v2.0.0.md](release-notes/v2.0.0.md) | v2.0.0 发布说明与真机验收清单 |
-| [CHANGELOG.md](../CHANGELOG.md) | v0.0.1 → v3.1.0 版本演进 |
+| [CHANGELOG.md](../CHANGELOG.md) | v0.0.1 → v3.3.0 版本演进 |
 
 ## 6. 可交付状态与未完成项
 
@@ -280,4 +282,23 @@ xcodebuild -project iosApp/iosApp.xcodeproj -scheme iosApp \
   三模块 `koverVerifyJvm` 通过；
 - 未使用 `@Suppress`、未新增规则例外、未用 `// detekt:ignore`、未把逻辑挪进 Composable 规避统计；
 - 四项构建与 `verifyVersionConsistency`（3.2.0 / 32）本地通过。
+
+## 15. 存量静态分析收口（v3.3.0）
+
+| 规则 | v3.2.0 | v3.3.0 | 处理 |
+| --- | ---: | ---: | --- |
+| `ThrowsCount` | 11 | 7 | 4 个解码/OTA 函数把同类失败合并为纯校验函数 + 单点抛错 |
+| `LongParameterList` | 4 | 1 | 3 个 Composable 的回调收敛为语义参数对象 |
+| `TooGenericExceptionCaught` | 29 | 29 | 边界兜底，收窄成具体类型会漏掉未知失败；改名凑数未做 |
+| `LargeClass` | 4 | 4 | 测试套件/字符串表/OTA 状态机，拆分不产生独立职责 |
+| 其余 | 9 | 9 | ReturnCount、SwallowedException、Loop、ExplicitGC 均保留 |
+
+- detekt 基线 57 → 50（core 17 / data 5 / feature 28），`detekt.yml` 零 diff，无新增条目；
+- 全量测试 772 项与 v3.2.0 持平，断言未修改（仅版本号期望同步为 3.3.0 / 33）；
+- 覆盖率 core 94.32% / data 87.55% / feature 86.29%，`koverVerifyJvm` 通过，下降均未超过 0.5pp；
+- 四项构建与 `verifyVersionConsistency`（3.3.0 / 33）本地通过；
+- 逐条理由与「确实改善 / 未改只是数字好看」的判断见
+  [static-analysis-baseline.md](static-analysis-baseline.md) 与
+  [release-notes/v3.3.0.md](release-notes/v3.3.0.md)。
+
 

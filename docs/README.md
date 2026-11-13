@@ -8,6 +8,7 @@ ValhallaApp 的文档按「先看怎么交付、再看怎么实现」的顺序�
 | 文档 | 说明 |
 | --- | --- |
 | [delivery.md](delivery.md) | 交付物清单、模块说明、构建命令、产物路径、CI 入口、可交付 vs 未完成对照 |
+| [release-notes/v3.3.0.md](release-notes/v3.3.0.md) | v3.3.0 存量 detekt 收口、规则研判与行为等价验证 |
 | [release-notes/v3.2.0.md](release-notes/v3.2.0.md) | v3.2.0 复杂函数与长方法收口、行为等价验证与覆盖率 |
 | [release-notes/v3.1.0.md](release-notes/v3.1.0.md) | v3.1.0 detekt 基线瘦身、UI 逻辑下沉、四态一致性与无障碍收口 |
 | [release-notes/v3.0.0.md](release-notes/v3.0.0.md) | v3.0.0 静态分析、覆盖率、存储迁移、真实资源与进程恢复 |
@@ -22,7 +23,7 @@ ValhallaApp 的文档按「先看怎么交付、再看怎么实现」的顺序�
 | [static-analysis-baseline.md](static-analysis-baseline.md) | detekt 基线逐条清单、实修分类与保留原因 |
 | [complexity-refactor.md](complexity-refactor.md) | v3.2.0 25 个复杂函数的前后对照与拆分方式 |
 | [ui-state-matrix.md](ui-state-matrix.md) | 16 个界面的空/加载/错误/禁用四态实现位置与不适用原因 |
-| [../CHANGELOG.md](../CHANGELOG.md) | v0.0.1 → v3.2.0 全量版本演进 |
+| [../CHANGELOG.md](../CHANGELOG.md) | v0.0.1 → v3.3.0 全量版本演进 |
 
 ## 架构与协议
 
