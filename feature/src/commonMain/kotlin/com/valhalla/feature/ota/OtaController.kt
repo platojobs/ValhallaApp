@@ -715,9 +715,8 @@ class OtaController(
                 val response = dispatcher.execute(OtaDataRequest(offset = offset.toLong(), data = chunk))
                 validateChunkAck(response, offset, chunk.size)?.let { throw CommandFailure.InvalidResponse(it) }
                 return
-            } catch (cancellation: CancellationException) {
-                throw cancellation
             } catch (error: Throwable) {
+                // 取消异常不在 isRetryable 的可重试集合里，会在这里原样抛出。
                 if (!isRetryable(error) || attempt >= maxChunkRetries) throw error
                 attempt++
                 retransmissions++
