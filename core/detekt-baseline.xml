@@ -13,9 +13,7 @@
     <ID>ThrowsCount:EcdsaP256.kt$EcdsaSignatureCodec$private fun readLength( bytes: ByteArray, offset: Int, ): Pair&lt;Int, Int&gt;</ID>
     <ID>ThrowsCount:FirmwarePackage.kt$FirmwareParser$suspend fun parse( name: String, source: FirmwareSource, ): FirmwarePackage</ID>
     <ID>ThrowsCount:FirmwareSignature.kt$FirmwareSignature.Companion$fun decode( bytes: ByteArray, offset: Int, ): FirmwareSignature</ID>
-    <ID>ThrowsCount:FrameCodec.kt$FrameCodec$fun decode(bytes: ByteArray): Frame</ID>
     <ID>ThrowsCount:MessageCodec.kt$MessageCodec$fun decodeNotification(frame: Frame): DeviceNotification</ID>
-    <ID>ThrowsCount:OtaMessages.kt$StartOtaRequest.Companion$fun decode(reader: PayloadReader): StartOtaRequest</ID>
     <ID>TooGenericExceptionCaught:CommandDispatcher.kt$CommandDispatcher$error: Throwable</ID>
     <ID>TooGenericExceptionCaught:ConcurrentCommandDispatcher.kt$ConcurrentCommandDispatcher$error: Throwable</ID>
     <ID>TooGenericExceptionCaught:EcdsaP256.kt$EcdsaP256Verifier$error: Throwable</ID>

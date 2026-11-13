@@ -34,10 +34,10 @@ class VersionConsistencyTest {
     private val versionCode: String get() = gradleProperties["valhalla.versionCode"].orEmpty()
 
     @Test
-    fun `gradle properties 提供 3_2_0 版本号`() {
-        assertEquals("3.2.0", versionName)
+    fun `gradle properties 提供 3_3_0 版本号`() {
+        assertEquals("3.3.0", versionName)
         assertTrue(versionName.matches(Regex("""\d+\.\d+\.\d+""")), "versionName 应为 x.y.z：$versionName")
-        assertEquals(32, versionCode.toIntOrNull())
+        assertEquals(33, versionCode.toIntOrNull())
     }
 
     @Test
